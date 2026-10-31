@@ -1,0 +1,28 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Temporary media files & logs
+temp/
+logs/
+*.log
+
+# SQLite Database
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+bot_database.sqlite3
+
+# Environment & credentials
+.env
+
+# OS specific files
+.DS_Store
+Thumbs.db
