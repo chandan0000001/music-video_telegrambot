@@ -64,8 +64,8 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "2000"))
 MAX_UPLOAD_SIZE_BYTES: int = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
-# Maximum allowed duration for media processing (in seconds, e.g., 3600 = 60 minutes)
-MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "3600"))
+# Maximum allowed duration for media processing (in seconds, e.g., 14400 = 4 hours, 0 = unlimited)
+MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "14400"))
 
 # Concurrency & Worker Limits
 MAX_CONCURRENT_DOWNLOADS: int = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "3"))
@@ -82,6 +82,6 @@ SUPPORTED_AUDIO_QUALITIES: list[str] = ["128", "192", "320"]  # in kbps
 SUPPORTED_VIDEO_FORMATS: list[str] = ["MP4"]
 SUPPORTED_VIDEO_RESOLUTIONS: list[str] = ["144p", "240p", "360p", "480p", "720p", "1080p", "1440p"]
 
-# Subprocess Timeout (in seconds)
-FFMPEG_TIMEOUT: int = 300
-YTDLP_TIMEOUT: int = 300
+# Subprocess Timeout (in seconds, e.g. 1800 = 30 minutes for long videos)
+FFMPEG_TIMEOUT: int = int(os.getenv("FFMPEG_TIMEOUT", "1800"))
+YTDLP_TIMEOUT: int = int(os.getenv("YTDLP_TIMEOUT", "1800"))

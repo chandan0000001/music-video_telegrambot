@@ -13,6 +13,7 @@ from utils.validators import (
     validate_media_limits,
     is_safe_url
 )
+from config import MAX_DURATION_SECONDS
 
 
 def test_valid_youtube_urls():
@@ -88,8 +89,8 @@ def test_validate_media_limits():
     assert ok is True
     assert err is None
 
-    # Exceeding duration (e.g. 2 hours when limit is 1 hour)
-    too_long, err = validate_media_limits(duration_seconds=7200, filesize_bytes=10 * 1024 * 1024)
+    # Exceeding duration
+    too_long, err = validate_media_limits(duration_seconds=MAX_DURATION_SECONDS + 60, filesize_bytes=10 * 1024 * 1024)
     assert too_long is False
     assert "Maximum allowed duration" in err
 

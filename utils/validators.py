@@ -119,7 +119,7 @@ def sanitize_filename(name: str, max_length: int = 100) -> str:
 
 def validate_media_limits(duration_seconds: Optional[int], filesize_bytes: Optional[int]) -> Tuple[bool, Optional[str]]:
     """Validate media duration and estimated filesize against configured limits."""
-    if duration_seconds is not None and duration_seconds > MAX_DURATION_SECONDS:
+    if MAX_DURATION_SECONDS > 0 and duration_seconds is not None and duration_seconds > MAX_DURATION_SECONDS:
         max_mins = MAX_DURATION_SECONDS // 60
         curr_mins = duration_seconds // 60
         return False, f"Media is too long ({curr_mins} mins). Maximum allowed duration is {max_mins} minutes."
