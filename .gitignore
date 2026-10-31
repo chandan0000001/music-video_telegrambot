@@ -22,6 +22,7 @@ bot_database.sqlite3
 
 # Environment & credentials
 .env
+cookies.txt
 
 # OS specific files
 .DS_Store

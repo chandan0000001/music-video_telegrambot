@@ -51,9 +51,24 @@ class MediaService:
         except Exception as e:
             logger.warning(f"Failed to remove temp dir {job_dir}: {e}")
 
+    def _get_common_ydl_opts(self) -> Dict[str, Any]:
+        """Base options with mobile client rotation to bypass bot verification."""
+        opts: Dict[str, Any] = {
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb"]
+                }
+            }
+        }
+        cookie_file = self.temp_base.parent / "cookies.txt"
+        if cookie_file.exists():
+            opts["cookiefile"] = str(cookie_file)
+        return opts
+
     def _sync_extract_info(self, url: str) -> Dict[str, Any]:
         """Extract metadata and analyze available video and audio formats."""
         ydl_opts = {
+            **self._get_common_ydl_opts(),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
@@ -178,6 +193,7 @@ class MediaService:
         # yt-dlp options for best audio
         download_template = str(job_dir / "input_audio.%(ext)s")
         ydl_opts = {
+            **self._get_common_ydl_opts(),
             "format": "bestaudio/best",
             "outtmpl": download_template,
             "quiet": True,
@@ -279,6 +295,7 @@ class MediaService:
         )
 
         ydl_opts = {
+            **self._get_common_ydl_opts(),
             "format": format_selector,
             "outtmpl": download_template,
             "quiet": True,
