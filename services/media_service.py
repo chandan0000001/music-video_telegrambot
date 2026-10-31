@@ -203,7 +203,9 @@ class MediaService:
         video_url: str,
         output_format: str,
         bitrate_kbps: str,
-        job_dir: Optional[Path] = None
+        job_dir: Optional[Path] = None,
+        tracker: Optional[Any] = None,
+        status_callback: Optional[Any] = None
     ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Path]:
         """
         Download and convert audio to requested format and bitrate.
@@ -215,20 +217,37 @@ class MediaService:
 
         # yt-dlp options for best audio
         download_template = str(job_dir / "input_audio.%(ext)s")
-        ydl_opts = {
+        ydl_opts: Dict[str, Any] = {
             **self._get_common_ydl_opts(),
             "format": "bestaudio/best",
             "outtmpl": download_template,
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 30,
+            "concurrent_fragment_downloads": 5,
+            "buffersize": 1024 * 1024,
+            "retries": 3,
+            "fragment_retries": 3,
         }
+        if tracker and hasattr(tracker, "ytdlp_hook"):
+            ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
 
-        try:
-            await asyncio.to_thread(self._sync_download, ydl_opts, video_url)
-        except Exception as e:
-            logger.error(f"Failed to download audio source from {video_url}: {e}")
-            return False, None, f"Audio download failed: {str(e)[:100]}", job_dir
+        # Retry loop for resilience
+        download_success = False
+        last_error = ""
+        for attempt in range(1, 3):
+            try:
+                await asyncio.to_thread(self._sync_download, ydl_opts, video_url)
+                download_success = True
+                break
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Audio download attempt {attempt} failed for {video_url}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(1.5)
+
+        if not download_success:
+            return False, None, f"Audio download failed: {last_error[:100]}", job_dir
 
         # Identify downloaded file
         downloaded_files = list(job_dir.glob("input_audio.*"))
@@ -237,6 +256,13 @@ class MediaService:
 
         raw_audio_file = downloaded_files[0]
         output_file = job_dir / f"audio_{uuid.uuid4().hex[:8]}.{output_format}"
+
+        # Notify processing with FFmpeg
+        if status_callback:
+            try:
+                await status_callback("⚙️ *Converting audio to high-fidelity " + output_format.upper() + " with FFmpeg...*")
+            except Exception:
+                pass
 
         # Convert using FFmpeg
         converted = await ffmpeg_service.convert_audio(
@@ -299,7 +325,9 @@ class MediaService:
         self,
         video_url: str,
         resolution: str,
-        job_dir: Optional[Path] = None
+        job_dir: Optional[Path] = None,
+        tracker: Optional[Any] = None,
+        status_callback: Optional[Any] = None
     ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Path]:
         """
         Download and remux video to Telegram-compatible MP4 at specified resolution.
@@ -317,21 +345,38 @@ class MediaService:
             f"best[height<={height_val}]"
         )
 
-        ydl_opts = {
+        ydl_opts: Dict[str, Any] = {
             **self._get_common_ydl_opts(),
             "format": format_selector,
             "outtmpl": download_template,
             "quiet": True,
             "no_warnings": True,
-            "socket_timeout": 45,
+            "socket_timeout": 30,
             "merge_output_format": "mp4",
+            "concurrent_fragment_downloads": 5,
+            "buffersize": 1024 * 1024,
+            "retries": 3,
+            "fragment_retries": 3,
         }
+        if tracker and hasattr(tracker, "ytdlp_hook"):
+            ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
 
-        try:
-            await asyncio.to_thread(self._sync_download, ydl_opts, video_url)
-        except Exception as e:
-            logger.error(f"Failed to download video from {video_url} at {resolution}: {e}")
-            return False, None, f"Video download failed: {str(e)[:100]}", job_dir
+        # Retry loop for resilience against intermittent drops
+        download_success = False
+        last_error = ""
+        for attempt in range(1, 3):
+            try:
+                await asyncio.to_thread(self._sync_download, ydl_opts, video_url)
+                download_success = True
+                break
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Video download attempt {attempt} failed for {video_url} at {resolution}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(2)
+
+        if not download_success:
+            return False, None, f"Video download failed: {last_error[:100]}", job_dir
 
         downloaded_files = list(job_dir.glob("input_media.*"))
         if not downloaded_files:
@@ -339,6 +384,13 @@ class MediaService:
 
         downloaded_video = downloaded_files[0]
         final_mp4 = job_dir / f"video_{uuid.uuid4().hex[:8]}.mp4"
+
+        # Notify remuxing phase
+        if status_callback:
+            try:
+                await status_callback("⚙️ *Optimizing video container with FFmpeg for Telegram streaming...*")
+            except Exception:
+                pass
 
         # Remux with FFmpeg to guarantee faststart and Telegram streamability
         remuxed = await ffmpeg_service.remux_video_for_telegram(
@@ -369,10 +421,22 @@ class MediaService:
 
         # If file exceeds Telegram Cloud Bot API limit (49.5 MB), compress with FFmpeg to fit
         if file_size > TELEGRAM_CLOUD_LIMIT_BYTES:
+            size_mb = file_size / (1024 * 1024)
             logger.info(
-                f"Video size ({file_size / (1024*1024):.1f} MB) exceeds Telegram 50MB direct limit. "
+                f"Video size ({size_mb:.1f} MB) exceeds Telegram 50MB direct limit. "
                 "Compressing with FFmpeg to fit..."
             )
+            if status_callback:
+                try:
+                    await status_callback(
+                        f"🗜 *Compressing video with FFmpeg...*\n"
+                        f"📊 Current size: `{size_mb:.1f} MB`\n"
+                        f"📦 Target size: `~48 MB` (to fit Telegram Cloud limit)\n"
+                        f"⏳ This may take a minute..."
+                    )
+                except Exception:
+                    pass
+
             compressed_mp4 = job_dir / f"compressed_{uuid.uuid4().hex[:8]}.mp4"
             compressed = await ffmpeg_service.compress_video_to_target_size(
                 input_file=target_file,

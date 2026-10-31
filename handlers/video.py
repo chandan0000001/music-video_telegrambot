@@ -8,8 +8,9 @@ from aiogram.types import CallbackQuery
 from database import db
 from services.media_service import media_service
 from services.telegram_service import telegram_service
-from keyboards.quality_keyboard import get_video_quality_keyboard
+from keyboards.quality_keyboard import get_video_quality_keyboard, get_retry_keyboard
 from utils.rate_limiter import concurrency_manager
+from utils.progress import DownloadProgressTracker, AsyncProgressReporter
 
 logger = logging.getLogger(__name__)
 router = Router(name="video_router")
@@ -99,31 +100,44 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
     )
     await concurrency_manager.acquire()
 
+    # Extract title for loading screen if available
+    media_title = f"YouTube Video ({video_id})"
+    if status_msg.text and "Title:" in status_msg.text:
+        try:
+            media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
+        except Exception:
+            pass
+
+    retry_cb = f"vdl:{video_id}:{resolution}"
+    back_cb = f"opt_video:{video_id}"
+
+    tracker = DownloadProgressTracker(
+        media_title=media_title,
+        quality_label=resolution,
+        media_type="video"
+    )
+    reporter = AsyncProgressReporter(status_msg, tracker)
+
     job_dir = None
     try:
-        await telegram_service.update_status(
-            status_msg,
-            f"⬇️ *Downloading {resolution} video & audio streams...*"
-        )
-
+        reporter.start()
         success, result, err, job_dir = await media_service.process_video(
             video_url=canonical_url,
-            resolution=resolution
+            resolution=resolution,
+            tracker=tracker,
+            status_callback=lambda text: telegram_service.update_status(status_msg, text)
         )
+        await reporter.stop()
 
         if not success or not result:
             await db.update_download_status(download_id, "failed")
-            await telegram_service.update_status(
+            await telegram_service.update_status_with_keyboard(
                 status_msg,
-                f"❌ *Video Processing Failed:*\n{err or 'Unknown error occurred.'}"
+                f"❌ *Video Processing Failed:*\n{err or 'Unknown error occurred.'}\n\n"
+                f"Click below to retry the download or choose a different quality:",
+                reply_markup=get_retry_keyboard(retry_cb, back_cb)
             )
             return
-
-        # Upload to Telegram
-        await telegram_service.update_status(
-            status_msg,
-            f"⬆️ *Uploading {resolution} video to Telegram...*"
-        )
 
         sent = await telegram_service.send_video_file(
             bot=callback.bot,
@@ -133,7 +147,8 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             duration=result["duration"],
             width=result["width"],
             height=result["height"],
-            thumbnail_path=result["thumbnail_path"]
+            thumbnail_path=result["thumbnail_path"],
+            status_message=status_msg
         )
 
         if sent:
@@ -144,19 +159,25 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
                 pass
         else:
             await db.update_download_status(download_id, "failed")
-            await telegram_service.update_status(
+            await telegram_service.update_status_with_keyboard(
                 status_msg,
-                "❌ *Upload Failed:* Telegram was unable to accept the video file."
+                "❌ *Upload Failed:* Telegram was unable to accept the video file.\n\n"
+                "You can retry or choose a different resolution (e.g. 720p or 480p):",
+                reply_markup=get_retry_keyboard(retry_cb, back_cb)
             )
 
     except Exception as e:
+        await reporter.stop()
         logger.exception(f"Unhandled video processing error for {canonical_url}: {e}")
         await db.update_download_status(download_id, "failed")
-        await telegram_service.update_status(
+        await telegram_service.update_status_with_keyboard(
             status_msg,
-            f"❌ *Error during video processing:* {str(e)[:150]}"
+            f"❌ *Error during video processing:*\n{str(e)[:150]}\n\n"
+            f"Click below to retry the download:",
+            reply_markup=get_retry_keyboard(retry_cb, back_cb)
         )
     finally:
+        await reporter.stop()
         concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

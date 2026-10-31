@@ -8,8 +8,9 @@ from aiogram.types import CallbackQuery
 from database import db
 from services.media_service import media_service
 from services.telegram_service import telegram_service
-from keyboards.quality_keyboard import get_audio_format_keyboard, get_audio_quality_keyboard
+from keyboards.quality_keyboard import get_audio_format_keyboard, get_audio_quality_keyboard, get_retry_keyboard
 from utils.rate_limiter import concurrency_manager
+from utils.progress import DownloadProgressTracker, AsyncProgressReporter
 
 logger = logging.getLogger(__name__)
 router = Router(name="audio_router")
@@ -115,32 +116,44 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     )
     await concurrency_manager.acquire()
 
+    media_title = f"YouTube Audio ({video_id})"
+    if status_msg.text and "Title:" in status_msg.text:
+        try:
+            media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
+        except Exception:
+            pass
+
+    retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
+    back_cb = f"opt_audio:{video_id}"
+
+    tracker = DownloadProgressTracker(
+        media_title=media_title,
+        quality_label=f"{selected_format.upper()} {bitrate}kbps",
+        media_type="audio"
+    )
+    reporter = AsyncProgressReporter(status_msg, tracker)
+
     job_dir = None
     try:
-        await telegram_service.update_status(
-            status_msg,
-            f"⬇️ *Downloading audio stream from source...*"
-        )
-
+        reporter.start()
         success, result, err, job_dir = await media_service.process_audio(
             video_url=canonical_url,
             output_format=selected_format,
-            bitrate_kbps=bitrate
+            bitrate_kbps=bitrate,
+            tracker=tracker,
+            status_callback=lambda text: telegram_service.update_status(status_msg, text)
         )
+        await reporter.stop()
 
         if not success or not result:
             await db.update_download_status(download_id, "failed")
-            await telegram_service.update_status(
+            await telegram_service.update_status_with_keyboard(
                 status_msg,
-                f"❌ *Audio Processing Failed:*\n{err or 'Unknown error occurred.'}"
+                f"❌ *Audio Processing Failed:*\n{err or 'Unknown error occurred.'}\n\n"
+                f"Click below to retry the download or choose a different format:",
+                reply_markup=get_retry_keyboard(retry_cb, back_cb)
             )
             return
-
-        # Upload to Telegram
-        await telegram_service.update_status(
-            status_msg,
-            f"⬆️ *Uploading {selected_format.upper()} ({bitrate} kbps) to Telegram...*"
-        )
 
         sent = await telegram_service.send_audio_file(
             bot=callback.bot,
@@ -149,7 +162,8 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
             title=result["title"],
             artist=result["artist"],
             duration=result["duration"],
-            thumbnail_path=result["thumbnail_path"]
+            thumbnail_path=result["thumbnail_path"],
+            status_message=status_msg
         )
 
         if sent:
@@ -160,19 +174,25 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
                 pass
         else:
             await db.update_download_status(download_id, "failed")
-            await telegram_service.update_status(
+            await telegram_service.update_status_with_keyboard(
                 status_msg,
-                "❌ *Upload Failed:* Telegram was unable to accept the audio file."
+                "❌ *Upload Failed:* Telegram was unable to accept the audio file.\n\n"
+                "You can retry or choose a different audio format:",
+                reply_markup=get_retry_keyboard(retry_cb, back_cb)
             )
 
     except Exception as e:
+        await reporter.stop()
         logger.exception(f"Unhandled audio processing error for {canonical_url}: {e}")
         await db.update_download_status(download_id, "failed")
-        await telegram_service.update_status(
+        await telegram_service.update_status_with_keyboard(
             status_msg,
-            f"❌ *Error during processing:* {str(e)[:150]}"
+            f"❌ *Error during processing:*\n{str(e)[:150]}\n\n"
+            f"Click below to retry the download:",
+            reply_markup=get_retry_keyboard(retry_cb, back_cb)
         )
     finally:
+        await reporter.stop()
         concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

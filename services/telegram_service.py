@@ -2,18 +2,19 @@
 Telegram Delivery Service
 Encapsulates sending audio and video files using aiogram with error handling and status updates.
 """
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
 from aiogram import Bot
-from aiogram.types import FSInputFile, Message
+from aiogram.types import FSInputFile, Message, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramAPIError, TelegramEntityTooLarge, TelegramBadRequest
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramService:
-    """Manages Telegram file dispatching and progress status messaging."""
+    """Manages Telegram file dispatching, live progress screens, and status updates."""
 
     @staticmethod
     async def update_status(message: Message, text: str) -> None:
@@ -22,9 +23,37 @@ class TelegramService:
             await message.edit_text(text, parse_mode="Markdown")
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
-                logger.warning(f"Failed to update status message: {e}")
+                logger.debug(f"Status update skipped: {e}")
         except Exception as e:
-            logger.warning(f"Unexpected error updating status: {e}")
+            logger.debug(f"Unexpected error updating status: {e}")
+
+    @staticmethod
+    async def update_status_with_keyboard(
+        message: Message,
+        text: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None
+    ) -> None:
+        """Safely edit message text and attach an inline keyboard (e.g. for retrying)."""
+        try:
+            await message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e).lower():
+                logger.debug(f"Status update with keyboard skipped: {e}")
+        except Exception as e:
+            logger.debug(f"Unexpected error updating status with keyboard: {e}")
+
+    @staticmethod
+    async def _keep_chat_action(bot: Bot, chat_id: int, action: str, stop_event: asyncio.Event) -> None:
+        """Periodically trigger Telegram chat action while upload is in flight."""
+        while not stop_event.is_set():
+            try:
+                await bot.send_chat_action(chat_id=chat_id, action=action)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+            except asyncio.TimeoutError:
+                pass
 
     @staticmethod
     async def send_audio_file(
@@ -34,15 +63,31 @@ class TelegramService:
         title: str,
         artist: str,
         duration: int,
-        thumbnail_path: Optional[Path] = None
+        thumbnail_path: Optional[Path] = None,
+        status_message: Optional[Message] = None
     ) -> bool:
-        """Deliver audio file using send_audio with metadata."""
+        """Deliver audio file using send_audio with metadata and live chat action."""
         if not file_path.exists():
             logger.error(f"Cannot send audio: file not found at {file_path}")
             return False
 
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        if status_message:
+            await TelegramService.update_status(
+                status_message,
+                f"⬆️ *Uploading Audio to Telegram...*\n"
+                f"🎵 *Title:* `{title[:40]}`\n"
+                f"📦 *File size:* `{file_size_mb:.1f} MB`\n"
+                f"📡 *Status:* Uploading directly to your chat..."
+            )
+
         audio_file = FSInputFile(str(file_path))
         thumb_file = FSInputFile(str(thumbnail_path)) if (thumbnail_path and thumbnail_path.exists()) else None
+
+        stop_action = asyncio.Event()
+        action_task = asyncio.create_task(
+            TelegramService._keep_chat_action(bot, chat_id, "upload_document", stop_action)
+        )
 
         try:
             await bot.send_audio(
@@ -77,6 +122,9 @@ class TelegramService:
                 text="❌ **Upload Failed:** An unexpected error occurred while transferring your audio."
             )
             return False
+        finally:
+            stop_action.set()
+            await action_task
 
     @staticmethod
     async def send_video_file(
@@ -87,15 +135,31 @@ class TelegramService:
         duration: int,
         width: int,
         height: int,
-        thumbnail_path: Optional[Path] = None
+        thumbnail_path: Optional[Path] = None,
+        status_message: Optional[Message] = None
     ) -> bool:
-        """Deliver video file using send_video with streaming support."""
+        """Deliver video file using send_video with streaming support and live chat action."""
         if not file_path.exists():
             logger.error(f"Cannot send video: file not found at {file_path}")
             return False
 
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        if status_message:
+            await TelegramService.update_status(
+                status_message,
+                f"⬆️ *Uploading Video to Telegram...*\n"
+                f"🎬 *Title:* `{title[:40]}`\n"
+                f"📦 *File size:* `{file_size_mb:.1f} MB`\n"
+                f"📡 *Status:* Uploading directly to your chat..."
+            )
+
         video_file = FSInputFile(str(file_path))
         thumb_file = FSInputFile(str(thumbnail_path)) if (thumbnail_path and thumbnail_path.exists()) else None
+
+        stop_action = asyncio.Event()
+        action_task = asyncio.create_task(
+            TelegramService._keep_chat_action(bot, chat_id, "upload_video", stop_action)
+        )
 
         try:
             await bot.send_video(
@@ -131,6 +195,9 @@ class TelegramService:
                 text="❌ **Upload Failed:** An unexpected error occurred while transferring your video."
             )
             return False
+        finally:
+            stop_action.set()
+            await action_task
 
 
 telegram_service = TelegramService()

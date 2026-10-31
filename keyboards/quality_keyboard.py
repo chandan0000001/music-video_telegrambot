@@ -76,3 +76,19 @@ def get_video_quality_keyboard(
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_retry_keyboard(
+    retry_callback: str,
+    back_callback: str
+) -> InlineKeyboardMarkup:
+    """Generate inline retry keyboard when download or processing fails."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Retry Download", callback_data=retry_callback)
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Change Quality", callback_data=back_callback),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")
+        ]
+    ])

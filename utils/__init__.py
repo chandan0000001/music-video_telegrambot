@@ -8,6 +8,13 @@ from utils.validators import (
     validate_media_limits,
     is_safe_url
 )
+from utils.progress import (
+    DownloadProgressTracker,
+    AsyncProgressReporter,
+    make_progress_bar,
+    format_bytes,
+    format_seconds
+)
 
 __all__ = [
     "setup_logger",
@@ -18,5 +25,10 @@ __all__ = [
     "extract_youtube_id",
     "sanitize_filename",
     "validate_media_limits",
-    "is_safe_url"
+    "is_safe_url",
+    "DownloadProgressTracker",
+    "AsyncProgressReporter",
+    "make_progress_bar",
+    "format_bytes",
+    "format_seconds"
 ]
