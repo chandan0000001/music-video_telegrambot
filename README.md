@@ -79,22 +79,23 @@ flowchart TD
 
 ### 2. Media Processing & Auto-Compression Pipeline
 
-Telegram's standard cloud API enforces a **50 MB** upload limit for standard bots. To ensure users always receive their files without errors, this bot uses an intelligent **two-tier processing pipeline**:
+Telegram's standard cloud API enforces a **50 MB** upload limit for basic bots. To allow uploads up to **2000 MB (2 GB)** without errors or downgrades, this bot utilizes an intelligent **Smart Routing & Hardware-Accelerated Pipeline**:
 
 ```mermaid
 flowchart TD
-    JobStart([New Media Job]) --> Download["⬇️ yt-dlp downloads stream into unique temp/job_ID/"]
-    Download --> Remux["⚙️ FFmpeg encodes audio or remuxes video with +faststart"]
-    Remux --> ProbeSize{"File Size > 49.5 MB?"}
+    JobStart([New Media Job]) --> Download["⬇️ Optimized yt-dlp (8 parallel fragment streams) into temp/job_ID/"]
+    Download --> Remux["⚙️ FFmpeg remux / transcode (Intel VAAPI HW Accelerated)"]
+    Remux --> ProbeSize{"File Size > 48 MB?"}
     
-    ProbeSize -- "No (<= 49.5 MB)" --> DirectUpload["⬆️ Send directly via sendAudio or sendVideo"]
+    ProbeSize -- "No (<= 48 MB)" --> FastHTTP["🚀 Standard Telegram Bot API (Instant HTTP POST)"]
     
-    ProbeSize -- "Yes (> 49.5 MB)" --> AutoCompress["⚙️ Dynamic FFmpeg Compression Engine"]
-    AutoCompress --> CalcBitrate["Calculate target bitrate: (48 MB * 8) / duration"]
-    CalcBitrate --> Transcode["Re-encode with libx264 + AAC to exact target size (~47 MB)"]
-    Transcode --> DirectUpload
+    ProbeSize -- "Yes (> 48 MB)" --> CheckMTProto{"MTProto Configured?"}
+    CheckMTProto -- "Yes" --> MTProto2GB["⚡ Native MTProto 2GB Engine (up to 2000 MB)"]
+    CheckMTProto -- "No" --> AutoChunk["📦 Lossless Zero-Reencode Chunking (44 MB chunks)"]
     
-    DirectUpload --> DBStatus["Update database status to 'completed'"]
+    FastHTTP --> DBStatus["Update database status to 'completed'"]
+    MTProto2GB --> DBStatus
+    AutoChunk --> DBStatus
     DBStatus --> FinalClean["Delete temp/job_ID/ immediately"]
 ```
 
@@ -293,6 +294,10 @@ BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
 # Administrator Telegram User IDs (Numeric)
 ADMIN_IDS=2063913663
 
+# Native MTProto 2GB Uploader (Get from https://my.telegram.org)
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+
 # Media Processing Limits (Optional)
 MAX_UPLOAD_SIZE_MB=2000
 MAX_DURATION_SECONDS=3600
@@ -359,7 +364,12 @@ Upon launching, the bot output will confirm:
   - Formats: `MP4` with H.264 video and AAC audio.
   - Resolutions: Only **genuinely available** stream heights (`144p`, `240p`, `360p`, `480p`, `720p`, `1080p`).
   - Streamable playback: Remuxed with `+faststart` so users can watch while downloading on Telegram.
-  - Automatic compression: Videos exceeding 50 MB are automatically compressed to ~48 MB so Telegram cloud delivers them smoothly.
+  - **Intel VAAPI / QuickSync Acceleration:** Encodings run at ~10x speed using hardware GPU render nodes (`/dev/dri/renderD128`) with zero CPU stress.
+  - **Smart Routing & 2 GB Uploads:** Videos and songs up to **2000 MB** deliver directly without compression degradation when MTProto is configured. Files under 48 MB route via high-speed HTTP Bot API.
+
+### In-Flight Download Cancellation
+- Every active download presents a real-time progress card with an inline **🛑 Cancel Download** button.
+- Clicking the button instantly terminates ongoing `yt-dlp` stream downloads and kills `ffmpeg` subprocesses on the server, purging all temporary data and releasing the worker slot immediately.
 
 ### User History
 - Send `/history` or click **📜 My History** to see your recent search queries and download statuses.
@@ -395,6 +405,47 @@ From the `/admin` dashboard, click:
 
 ### Linux (systemd service)
 
+#### Option 1: Rootless User Service (Recommended — No Root / Sudo Required)
+You can run the bot 24/7 under your own user account and have it automatically boot on machine startup:
+
+1. Create user service directory and file:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   nano ~/.config/systemd/user/musicbot.service
+   ```
+
+2. Add configuration:
+   ```ini
+   [Unit]
+   Description=Telegram Music & Video 2GB Downloader Bot
+   After=network.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=/home/chandan/music_bot
+   ExecStart=/home/chandan/music_bot/.venv/bin/python /home/chandan/music_bot/bot.py
+   Restart=always
+   RestartSec=5
+   Environment=PYTHONUNBUFFERED=1
+
+   [Install]
+   WantedBy=default.target
+   ```
+
+3. Enable auto-boot on system startup (lingering) and launch service:
+   ```bash
+   loginctl enable-linger $USER
+   systemctl --user daemon-reload
+   systemctl --user enable --now musicbot.service
+   ```
+
+4. Manage and check logs:
+   ```bash
+   systemctl --user status musicbot.service
+   journalctl --user -u musicbot.service -f
+   ```
+
+#### Option 2: System-wide Service (Requires Sudo)
 1. Create a systemd service file:
    ```bash
    sudo nano /etc/systemd/system/music-bot.service
@@ -422,8 +473,7 @@ From the `/admin` dashboard, click:
 3. Enable and start:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl enable music-bot
-   sudo systemctl start music-bot
+   sudo systemctl enable --now music-bot
    ```
 
 4. Check logs:
@@ -477,29 +527,39 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 20 test cases will execute:
+All 30 test cases will execute:
 ```text
-tests/test_database.py::test_database_init_and_restart PASSED            [  5%]
-tests/test_database.py::test_new_and_existing_user PASSED                [ 10%]
-tests/test_database.py::test_search_and_download_history PASSED          [ 15%]
-tests/test_database.py::test_block_unblock_and_csv_export PASSED         [ 20%]
-tests/test_handlers.py::test_scenario_5_and_6_keyboard_generation PASSED [ 25%]
-tests/test_handlers.py::test_admin_authorization_logic PASSED            [ 30%]
-tests/test_handlers.py::test_scenario_12_and_13_admin_command PASSED     [ 35%]
-tests/test_rate_limiter.py::test_user_rate_limiting PASSED               [ 40%]
-tests/test_rate_limiter.py::test_admin_bypasses_rate_limit PASSED        [ 45%]
-tests/test_rate_limiter.py::test_concurrency_manager PASSED              [ 50%]
-tests/test_services.py::test_scenarios_3_and_4_search_music PASSED       [ 55%]
-tests/test_services.py::test_format_duration_helper PASSED               [ 60%]
-tests/test_services.py::test_scenario_7_ffmpeg_audio_processing PASSED   [ 65%]
-tests/test_services.py::test_scenario_8_ffmpeg_video_processing PASSED   [ 70%]
-tests/test_services.py::test_scenario_11_telegram_upload_failure_handling PASSED [ 75%]
-tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 80%]
-tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 85%]
-tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 90%]
-tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 95%]
+tests/test_database.py::test_database_init_and_restart PASSED            [  3%]
+tests/test_database.py::test_new_and_existing_user PASSED                [  6%]
+tests/test_database.py::test_search_and_download_history PASSED          [ 10%]
+tests/test_database.py::test_block_unblock_and_csv_export PASSED         [ 13%]
+tests/test_handlers.py::test_scenario_5_and_6_keyboard_generation PASSED [ 16%]
+tests/test_handlers.py::test_admin_authorization_logic PASSED            [ 20%]
+tests/test_handlers.py::test_scenario_12_and_13_admin_command PASSED     [ 23%]
+tests/test_progress.py::test_make_progress_bar PASSED                    [ 26%]
+tests/test_progress.py::test_format_bytes PASSED                         [ 30%]
+tests/test_progress.py::test_format_seconds PASSED                       [ 33%]
+tests/test_progress.py::test_download_progress_tracker PASSED            [ 36%]
+tests/test_progress.py::test_retry_keyboard PASSED                       [ 40%]
+tests/test_progress.py::test_upload_progress_tracker PASSED              [ 43%]
+tests/test_progress.py::test_tracked_fs_input_file PASSED                [ 46%]
+tests/test_progress.py::test_task_registry_cancellation PASSED           [ 50%]
+tests/test_rate_limiter.py::test_user_rate_limiting PASSED               [ 53%]
+tests/test_rate_limiter.py::test_admin_bypasses_rate_limit PASSED        [ 56%]
+tests/test_rate_limiter.py::test_concurrency_manager PASSED              [ 60%]
+tests/test_services.py::test_scenarios_3_and_4_search_music PASSED       [ 63%]
+tests/test_services.py::test_format_duration_helper PASSED               [ 66%]
+tests/test_services.py::test_scenario_7_ffmpeg_audio_processing PASSED   [ 70%]
+tests/test_services.py::test_scenario_8_ffmpeg_video_processing PASSED   [ 73%]
+tests/test_services.py::test_scenario_11_telegram_upload_failure_handling PASSED [ 76%]
+tests/test_services.py::test_mtproto_service_properties PASSED           [ 80%]
+tests/test_services.py::test_ffmpeg_split_video_into_chunks PASSED       [ 83%]
+tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 86%]
+tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 90%]
+tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 93%]
+tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 96%]
 tests/test_validators.py::test_validate_media_limits PASSED              [100%]
-============================== 20 passed ==============================
+============================== 30 passed in 4.01s ==============================
 ```
 
 ---
