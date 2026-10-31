@@ -43,11 +43,12 @@ ADMIN_IDS: set[int] = {
 } or {2063913663}
 
 # Base Paths
-DATABASE_PATH: Path = BASE_DIR / "bot_database.sqlite3"
-TEMP_DIR: Path = BASE_DIR / "temp"
-LOGS_DIR: Path = BASE_DIR / "logs"
+DATABASE_PATH: Path = Path(os.getenv("DATABASE_PATH", str(BASE_DIR / "bot_database.sqlite3")))
+TEMP_DIR: Path = Path(os.getenv("TEMP_DIR", str(BASE_DIR / "temp")))
+LOGS_DIR: Path = Path(os.getenv("LOGS_DIR", str(BASE_DIR / "logs")))
 
 # Ensure runtime directories exist
+DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
