@@ -81,8 +81,8 @@ class TelegramService:
                 f"📡 *Status:* Uploading directly to your chat..."
             )
 
-        audio_file = FSInputFile(str(file_path))
-        thumb_file = FSInputFile(str(thumbnail_path)) if (thumbnail_path and thumbnail_path.exists()) else None
+        audio_file = FSInputFile(str(file_path), chunk_size=1024 * 1024)
+        thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
 
         stop_action = asyncio.Event()
         action_task = asyncio.create_task(
@@ -153,8 +153,8 @@ class TelegramService:
                 f"📡 *Status:* Uploading directly to your chat..."
             )
 
-        video_file = FSInputFile(str(file_path))
-        thumb_file = FSInputFile(str(thumbnail_path)) if (thumbnail_path and thumbnail_path.exists()) else None
+        video_file = FSInputFile(str(file_path), chunk_size=1024 * 1024)
+        thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
 
         stop_action = asyncio.Event()
         action_task = asyncio.create_task(
@@ -175,10 +175,46 @@ class TelegramService:
             )
             return True
         except TelegramEntityTooLarge:
-            logger.error(f"TelegramEntityTooLarge: {file_path} exceeded limit")
+            logger.warning(f"TelegramEntityTooLarge: {file_path} ({file_size_mb:.1f} MB) rejected by cloud server.")
+            if status_message:
+                await TelegramService.update_status(
+                    status_message,
+                    f"⚠️ *Telegram Cloud Server Limit (50 MB) Reached!*\n"
+                    f"File is `{file_size_mb:.1f} MB`. Telegram Cloud API limits bot uploads to 50 MB.\n"
+                    f"🗜 Compressing video to fit Telegram cloud limits..."
+                )
+            try:
+                from services.ffmpeg_service import ffmpeg_service
+                compressed_file = file_path.parent / f"compressed_{file_path.name}"
+                compressed = await ffmpeg_service.compress_video_to_target_size(
+                    input_file=file_path,
+                    output_file=compressed_file,
+                    target_size_bytes=48 * 1024 * 1024,
+                    duration=duration
+                )
+                if compressed and compressed_file.exists():
+                    comp_video = FSInputFile(str(compressed_file), chunk_size=1024 * 1024)
+                    await bot.send_video(
+                        chat_id=chat_id,
+                        video=comp_video,
+                        caption=f"🎬 *{title}*\n📺 *Resolution:* {height}p (Optimized for Telegram Cloud)",
+                        duration=duration,
+                        width=width,
+                        height=height,
+                        thumbnail=thumb_file,
+                        supports_streaming=True,
+                        parse_mode="Markdown"
+                    )
+                    return True
+            except Exception as comp_err:
+                logger.error(f"Fallback compression failed: {comp_err}")
+
             await bot.send_message(
                 chat_id=chat_id,
-                text="❌ **File too large!** The video file exceeds Telegram's upload limits."
+                text=(
+                    f"❌ **File too large!** The video is {file_size_mb:.1f} MB.\n"
+                    "Telegram Cloud restricts bot uploads to 50 MB unless using a Local Bot API server (`TELEGRAM_API_SERVER` in .env)."
+                )
             )
             return False
         except TelegramAPIError as e:

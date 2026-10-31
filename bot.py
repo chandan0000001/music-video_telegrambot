@@ -8,7 +8,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN, ADMIN_IDS
+from config import BOT_TOKEN, ADMIN_IDS, TELEGRAM_API_SERVER
 from database import db
 from utils.logger import setup_logger
 from utils.rate_limiter import ThrottlingMiddleware
@@ -63,8 +63,17 @@ async def main() -> None:
         print("=" * 65 + "\n")
         sys.exit(1)
 
-    # Initialize Bot & Dispatcher
-    bot = Bot(token=BOT_TOKEN)
+    # Initialize Bot & Dispatcher with high-throughput network session
+    from aiogram.client.session.aiohttp import AiohttpSession
+    from aiogram.client.telegram import TelegramAPIServer
+
+    session = None
+    if TELEGRAM_API_SERVER:
+        server = TelegramAPIServer.from_base(TELEGRAM_API_SERVER)
+        session = AiohttpSession(api=server)
+        logger.info(f"Using custom Telegram Bot API Server: {TELEGRAM_API_SERVER} (up to 2000 MB uploads)")
+
+    bot = Bot(token=BOT_TOKEN, session=session)
     dp = Dispatcher(storage=MemoryStorage())
 
     # Register Middlewares

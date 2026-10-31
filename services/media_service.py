@@ -17,7 +17,6 @@ from config import (
     MAX_DURATION_SECONDS,
     MAX_UPLOAD_SIZE_BYTES,
     MAX_UPLOAD_SIZE_MB,
-    TELEGRAM_CLOUD_LIMIT_BYTES,
     SUPPORTED_AUDIO_FORMATS,
     SUPPORTED_AUDIO_QUALITIES,
     SUPPORTED_VIDEO_RESOLUTIONS
@@ -224,10 +223,13 @@ class MediaService:
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 30,
-            "concurrent_fragment_downloads": 5,
-            "buffersize": 1024 * 1024,
-            "retries": 3,
-            "fragment_retries": 3,
+            "concurrent_fragment_downloads": 8,
+            "buffersize": 4 * 1024 * 1024,
+            "http_chunk_size": 10485760,
+            "retries": 10,
+            "fragment_retries": 10,
+            "file_access_retries": 5,
+            "nocheckcertificate": True,
         }
         if tracker and hasattr(tracker, "ytdlp_hook"):
             ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
@@ -353,10 +355,13 @@ class MediaService:
             "no_warnings": True,
             "socket_timeout": 30,
             "merge_output_format": "mp4",
-            "concurrent_fragment_downloads": 5,
-            "buffersize": 1024 * 1024,
-            "retries": 3,
-            "fragment_retries": 3,
+            "concurrent_fragment_downloads": 8,
+            "buffersize": 4 * 1024 * 1024,
+            "http_chunk_size": 10485760,
+            "retries": 10,
+            "fragment_retries": 10,
+            "file_access_retries": 5,
+            "nocheckcertificate": True,
         }
         if tracker and hasattr(tracker, "ytdlp_hook"):
             ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
@@ -419,35 +424,7 @@ class MediaService:
 
         file_size = target_file.stat().st_size
 
-        # If file exceeds Telegram Cloud Bot API limit (49.5 MB), compress with FFmpeg to fit
-        if file_size > TELEGRAM_CLOUD_LIMIT_BYTES:
-            size_mb = file_size / (1024 * 1024)
-            logger.info(
-                f"Video size ({size_mb:.1f} MB) exceeds Telegram 50MB direct limit. "
-                "Compressing with FFmpeg to fit..."
-            )
-            if status_callback:
-                try:
-                    await status_callback(
-                        f"🗜 *Compressing video with FFmpeg...*\n"
-                        f"📊 Current size: `{size_mb:.1f} MB`\n"
-                        f"📦 Target size: `~48 MB` (to fit Telegram Cloud limit)\n"
-                        f"⏳ This may take a minute..."
-                    )
-                except Exception:
-                    pass
-
-            compressed_mp4 = job_dir / f"compressed_{uuid.uuid4().hex[:8]}.mp4"
-            compressed = await ffmpeg_service.compress_video_to_target_size(
-                input_file=target_file,
-                output_file=compressed_mp4,
-                target_size_bytes=48 * 1024 * 1024,
-                duration=duration
-            )
-            if compressed and compressed_mp4.exists() and compressed_mp4.stat().st_size > 0:
-                target_file = compressed_mp4
-                file_size = target_file.stat().st_size
-
+        # Validate strictly against configured MAX_UPLOAD_SIZE_MB (from env, e.g. 2000 MB)
         if file_size > MAX_UPLOAD_SIZE_BYTES:
             size_mb = file_size / (1024 * 1024)
             return (

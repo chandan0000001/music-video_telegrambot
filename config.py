@@ -6,6 +6,7 @@ Loads credentials and overrides from .env if present.
 import os
 import base64
 from pathlib import Path
+from typing import Optional
 
 # Base Paths
 BASE_DIR: Path = Path(__file__).resolve().parent
@@ -35,6 +36,7 @@ if not COOKIE_FILE.exists():
 
 # Telegram Bot Credentials
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+TELEGRAM_API_SERVER: Optional[str] = os.getenv("TELEGRAM_API_SERVER")
 
 # Administrator Telegram IDs (Numeric User IDs, comma-separated in env)
 _admin_raw = os.getenv("ADMIN_IDS", "2063913663")
@@ -53,11 +55,9 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Media Processing & Limits
-# Set to maximum possible (2 GB / 2000 MB).
-# Videos exceeding Telegram Cloud Bot API limit (50 MB) are automatically compressed with FFmpeg.
+# Configured via MAX_UPLOAD_SIZE_MB from environment (.env). Default: 2000 MB (2 GB).
 MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "2000"))
 MAX_UPLOAD_SIZE_BYTES: int = MAX_UPLOAD_SIZE_MB * 1024 * 1024
-TELEGRAM_CLOUD_LIMIT_BYTES: int = int(49.5 * 1024 * 1024)  # 49.5 MB cloud threshold
 
 # Maximum allowed duration for media processing (in seconds, e.g., 3600 = 60 minutes)
 MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "3600"))
