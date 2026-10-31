@@ -4,6 +4,7 @@ Centralized configuration for the Telegram Music & Video Downloader Bot.
 Loads credentials and overrides from .env if present.
 """
 import os
+import base64
 from pathlib import Path
 
 # Base Paths
@@ -17,6 +18,20 @@ if _env_file.exists():
         if line and not line.startswith("#") and "=" in line:
             key, val = line.split("=", 1)
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+
+# Auto-generate cookies.txt from environment variable (for Cloud / PaaS deployments)
+COOKIE_FILE: Path = BASE_DIR / "cookies.txt"
+_cookies_b64 = os.getenv("YOUTUBE_COOKIES_BASE64")
+_cookies_raw = os.getenv("YOUTUBE_COOKIES")
+
+if not COOKIE_FILE.exists():
+    if _cookies_b64:
+        try:
+            COOKIE_FILE.write_bytes(base64.b64decode(_cookies_b64.strip()))
+        except Exception:
+            pass
+    elif _cookies_raw:
+        COOKIE_FILE.write_text(_cookies_raw.strip(), encoding="utf-8")
 
 # Telegram Bot Credentials
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")

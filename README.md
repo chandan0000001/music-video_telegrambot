@@ -512,6 +512,11 @@ tests/test_validators.py::test_validate_media_limits PASSED              [100%]
 ### Q: How does the bot send files larger than 50 MB on Telegram?
 **A:** If a video's natural size exceeds 49.5 MB, the bot automatically triggers FFmpeg's target-bitrate compression engine to compress the video down to ~48 MB so Telegram's cloud API accepts it without failing.
 
+### Q: How do I provide `cookies.txt` when deploying to Cloud Providers (Railway, Render, VPS)?
+**A:** Because `cookies.txt` is in `.gitignore`, there are two convenient ways to supply it:
+- **Cloud / PaaS (Railway, Render, Heroku, Fly.io):** Convert your `cookies.txt` to Base64 (`base64 -w 0 cookies.txt` on Linux/Mac, or `[Convert]::ToBase64String([IO.File]::ReadAllBytes('cookies.txt'))` on Windows). Add an environment variable in your provider's dashboard: `YOUTUBE_COOKIES_BASE64=<base64_string>`. The bot automatically generates `cookies.txt` on container startup!
+- **VPS / Dedicated Servers (AWS, DigitalOcean, Hetzner):** After cloning the repo, simply upload `cookies.txt` using SCP (`scp cookies.txt user@vps_ip:/path/to/music_bot/`) or paste it directly using `nano cookies.txt`.
+
 ### Q: Does the bot clean up downloaded files?
 **A:** Yes. Each download job operates in an isolated folder under `temp/job_<UUID>/` and is completely deleted in a `finally` block immediately after delivery or if an error occurs.
 
