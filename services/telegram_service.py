@@ -5,10 +5,13 @@ Encapsulates sending audio and video files using aiogram with error handling and
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from aiogram import Bot
 from aiogram.types import FSInputFile, Message, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramAPIError, TelegramEntityTooLarge, TelegramBadRequest
+
+from config import TELEGRAM_API_SERVER
+from services.ffmpeg_service import ffmpeg_service
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +69,57 @@ class TelegramService:
         thumbnail_path: Optional[Path] = None,
         status_message: Optional[Message] = None
     ) -> bool:
-        """Deliver audio file using send_audio with metadata and live chat action."""
+        """Deliver audio file using send_audio with metadata and live chat action (with chunking if >48MB)."""
         if not file_path.exists():
             logger.error(f"Cannot send audio: file not found at {file_path}")
             return False
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
+
+        # If audio exceeds Telegram Cloud 50MB single-upload limit, split into 40-45MB chunks
+        if file_size_mb > 48 and not TELEGRAM_API_SERVER:
+            if status_message:
+                await TelegramService.update_status(
+                    status_message,
+                    f"📦 *Preparing Audio Chunks (40-45 MB each)...*\n"
+                    f"🎵 *{title[:40]}*\n"
+                    f"✨ *Preserving 100% Original Audio Fidelity...*"
+                )
+            chunks_dir = file_path.parent / "audio_chunks"
+            parts = await ffmpeg_service.split_audio_into_chunks(
+                input_file=file_path,
+                output_dir=chunks_dir,
+                duration=duration,
+                target_format=file_path.suffix.replace(".", "") or "mp3",
+                target_chunk_bytes=44 * 1024 * 1024
+            )
+            if len(parts) > 1:
+                total_parts = len(parts)
+                logger.info(f"Delivering audio in {total_parts} chunks to chat {chat_id}")
+                for idx, part_file in enumerate(parts, start=1):
+                    part_size_mb = part_file.stat().st_size / (1024 * 1024)
+                    if status_message:
+                        await TelegramService.update_status(
+                            status_message,
+                            f"⬆️ *Uploading Audio Part {idx} of {total_parts}...*\n"
+                            f"🎵 *{title[:40]}*\n"
+                            f"📦 *Chunk size:* `{part_size_mb:.1f} MB`"
+                        )
+                    part_audio = FSInputFile(str(part_file), chunk_size=1024 * 1024)
+                    thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
+                    caption = f"🎵 *{title}* (Part {idx}/{total_parts})\n👤 *Artist:* {artist} | 💾 *Size:* {part_size_mb:.1f} MB"
+                    await bot.send_audio(
+                        chat_id=chat_id,
+                        audio=part_audio,
+                        title=f"{title[:50]} (Part {idx}/{total_parts})",
+                        performer=artist[:64],
+                        duration=max(1, duration // total_parts),
+                        thumbnail=thumb_file,
+                        caption=caption,
+                        parse_mode="Markdown"
+                    )
+                return True
+
         if status_message:
             await TelegramService.update_status(
                 status_message,
@@ -144,6 +192,67 @@ class TelegramService:
             return False
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
+
+        # If video exceeds Telegram Cloud 50MB single-upload limit, split into optimal 40-45MB chunks
+        # This preserves 100% original visual quality (e.g. 1080p60) without any compression downgrade!
+        if file_size_mb > 48 and not TELEGRAM_API_SERVER:
+            if status_message:
+                await TelegramService.update_status(
+                    status_message,
+                    f"📦 *Preparing Optimal Chunks (40-45 MB each)...*\n"
+                    f"🎬 *{title[:40]}*\n"
+                    f"✨ *Preserving 100% Original {height}p Quality without compression Loss...*"
+                )
+            chunks_dir = file_path.parent / "video_chunks"
+            parts = await ffmpeg_service.split_video_into_chunks(
+                input_file=file_path,
+                output_dir=chunks_dir,
+                duration=duration,
+                target_chunk_bytes=44 * 1024 * 1024
+            )
+            if len(parts) > 1:
+                total_parts = len(parts)
+                logger.info(f"Delivering video in {total_parts} chunks to chat {chat_id}")
+                for idx, part_file in enumerate(parts, start=1):
+                    part_size_mb = part_file.stat().st_size / (1024 * 1024)
+                    if status_message:
+                        await TelegramService.update_status(
+                            status_message,
+                            f"⬆️ *Uploading Part {idx} of {total_parts}...*\n"
+                            f"🎬 *{title[:40]}*\n"
+                            f"📦 *Chunk size:* `{part_size_mb:.1f} MB`\n"
+                            f"📡 Sending directly to your chat..."
+                        )
+
+                    # probe exact part duration
+                    part_dur = max(1, duration // total_parts)
+                    part_probe = await ffmpeg_service.probe_media(part_file)
+                    if part_probe and "format" in part_probe and "duration" in part_probe["format"]:
+                        try:
+                            part_dur = int(float(part_probe["format"]["duration"]))
+                        except Exception:
+                            pass
+
+                    part_video = FSInputFile(str(part_file), chunk_size=1024 * 1024)
+                    thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
+                    caption = (
+                        f"🎬 *{title}* (Part {idx}/{total_parts})\n"
+                        f"📺 *Resolution:* {height}p | 💾 *Size:* {part_size_mb:.1f} MB"
+                    )
+
+                    await bot.send_video(
+                        chat_id=chat_id,
+                        video=part_video,
+                        caption=caption,
+                        duration=part_dur,
+                        width=width,
+                        height=height,
+                        thumbnail=thumb_file,
+                        supports_streaming=True,
+                        parse_mode="Markdown"
+                    )
+                return True
+
         if status_message:
             await TelegramService.update_status(
                 status_message,

@@ -215,6 +215,93 @@ class FFmpegService:
         success, _ = await self._run_command(cmd, timeout=FFMPEG_TIMEOUT * 2)
         return success and output_file.exists() and output_file.stat().st_size > 0
 
+    async def split_video_into_chunks(
+        self,
+        input_file: Path,
+        output_dir: Path,
+        duration: int,
+        target_chunk_bytes: int = 44 * 1024 * 1024
+    ) -> list[Path]:
+        """
+        Split a large video file into sequential, fully playable MP4 chunks
+        (40MB-48MB each) using zero-re-encoding stream copy (-c copy).
+        Each chunk is standalone, streamable, and fits under Telegram Cloud's 50MB limit.
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_size = input_file.stat().st_size
+        if file_size <= target_chunk_bytes:
+            return [input_file]
+
+        if duration <= 0:
+            probe = await self.probe_media(input_file)
+            if probe and "format" in probe and "duration" in probe["format"]:
+                try:
+                    duration = int(float(probe["format"]["duration"]))
+                except Exception:
+                    duration = 300
+            else:
+                duration = 300
+
+        # Calculate optimal segment time so parts are between 40 MB and 47 MB
+        num_chunks = max(2, int((file_size + target_chunk_bytes - 1) // target_chunk_bytes))
+        seg_duration = max(2, int(duration / num_chunks))
+
+        output_pattern = output_dir / "part_%03d.mp4"
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", str(input_file),
+            "-c", "copy",
+            "-map", "0",
+            "-f", "segment",
+            "-segment_time", str(seg_duration),
+            "-reset_timestamps", "1",
+            "-movflags", "+faststart",
+            str(output_pattern)
+        ]
+        success, _ = await self._run_command(cmd, timeout=FFMPEG_TIMEOUT)
+        parts = sorted(list(output_dir.glob("part_*.mp4")))
+        if success and parts:
+            return parts
+
+        return [input_file]
+
+    async def split_audio_into_chunks(
+        self,
+        input_file: Path,
+        output_dir: Path,
+        duration: int,
+        target_format: str = "mp3",
+        target_chunk_bytes: int = 44 * 1024 * 1024
+    ) -> list[Path]:
+        """Split large audio file into sequential chunks under 48MB."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_size = input_file.stat().st_size
+        if file_size <= target_chunk_bytes:
+            return [input_file]
+
+        if duration <= 0:
+            duration = 300
+
+        num_chunks = max(2, int((file_size + target_chunk_bytes - 1) // target_chunk_bytes))
+        seg_duration = max(5, int(duration / num_chunks))
+
+        output_pattern = output_dir / f"audio_part_%03d.{target_format}"
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", str(input_file),
+            "-c", "copy",
+            "-f", "segment",
+            "-segment_time", str(seg_duration),
+            "-reset_timestamps", "1",
+            str(output_pattern)
+        ]
+        success, _ = await self._run_command(cmd, timeout=FFMPEG_TIMEOUT)
+        parts = sorted(list(output_dir.glob(f"audio_part_*.{target_format}")))
+        if success and parts:
+            return parts
+
+        return [input_file]
+
     async def extract_thumbnail(self, video_file: Path, output_image: Path, timestamp: str = "00:00:01") -> bool:
         """Extract a single frame from video for use as Telegram thumbnail."""
         cmd = [

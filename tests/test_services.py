@@ -133,3 +133,32 @@ async def test_scenario_11_telegram_upload_failure_handling(tmp_path: Path):
     assert sent is False
     mock_bot.send_message.assert_awaited_once()
     assert "File too large" in mock_bot.send_message.call_args[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_split_video_into_chunks(tmp_path: Path):
+    """Test splitting large video into smaller playable chunks without quality loss."""
+    src_video = tmp_path / "test_split.mp4"
+    gen_cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=10:size=320x240:rate=10",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+        "-c:v", "libx264", "-g", "10", "-c:a", "aac",
+        str(src_video)
+    ]
+    ok, _ = await ffmpeg_service._run_command(gen_cmd)
+    assert ok is True
+
+    chunks_dir = tmp_path / "chunks"
+    parts = await ffmpeg_service.split_video_into_chunks(
+        input_file=src_video,
+        output_dir=chunks_dir,
+        duration=10,
+        target_chunk_bytes=50 * 1024  # small threshold to trigger splitting
+    )
+    assert len(parts) >= 2
+    for p in parts:
+        assert p.exists() and p.stat().st_size > 0
+        probe = await ffmpeg_service.probe_media(p)
+        assert probe is not None
+        assert "streams" in probe
