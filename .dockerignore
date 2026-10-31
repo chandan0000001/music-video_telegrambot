@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+temp/
+logs/
+*.sqlite3*
+.env
+cookies.txt
+.git/
