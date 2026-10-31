@@ -45,7 +45,8 @@ async def on_startup(bot: Bot) -> None:
 
     # 3. Start MTProto Direct Uploader (for up to 2000 MB single-file transfers)
     if mtproto_service.is_configured:
-        await mtproto_service.start()
+        ok = await mtproto_service.start()
+        logger.info(f"MTProto 2GB High-Speed Engine started: {ok}")
 
 
 async def on_shutdown(bot: Bot) -> None:
