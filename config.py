@@ -2,11 +2,24 @@
 Application Configuration
 Centralized configuration for the Telegram Music & Video Downloader Bot.
 """
+import os
 from pathlib import Path
 
+# Base Paths
+BASE_DIR: Path = Path(__file__).resolve().parent
+
+# Auto-load local environment file (.env) if present (ignored in git)
+_env_file = BASE_DIR / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, val = line.split("=", 1)
+            os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+
 # Telegram Bot Credentials
-# Replace with your actual bot token obtained from @BotFather
-BOT_TOKEN: str = "YOUR_BOT_TOKEN_HERE"
+# Replace with your actual bot token obtained from @BotFather or set in .env
+BOT_TOKEN: str = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
 # Administrator Telegram IDs
 ADMIN_IDS: set[int] = {
