@@ -92,3 +92,12 @@ def get_retry_keyboard(
             InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")
         ]
     ])
+
+
+def get_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Generate inline cancellation button shown during active downloads."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🛑 Cancel Download", callback_data=f"cancel_dl:{user_id}")
+        ]
+    ])

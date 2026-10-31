@@ -84,9 +84,9 @@ class TelegramService:
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-        # 1. Native MTProto Direct Delivery (up to 2000 MB without 50MB HTTP limit)
-        if mtproto_service.is_configured:
-            logger.info(f"Using MTProto 2GB Uploader for audio: {file_path.name} ({file_size_mb:.1f} MB)")
+        # 1. Smart Routing: MTProto Direct Delivery for large files (>48MB up to 2000MB)
+        if file_size_mb > 48 and mtproto_service.is_configured:
+            logger.info(f"Using MTProto 2GB Uploader for large audio: {file_path.name} ({file_size_mb:.1f} MB)")
             sent = await mtproto_service.send_audio(
                 chat_id=chat_id,
                 file_path=file_path,
@@ -98,7 +98,7 @@ class TelegramService:
             )
             if sent:
                 return True
-            logger.warning("MTProto audio upload did not complete, falling back to standard HTTP Bot API...")
+            logger.warning("MTProto audio upload did not complete, falling back to standard HTTP Bot API / chunking...")
 
         # If audio exceeds Telegram Cloud 50MB single-upload limit, split into 40-45MB chunks
         if file_size_mb > 48 and not TELEGRAM_API_SERVER:
@@ -232,9 +232,9 @@ class TelegramService:
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-        # 1. Native MTProto Direct Delivery (up to 2000 MB without 50MB HTTP limit)
-        if mtproto_service.is_configured:
-            logger.info(f"Using MTProto 2GB Uploader for video: {file_path.name} ({file_size_mb:.1f} MB)")
+        # 1. Smart Routing: MTProto Direct Delivery for large files (>48MB up to 2000MB)
+        if file_size_mb > 48 and mtproto_service.is_configured:
+            logger.info(f"Using MTProto 2GB Uploader for large video: {file_path.name} ({file_size_mb:.1f} MB)")
             sent = await mtproto_service.send_video(
                 chat_id=chat_id,
                 file_path=file_path,
@@ -247,7 +247,7 @@ class TelegramService:
             )
             if sent:
                 return True
-            logger.warning("MTProto video upload did not complete, falling back to standard HTTP Bot API...")
+            logger.warning("MTProto video upload did not complete, falling back to standard HTTP Bot API / chunking...")
 
         # If video exceeds Telegram Cloud 50MB single-upload limit, split into optimal 40-45MB chunks
         # This preserves 100% original visual quality (e.g. 1080p60) without any compression downgrade!

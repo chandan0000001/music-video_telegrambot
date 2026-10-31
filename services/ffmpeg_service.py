@@ -2,6 +2,7 @@
 FFmpeg Media Processing Engine
 Executes media conversion, extraction, and remuxing securely via non-blocking subprocesses.
 """
+import os
 import asyncio
 import json
 import logging
@@ -48,6 +49,13 @@ class FFmpegService:
             except Exception:
                 pass
             return False, f"Process timed out after {timeout} seconds"
+        except asyncio.CancelledError:
+            logger.info("FFmpeg command cancelled; terminating subprocess immediately...")
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise
         except Exception as e:
             logger.exception(f"Unexpected error executing command: {e}")
             return False, str(e)
@@ -151,24 +159,46 @@ class FFmpegService:
 
         success, _ = await self._run_command(cmd)
         if not success:
-            # Fallback: re-encode video with libx264 if direct stream copy fails
-            logger.info("Direct stream copy failed, attempting full transcode with libx264...")
-            fallback_cmd = [
-                self.ffmpeg_path, "-y",
-                "-i", str(video_input)
-            ]
-            if audio_input and audio_input.exists():
-                fallback_cmd.extend(["-i", str(audio_input), "-map", "0:v:0", "-map", "1:a:0"])
-            fallback_cmd.extend([
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "24",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-movflags", "+faststart",
-                str(output_file)
-            ])
-            success, _ = await self._run_command(fallback_cmd, timeout=FFMPEG_TIMEOUT * 2)
+            # Fallback: attempt Intel VAAPI hardware transcode first, then CPU libx264
+            logger.info("Direct stream copy failed, attempting hardware/software transcode...")
+            vaapi_device = Path("/dev/dri/renderD128")
+            if vaapi_device.exists() and os.access(str(vaapi_device), os.R_OK | os.W_OK):
+                hw_fallback = [
+                    self.ffmpeg_path, "-y",
+                    "-init_hw_device", f"vaapi=va:{vaapi_device}",
+                    "-filter_hw_device", "va",
+                    "-i", str(video_input)
+                ]
+                if audio_input and audio_input.exists():
+                    hw_fallback.extend(["-i", str(audio_input), "-map", "0:v:0", "-map", "1:a:0"])
+                hw_fallback.extend([
+                    "-vf", "format=nv12,hwupload",
+                    "-c:v", "h264_vaapi",
+                    "-b:v", "2500k",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    str(output_file)
+                ])
+                success, _ = await self._run_command(hw_fallback, timeout=FFMPEG_TIMEOUT * 2)
+
+            if not success or not output_file.exists():
+                fallback_cmd = [
+                    self.ffmpeg_path, "-y",
+                    "-i", str(video_input)
+                ]
+                if audio_input and audio_input.exists():
+                    fallback_cmd.extend(["-i", str(audio_input), "-map", "0:v:0", "-map", "1:a:0"])
+                fallback_cmd.extend([
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "24",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    str(output_file)
+                ])
+                success, _ = await self._run_command(fallback_cmd, timeout=FFMPEG_TIMEOUT * 2)
 
         return success and output_file.exists() and output_file.stat().st_size > 0
 
@@ -197,6 +227,29 @@ class FFmpegService:
             f"Compressing video {input_file.name} to target {effective_bytes / (1024*1024):.1f}MB: "
             f"video_bitrate={video_bitrate // 1000}k, duration={duration}s"
         )
+
+        # 1. Attempt high-speed Intel VAAPI hardware acceleration if DRM render node is present
+        vaapi_device = Path("/dev/dri/renderD128")
+        if vaapi_device.exists() and os.access(str(vaapi_device), os.R_OK | os.W_OK):
+            hw_cmd = [
+                self.ffmpeg_path, "-y",
+                "-init_hw_device", f"vaapi=va:{vaapi_device}",
+                "-filter_hw_device", "va",
+                "-i", str(input_file),
+                "-vf", "format=nv12,hwupload",
+                "-c:v", "h264_vaapi",
+                "-b:v", f"{video_bitrate}",
+                "-maxrate", f"{int(video_bitrate * 1.2)}",
+                "-c:a", "aac",
+                "-b:a", "96k",
+                "-movflags", "+faststart",
+                str(output_file)
+            ]
+            hw_ok, _ = await self._run_command(hw_cmd, timeout=FFMPEG_TIMEOUT * 2)
+            if hw_ok and output_file.exists() and output_file.stat().st_size > 0:
+                logger.info(f"Intel VAAPI hardware compression successful for {input_file.name}")
+                return True
+            logger.info("VAAPI hardware compression not available or failed; using CPU libx264...")
 
         cmd = [
             self.ffmpeg_path, "-y",

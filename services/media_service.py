@@ -58,6 +58,24 @@ class MediaService:
             opts["cookiefile"] = str(cookie_file)
         return opts
 
+    def _apply_turbo_downloader(self, opts: Dict[str, Any]) -> None:
+        """Enable multi-connection parallel downloads via aria2c if available."""
+        from config import USE_ARIA2
+        if USE_ARIA2:
+            aria2_bin = shutil.which("aria2c")
+            if aria2_bin:
+                opts["external_downloader"] = "aria2c"
+                opts["external_downloader_args"] = {
+                    "aria2c": [
+                        "-s", "8",
+                        "-x", "8",
+                        "-k", "1M",
+                        "--min-split-size=1M",
+                        "--file-allocation=none",
+                        "--summary-interval=0"
+                    ]
+                }
+
     def _sync_extract_info(self, url: str) -> Dict[str, Any]:
         """Extract metadata and analyze available video and audio formats."""
         ydl_opts = {
@@ -235,6 +253,8 @@ class MediaService:
         if tracker and hasattr(tracker, "ytdlp_hook"):
             ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
 
+        self._apply_turbo_downloader(ydl_opts)
+
         # Retry loop for resilience
         download_success = False
         last_error = ""
@@ -367,6 +387,8 @@ class MediaService:
         }
         if tracker and hasattr(tracker, "ytdlp_hook"):
             ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
+
+        self._apply_turbo_downloader(ydl_opts)
 
         # Retry loop for resilience against intermittent drops
         download_success = False

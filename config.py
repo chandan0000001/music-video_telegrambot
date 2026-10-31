@@ -85,3 +85,6 @@ SUPPORTED_VIDEO_RESOLUTIONS: list[str] = ["144p", "240p", "360p", "480p", "720p"
 # Subprocess Timeout (in seconds, e.g. 1800 = 30 minutes for long videos)
 FFMPEG_TIMEOUT: int = int(os.getenv("FFMPEG_TIMEOUT", "1800"))
 YTDLP_TIMEOUT: int = int(os.getenv("YTDLP_TIMEOUT", "1800"))
+
+# Downloader Acceleration (aria2c multi-connection parallel downloads)
+USE_ARIA2: bool = os.getenv("USE_ARIA2", "true").lower() in ("true", "1", "yes")

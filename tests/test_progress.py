@@ -1,6 +1,7 @@
 """
 Unit Tests for Download Progress Tracker & Loading Screen Generator
 """
+import asyncio
 import pytest
 from pathlib import Path
 from utils.progress import (
@@ -142,3 +143,40 @@ async def test_tracked_fs_input_file(tmp_path: Path):
     assert bytes(read_data) == test_data
     assert tracker.uploaded_bytes == len(test_data)
     assert tracker.percentage == 100.0
+
+
+@pytest.mark.asyncio
+async def test_task_registry_cancellation():
+    """Verify task registry can register, signal tracker, and cancel active task."""
+    from utils.task_registry import task_registry
+    from keyboards.quality_keyboard import get_cancel_download_keyboard
+
+    kb = get_cancel_download_keyboard(user_id=12345)
+    assert kb.inline_keyboard[0][0].callback_data == "cancel_dl:12345"
+
+    tracker = DownloadProgressTracker("Test Media", "720p")
+    cancelled_event = asyncio.Event()
+
+    async def dummy_job():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled_event.set()
+            raise
+
+    task = asyncio.create_task(dummy_job())
+    await asyncio.sleep(0.01)  # allow dummy_job to start and await
+    task_registry.register(12345, task, tracker=tracker)
+
+    assert task_registry.is_active(12345) is True
+
+    # Cancel task
+    result = task_registry.cancel(12345)
+    assert result is True
+    assert tracker._is_cancelled is True
+
+    await asyncio.sleep(0.05)
+    assert cancelled_event.is_set()
+
+    task_registry.unregister(12345)
+    assert task_registry.is_active(12345) is False

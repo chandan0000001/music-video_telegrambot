@@ -163,3 +163,32 @@ async def cb_cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
         except Exception:
             pass
     await callback.answer("Cancelled")
+
+
+@router.callback_query(F.data.startswith("cancel_dl"))
+async def cb_cancel_active_download(callback: CallbackQuery) -> None:
+    """Abort an active in-flight download immediately."""
+    from utils.task_registry import task_registry
+    parts = callback.data.split(":")
+    target_user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+    user_id = callback.from_user.id if callback.from_user else 0
+
+    if target_user_id and user_id != target_user_id:
+        await callback.answer("⚠️ You can only cancel your own downloads.", show_alert=True)
+        return
+
+    uid_to_cancel = target_user_id or user_id
+    cancelled = task_registry.cancel(uid_to_cancel)
+    if cancelled:
+        await callback.answer("🛑 Download cancelled.")
+        if callback.message:
+            try:
+                await callback.message.edit_text(
+                    "🛑 *Download Cancelled*\n"
+                    "The download process was stopped and resources freed.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+    else:
+        await callback.answer("No active download in progress or already completed.", show_alert=True)

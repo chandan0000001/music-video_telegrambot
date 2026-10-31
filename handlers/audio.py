@@ -1,6 +1,7 @@
 """
 Audio Download and FFmpeg Conversion Handler
 """
+import asyncio
 import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
@@ -8,9 +9,15 @@ from aiogram.types import CallbackQuery
 from database import db
 from services.media_service import media_service
 from services.telegram_service import telegram_service
-from keyboards.quality_keyboard import get_audio_format_keyboard, get_audio_quality_keyboard, get_retry_keyboard
+from keyboards.quality_keyboard import (
+    get_audio_format_keyboard,
+    get_audio_quality_keyboard,
+    get_retry_keyboard,
+    get_cancel_download_keyboard
+)
 from utils.rate_limiter import concurrency_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter
+from utils.task_registry import task_registry
 
 logger = logging.getLogger(__name__)
 router = Router(name="audio_router")
@@ -109,33 +116,46 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         status="pending"
     )
 
-    # Acquire concurrency slot
-    await telegram_service.update_status(
-        status_msg,
-        f"⏳ *Job queued:* Waiting for an available worker slot..."
-    )
-    await concurrency_manager.acquire()
+    cancel_kb = get_cancel_download_keyboard(user_id)
+    current_task = asyncio.current_task()
+    if current_task:
+        task_registry.register(user_id, current_task)
 
-    media_title = f"YouTube Audio ({video_id})"
-    if status_msg.text and "Title:" in status_msg.text:
-        try:
-            media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
-        except Exception:
-            pass
-
-    retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
-    back_cb = f"opt_audio:{video_id}"
-
-    tracker = DownloadProgressTracker(
-        media_title=media_title,
-        quality_label=f"{selected_format.upper()} {bitrate}kbps",
-        media_type="audio"
-    )
-    reporter = AsyncProgressReporter(status_msg, tracker)
-
+    acquired_slot = False
     job_dir = None
+    reporter = None
+
     try:
+        # Acquire concurrency slot
+        await telegram_service.update_status_with_keyboard(
+            status_msg,
+            f"⏳ *Job queued:* Waiting for an available worker slot...",
+            reply_markup=cancel_kb
+        )
+        await concurrency_manager.acquire()
+        acquired_slot = True
+
+        media_title = f"YouTube Audio ({video_id})"
+        if status_msg.text and "Title:" in status_msg.text:
+            try:
+                media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
+            except Exception:
+                pass
+
+        retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
+        back_cb = f"opt_audio:{video_id}"
+
+        tracker = DownloadProgressTracker(
+            media_title=media_title,
+            quality_label=f"{selected_format.upper()} {bitrate}kbps",
+            media_type="audio"
+        )
+        if current_task:
+            task_registry.register(user_id, current_task, tracker=tracker)
+
+        reporter = AsyncProgressReporter(status_msg, tracker, reply_markup=cancel_kb)
         reporter.start()
+
         success, result, err, job_dir = await media_service.process_audio(
             video_url=canonical_url,
             output_format=selected_format,
@@ -181,8 +201,23 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
                 reply_markup=get_retry_keyboard(retry_cb, back_cb)
             )
 
+    except asyncio.CancelledError:
+        logger.info(f"Audio job aborted by user {user_id} ({canonical_url})")
+        if reporter:
+            await reporter.stop()
+        await db.update_download_status(download_id, "cancelled")
+        try:
+            await telegram_service.update_status(
+                status_msg,
+                f"🛑 *Download Cancelled*\n"
+                f"🎵 `{media_title}`\n\n"
+                f"The download was stopped and temporary storage freed."
+            )
+        except Exception:
+            pass
     except Exception as e:
-        await reporter.stop()
+        if reporter:
+            await reporter.stop()
         logger.exception(f"Unhandled audio processing error for {canonical_url}: {e}")
         await db.update_download_status(download_id, "failed")
         await telegram_service.update_status_with_keyboard(
@@ -192,7 +227,10 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
             reply_markup=get_retry_keyboard(retry_cb, back_cb)
         )
     finally:
-        await reporter.stop()
-        concurrency_manager.release()
+        if reporter:
+            await reporter.stop()
+        task_registry.unregister(user_id)
+        if acquired_slot:
+            concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

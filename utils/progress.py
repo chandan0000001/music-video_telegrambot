@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, AsyncGenerator
 import aiofiles
 from aiogram import Bot
-from aiogram.types import FSInputFile, Message
+from aiogram.types import FSInputFile, Message, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 
 logger = logging.getLogger(__name__)
@@ -73,9 +73,18 @@ class DownloadProgressTracker:
         self.last_update_time: float = 0.0
         self.last_rendered_text: str = ""
         self.min_update_interval: float = 2.5  # seconds between Telegram message edits
+        self._is_cancelled: bool = False
+
+    def cancel(self) -> None:
+        """Flag the tracker as cancelled to stop yt-dlp on next progress tick."""
+        self._is_cancelled = True
 
     def ytdlp_hook(self, d: dict) -> None:
         """Synchronous callback executed inside yt-dlp worker thread."""
+        if self._is_cancelled:
+            from yt_dlp.utils import DownloadCancelled
+            raise DownloadCancelled("Download aborted by user.")
+
         status = d.get("status")
         if status == "downloading":
             self.status = "downloading"
@@ -117,9 +126,15 @@ class DownloadProgressTracker:
 class AsyncProgressReporter:
     """Manages the background loop updating Telegram status message smoothly."""
 
-    def __init__(self, message: Message, tracker: DownloadProgressTracker):
+    def __init__(
+        self,
+        message: Message,
+        tracker: DownloadProgressTracker,
+        reply_markup: Optional[InlineKeyboardMarkup] = None
+    ):
         self.message = message
         self.tracker = tracker
+        self.reply_markup = reply_markup
         self._stop_event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
 
@@ -131,7 +146,11 @@ class AsyncProgressReporter:
                     if self.tracker.status == "downloading" and self.tracker.downloaded_bytes > 0:
                         text = self.tracker.render_download_card()
                         if text != self.tracker.last_rendered_text:
-                            await self.message.edit_text(text, parse_mode="Markdown")
+                            await self.message.edit_text(
+                                text,
+                                parse_mode="Markdown",
+                                reply_markup=self.reply_markup
+                            )
                             self.tracker.last_rendered_text = text
                             self.tracker.last_update_time = now
             except TelegramRetryAfter as e:
