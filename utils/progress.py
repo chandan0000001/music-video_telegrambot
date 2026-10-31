@@ -209,6 +209,29 @@ class UploadProgressTracker:
             if self.speed > 0:
                 self.eta = int(remaining_bytes / self.speed)
 
+    def update_progress(self, current_bytes: int, total_bytes: int) -> None:
+        """Update tracker with absolute cumulative bytes (used by MTProto progress hooks)."""
+        self.uploaded_bytes = current_bytes
+        if total_bytes > 0:
+            self.total_bytes = total_bytes
+        self.percentage = min(100.0, (self.uploaded_bytes / self.total_bytes) * 100.0)
+
+        now = time.time()
+        time_diff = now - self._last_calc_time
+        if time_diff >= 1.0:
+            bytes_diff = self.uploaded_bytes - self._last_calc_bytes
+            instant_speed = bytes_diff / time_diff
+            if self.speed > 0:
+                self.speed = 0.7 * instant_speed + 0.3 * self.speed
+            else:
+                self.speed = instant_speed
+            self._last_calc_time = now
+            self._last_calc_bytes = self.uploaded_bytes
+
+            remaining_bytes = max(0, self.total_bytes - self.uploaded_bytes)
+            if self.speed > 0:
+                self.eta = int(remaining_bytes / self.speed)
+
     def render_upload_card(self) -> str:
         icon = "🎬" if self.media_type == "video" else "🎵"
         part_prefix = f" • {self.part_info}" if self.part_info else ""

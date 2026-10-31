@@ -14,6 +14,7 @@ from utils.logger import setup_logger
 from utils.rate_limiter import ThrottlingMiddleware
 from handlers import setup_routers
 from services.ffmpeg_service import ffmpeg_service
+from services.mtproto_service import mtproto_service
 
 # Initialize logger
 logger = setup_logger("music_bot")
@@ -42,10 +43,15 @@ async def on_startup(bot: Bot) -> None:
     logger.info(f"Bot connected: @{bot_info.username} (ID: {bot_info.id})")
     logger.info(f"Loaded {len(ADMIN_IDS)} administrator ID(s).")
 
+    # 3. Start MTProto Direct Uploader (for up to 2000 MB single-file transfers)
+    if mtproto_service.is_configured:
+        await mtproto_service.start()
+
 
 async def on_shutdown(bot: Bot) -> None:
     """Graceful shutdown: close bot session and cleanup."""
     logger.info("Shutting down bot and closing network sessions...")
+    await mtproto_service.stop()
     await bot.session.close()
     logger.info("Bot stopped cleanly.")
 

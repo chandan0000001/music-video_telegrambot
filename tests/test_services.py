@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramEntityTooLarge, TelegramAPIError
 from services.ffmpeg_service import ffmpeg_service
 from services.music_service import music_service, format_duration
 from services.telegram_service import telegram_service
+from services.mtproto_service import mtproto_service
 
 
 @pytest.mark.asyncio
@@ -113,8 +114,9 @@ async def test_scenario_8_ffmpeg_video_processing(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_scenario_11_telegram_upload_failure_handling(tmp_path: Path):
+async def test_scenario_11_telegram_upload_failure_handling(tmp_path: Path, monkeypatch):
     """Test scenario 11: Telegram file upload failure is safely handled with feedback."""
+    monkeypatch.setattr(type(mtproto_service), "is_configured", property(lambda self: False))
     mock_bot = MagicMock()
     mock_bot.send_audio = AsyncMock(side_effect=TelegramEntityTooLarge(method="sendAudio", message="File too large"))
     mock_bot.send_message = AsyncMock()
@@ -133,6 +135,14 @@ async def test_scenario_11_telegram_upload_failure_handling(tmp_path: Path):
     assert sent is False
     mock_bot.send_message.assert_awaited_once()
     assert "File too large" in mock_bot.send_message.call_args[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_mtproto_service_properties():
+    """Verify MTProto service configuration checks and interface."""
+    assert hasattr(mtproto_service, "is_configured")
+    assert hasattr(mtproto_service, "send_video")
+    assert hasattr(mtproto_service, "send_audio")
 
 
 @pytest.mark.asyncio

@@ -38,6 +38,11 @@ if not COOKIE_FILE.exists():
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 TELEGRAM_API_SERVER: Optional[str] = os.getenv("TELEGRAM_API_SERVER")
 
+# Telegram MTProto Credentials (enables 2000 MB native uploads without 50MB HTTP limit)
+_raw_api_id = os.getenv("TELEGRAM_API_ID")
+TELEGRAM_API_ID: Optional[int] = int(_raw_api_id.strip()) if (_raw_api_id and _raw_api_id.strip().isdigit()) else None
+TELEGRAM_API_HASH: Optional[str] = os.getenv("TELEGRAM_API_HASH").strip() if os.getenv("TELEGRAM_API_HASH") else None
+
 # Administrator Telegram IDs (Numeric User IDs, comma-separated in env)
 _admin_raw = os.getenv("ADMIN_IDS", "2063913663")
 ADMIN_IDS: set[int] = {
