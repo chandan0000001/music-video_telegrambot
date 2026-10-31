@@ -276,30 +276,30 @@ termux-wake-lock
 
 ---
 
-### 3. Configure `config.py`
+### 3. Configure Environment Variables (`.env`)
 
-Open `config.py` in your code editor:
+Copy `.env.example` to create your private `.env` file (which is ignored by Git):
 
-```python
-# Telegram Bot Token from @BotFather
-BOT_TOKEN: str = "PASTE_YOUR_TELEGRAM_BOT_TOKEN_HERE"
-
-# Administrator Telegram IDs (Numeric)
-ADMIN_IDS: set[int] = {
-    2063913663  # Replace with your Telegram ID
-}
-
-# Maximum Upload Size (MB)
-MAX_UPLOAD_SIZE_MB: int = 2000  # Up to 2000 MB
-
-# Concurrency & Worker Limits
-MAX_CONCURRENT_DOWNLOADS: int = 3  # Max concurrent downloads
-MAX_DURATION_SECONDS: int = 3600   # Max 60-minute media limit
-
-# Rate Limiting
-RATE_LIMIT_REQUESTS: int = 5       # Max 5 requests
-RATE_LIMIT_WINDOW: int = 10        # Per 10-second window
+```bash
+cp .env.example .env
 ```
+
+Open `.env` in any text editor and paste your bot credentials:
+
+```ini
+# Telegram Bot Token from @BotFather
+BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
+
+# Administrator Telegram User IDs (Numeric)
+ADMIN_IDS=2063913663
+
+# Media Processing Limits (Optional)
+MAX_UPLOAD_SIZE_MB=2000
+MAX_DURATION_SECONDS=3600
+MAX_CONCURRENT_DOWNLOADS=3
+```
+
+*(You can also configure `config.py` directly if preferred).*
 
 ---
 
