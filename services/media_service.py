@@ -52,14 +52,8 @@ class MediaService:
             logger.warning(f"Failed to remove temp dir {job_dir}: {e}")
 
     def _get_common_ydl_opts(self) -> Dict[str, Any]:
-        """Base options with mobile client rotation to bypass bot verification."""
-        opts: Dict[str, Any] = {
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios", "mweb"]
-                }
-            }
-        }
+        """Base options for yt-dlp metadata and downloads."""
+        opts: Dict[str, Any] = {}
         cookie_file = self.temp_base.parent / "cookies.txt"
         if cookie_file.exists():
             opts["cookiefile"] = str(cookie_file)
@@ -74,8 +68,22 @@ class MediaService:
             "skip_download": True,
             "socket_timeout": 20,
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=False)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "not a bot" in err_msg or "sign in" in err_msg:
+                logger.warning(f"Bot challenge detected for {url}. Retrying with mobile player client fallback...")
+                fallback_opts = dict(ydl_opts)
+                fallback_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android", "ios"]
+                    }
+                }
+                with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
+                    return fallback_ydl.extract_info(url, download=False)
+            raise
 
     async def get_media_info(self, url_or_id: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
         """
@@ -122,7 +130,7 @@ class MediaService:
         # If no standard matched but video formats exist, add available heights directly
         if not available_resolutions and available_heights:
             sorted_h = sorted(list(available_heights))
-            available_resolutions = [f"{h}p" for h in sorted_h if h <= 1080]
+            available_resolutions = [f"{h}p" for h in sorted_h if h <= 1440]
 
         # Ensure low-to-high order
         available_resolutions.sort(key=lambda x: int(x.replace("p", "")))
@@ -154,9 +162,24 @@ class MediaService:
         return True, info, None
 
     def _sync_download(self, ydl_opts: Dict[str, Any], url: str) -> None:
-        """Synchronous yt-dlp download invocation."""
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        """Synchronous yt-dlp download invocation with fallback on bot challenge."""
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "not a bot" in err_msg or "sign in" in err_msg:
+                logger.warning(f"Bot challenge detected during download for {url}. Retrying with mobile player client fallback...")
+                fallback_opts = dict(ydl_opts)
+                fallback_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android", "ios"]
+                    }
+                }
+                with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
+                    fallback_ydl.download([url])
+            else:
+                raise
 
     async def download_thumbnail(self, thumbnail_url: str, dest_path: Path) -> bool:
         """Download remote thumbnail image to local file."""

@@ -75,7 +75,7 @@ SUPPORTED_AUDIO_QUALITIES: list[str] = ["128", "192", "320"]  # in kbps
 
 # Video Encoding Settings
 SUPPORTED_VIDEO_FORMATS: list[str] = ["MP4"]
-SUPPORTED_VIDEO_RESOLUTIONS: list[str] = ["144p", "240p", "360p", "480p", "720p", "1080p"]
+SUPPORTED_VIDEO_RESOLUTIONS: list[str] = ["144p", "240p", "360p", "480p", "720p", "1080p", "1440p"]
 
 # Subprocess Timeout (in seconds)
 FFMPEG_TIMEOUT: int = 300

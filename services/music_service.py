@@ -41,11 +41,6 @@ class MusicService:
             "no_warnings": True,
             "skip_download": True,
             "socket_timeout": 15,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios", "mweb"]
-                }
-            }
         }
         if cookie_file.exists():
             ydl_opts["cookiefile"] = str(cookie_file)
@@ -54,36 +49,51 @@ class MusicService:
         results = []
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(search_query, download=False)
-                if not info or "entries" not in info:
-                    return []
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(search_query, download=False)
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "not a bot" in err_msg or "sign in" in err_msg:
+                    fallback_opts = dict(ydl_opts)
+                    fallback_opts["extractor_args"] = {
+                        "youtube": {
+                            "player_client": ["android", "ios"]
+                        }
+                    }
+                    with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                        info = ydl.extract_info(search_query, download=False)
+                else:
+                    raise
 
-                for entry in info["entries"]:
-                    if not entry:
-                        continue
-                    video_id = entry.get("id")
-                    if not video_id:
-                        continue
+            if not info or "entries" not in info:
+                return []
 
-                    raw_duration = entry.get("duration")
-                    thumbnails = entry.get("thumbnails", [])
-                    thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
+            for entry in info["entries"]:
+                if not entry:
+                    continue
+                video_id = entry.get("id")
+                if not video_id:
+                    continue
 
-                    title = entry.get("title", "Unknown Title")
-                    artist = entry.get("uploader") or entry.get("channel") or "Unknown Artist"
+                raw_duration = entry.get("duration")
+                thumbnails = entry.get("thumbnails", [])
+                thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
 
-                    results.append({
-                        "id": video_id,
-                        "title": title,
-                        "artist": artist,
-                        "duration": raw_duration,
-                        "duration_str": format_duration(raw_duration),
-                        "thumbnail": thumbnail_url,
-                        "url": f"https://www.youtube.com/watch?v={video_id}"
-                    })
+                title = entry.get("title", "Unknown Title")
+                artist = entry.get("uploader") or entry.get("channel") or "Unknown Artist"
 
-                return results
+                results.append({
+                    "id": video_id,
+                    "title": title,
+                    "artist": artist,
+                    "duration": raw_duration,
+                    "duration_str": format_duration(raw_duration),
+                    "thumbnail": thumbnail_url,
+                    "url": f"https://www.youtube.com/watch?v={video_id}"
+                })
+
+            return results
         except Exception as e:
             logger.error(f"Search error for query '{query}': {e}")
             return []
