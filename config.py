@@ -86,5 +86,5 @@ SUPPORTED_VIDEO_RESOLUTIONS: list[str] = ["144p", "240p", "360p", "480p", "720p"
 FFMPEG_TIMEOUT: int = int(os.getenv("FFMPEG_TIMEOUT", "1800"))
 YTDLP_TIMEOUT: int = int(os.getenv("YTDLP_TIMEOUT", "1800"))
 
-# Downloader Acceleration (aria2c multi-connection parallel downloads)
-USE_ARIA2: bool = os.getenv("USE_ARIA2", "true").lower() in ("true", "1", "yes")
+# Downloader Acceleration (Disabled by default: YouTube throttles aria2c to 300KB/s; native yt-dlp reaches 10+ MB/s)
+USE_ARIA2: bool = os.getenv("USE_ARIA2", "false").lower() in ("true", "1", "yes")

@@ -45,7 +45,9 @@ class MTProtoService:
                     api_hash=TELEGRAM_API_HASH,
                     bot_token=BOT_TOKEN,
                     workdir=str(TEMP_DIR),
-                    in_memory=True
+                    in_memory=True,
+                    max_concurrent_transmissions=4,
+                    workers=16
                 )
                 await self.client.start()
                 self._is_started = True
