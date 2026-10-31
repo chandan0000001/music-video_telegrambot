@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramEntityTooLarge, Telegra
 
 from config import TELEGRAM_API_SERVER
 from services.ffmpeg_service import ffmpeg_service
+from utils.progress import TrackedFSInputFile, UploadProgressTracker, AsyncUploadProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,10 @@ class TelegramService:
             await message.edit_text(text, parse_mode="Markdown")
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
-                logger.debug(f"Status update skipped: {e}")
+                try:
+                    await message.edit_text(text, parse_mode=None)
+                except Exception:
+                    logger.debug(f"Status update skipped: {e}")
         except Exception as e:
             logger.debug(f"Unexpected error updating status: {e}")
 
@@ -41,7 +45,10 @@ class TelegramService:
             await message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
-                logger.debug(f"Status update with keyboard skipped: {e}")
+                try:
+                    await message.edit_text(text, reply_markup=reply_markup, parse_mode=None)
+                except Exception:
+                    logger.debug(f"Status update with keyboard skipped: {e}")
         except Exception as e:
             logger.debug(f"Unexpected error updating status with keyboard: {e}")
 
@@ -97,39 +104,52 @@ class TelegramService:
                 total_parts = len(parts)
                 logger.info(f"Delivering audio in {total_parts} chunks to chat {chat_id}")
                 for idx, part_file in enumerate(parts, start=1):
-                    part_size_mb = part_file.stat().st_size / (1024 * 1024)
+                    part_size_bytes = part_file.stat().st_size
+                    part_size_mb = part_size_bytes / (1024 * 1024)
+
+                    upload_tracker = None
+                    upload_reporter = None
                     if status_message:
-                        await TelegramService.update_status(
-                            status_message,
-                            f"⬆️ *Uploading Audio Part {idx} of {total_parts}...*\n"
-                            f"🎵 *{title[:40]}*\n"
-                            f"📦 *Chunk size:* `{part_size_mb:.1f} MB`"
+                        upload_tracker = UploadProgressTracker(
+                            media_title=title,
+                            total_bytes=part_size_bytes,
+                            media_type="audio",
+                            part_info=f"Part {idx} of {total_parts}"
                         )
-                    part_audio = FSInputFile(str(part_file), chunk_size=1024 * 1024)
+                        upload_reporter = AsyncUploadProgressReporter(status_message, upload_tracker)
+                        upload_reporter.start()
+
+                    part_audio = TrackedFSInputFile(str(part_file), tracker=upload_tracker, chunk_size=512 * 1024)
                     thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
                     caption = f"🎵 *{title}* (Part {idx}/{total_parts})\n👤 *Artist:* {artist} | 💾 *Size:* {part_size_mb:.1f} MB"
-                    await bot.send_audio(
-                        chat_id=chat_id,
-                        audio=part_audio,
-                        title=f"{title[:50]} (Part {idx}/{total_parts})",
-                        performer=artist[:64],
-                        duration=max(1, duration // total_parts),
-                        thumbnail=thumb_file,
-                        caption=caption,
-                        parse_mode="Markdown"
-                    )
+                    try:
+                        await bot.send_audio(
+                            chat_id=chat_id,
+                            audio=part_audio,
+                            title=f"{title[:50]} (Part {idx}/{total_parts})",
+                            performer=artist[:64],
+                            duration=max(1, duration // total_parts),
+                            thumbnail=thumb_file,
+                            caption=caption,
+                            parse_mode="Markdown"
+                        )
+                    finally:
+                        if upload_reporter:
+                            await upload_reporter.stop()
                 return True
 
+        upload_tracker = None
+        upload_reporter = None
         if status_message:
-            await TelegramService.update_status(
-                status_message,
-                f"⬆️ *Uploading Audio to Telegram...*\n"
-                f"🎵 *Title:* `{title[:40]}`\n"
-                f"📦 *File size:* `{file_size_mb:.1f} MB`\n"
-                f"📡 *Status:* Uploading directly to your chat..."
+            upload_tracker = UploadProgressTracker(
+                media_title=title,
+                total_bytes=file_path.stat().st_size,
+                media_type="audio"
             )
+            upload_reporter = AsyncUploadProgressReporter(status_message, upload_tracker)
+            upload_reporter.start()
 
-        audio_file = FSInputFile(str(file_path), chunk_size=1024 * 1024)
+        audio_file = TrackedFSInputFile(str(file_path), tracker=upload_tracker, chunk_size=512 * 1024)
         thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
 
         stop_action = asyncio.Event()
@@ -171,6 +191,8 @@ class TelegramService:
             )
             return False
         finally:
+            if upload_reporter:
+                await upload_reporter.stop()
             stop_action.set()
             await action_task
 
@@ -214,15 +236,8 @@ class TelegramService:
                 total_parts = len(parts)
                 logger.info(f"Delivering video in {total_parts} chunks to chat {chat_id}")
                 for idx, part_file in enumerate(parts, start=1):
-                    part_size_mb = part_file.stat().st_size / (1024 * 1024)
-                    if status_message:
-                        await TelegramService.update_status(
-                            status_message,
-                            f"⬆️ *Uploading Part {idx} of {total_parts}...*\n"
-                            f"🎬 *{title[:40]}*\n"
-                            f"📦 *Chunk size:* `{part_size_mb:.1f} MB`\n"
-                            f"📡 Sending directly to your chat..."
-                        )
+                    part_size_bytes = part_file.stat().st_size
+                    part_size_mb = part_size_bytes / (1024 * 1024)
 
                     # probe exact part duration
                     part_dur = max(1, duration // total_parts)
@@ -233,36 +248,55 @@ class TelegramService:
                         except Exception:
                             pass
 
-                    part_video = FSInputFile(str(part_file), chunk_size=1024 * 1024)
+                    upload_tracker = None
+                    upload_reporter = None
+                    if status_message:
+                        upload_tracker = UploadProgressTracker(
+                            media_title=title,
+                            total_bytes=part_size_bytes,
+                            media_type="video",
+                            part_info=f"Part {idx} of {total_parts}"
+                        )
+                        upload_reporter = AsyncUploadProgressReporter(status_message, upload_tracker)
+                        upload_reporter.start()
+
+                    part_video = TrackedFSInputFile(str(part_file), tracker=upload_tracker, chunk_size=512 * 1024)
                     thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
                     caption = (
                         f"🎬 *{title}* (Part {idx}/{total_parts})\n"
                         f"📺 *Resolution:* {height}p | 💾 *Size:* {part_size_mb:.1f} MB"
                     )
 
-                    await bot.send_video(
-                        chat_id=chat_id,
-                        video=part_video,
-                        caption=caption,
-                        duration=part_dur,
-                        width=width,
-                        height=height,
-                        thumbnail=thumb_file,
-                        supports_streaming=True,
-                        parse_mode="Markdown"
-                    )
+                    try:
+                        await bot.send_video(
+                            chat_id=chat_id,
+                            video=part_video,
+                            caption=caption,
+                            duration=part_dur,
+                            width=width,
+                            height=height,
+                            thumbnail=thumb_file,
+                            supports_streaming=True,
+                            parse_mode="Markdown"
+                        )
+                    finally:
+                        if upload_reporter:
+                            await upload_reporter.stop()
                 return True
 
+        file_size_bytes = file_path.stat().st_size
+        upload_tracker = None
+        upload_reporter = None
         if status_message:
-            await TelegramService.update_status(
-                status_message,
-                f"⬆️ *Uploading Video to Telegram...*\n"
-                f"🎬 *Title:* `{title[:40]}`\n"
-                f"📦 *File size:* `{file_size_mb:.1f} MB`\n"
-                f"📡 *Status:* Uploading directly to your chat..."
+            upload_tracker = UploadProgressTracker(
+                media_title=title,
+                total_bytes=file_size_bytes,
+                media_type="video"
             )
+            upload_reporter = AsyncUploadProgressReporter(status_message, upload_tracker)
+            upload_reporter.start()
 
-        video_file = FSInputFile(str(file_path), chunk_size=1024 * 1024)
+        video_file = TrackedFSInputFile(str(file_path), tracker=upload_tracker, chunk_size=512 * 1024)
         thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
 
         stop_action = asyncio.Event()
@@ -284,6 +318,8 @@ class TelegramService:
             )
             return True
         except TelegramEntityTooLarge:
+            if upload_reporter:
+                await upload_reporter.stop()
             logger.warning(f"TelegramEntityTooLarge: {file_path} ({file_size_mb:.1f} MB) rejected by cloud server.")
             if status_message:
                 await TelegramService.update_status(
@@ -293,7 +329,6 @@ class TelegramService:
                     f"🗜 Compressing video to fit Telegram cloud limits..."
                 )
             try:
-                from services.ffmpeg_service import ffmpeg_service
                 compressed_file = file_path.parent / f"compressed_{file_path.name}"
                 compressed = await ffmpeg_service.compress_video_to_target_size(
                     input_file=file_path,
@@ -302,19 +337,36 @@ class TelegramService:
                     duration=duration
                 )
                 if compressed and compressed_file.exists():
-                    comp_video = FSInputFile(str(compressed_file), chunk_size=1024 * 1024)
-                    await bot.send_video(
-                        chat_id=chat_id,
-                        video=comp_video,
-                        caption=f"🎬 *{title}*\n📺 *Resolution:* {height}p (Optimized for Telegram Cloud)",
-                        duration=duration,
-                        width=width,
-                        height=height,
-                        thumbnail=thumb_file,
-                        supports_streaming=True,
-                        parse_mode="Markdown"
-                    )
-                    return True
+                    comp_size_bytes = compressed_file.stat().st_size
+                    comp_tracker = None
+                    comp_reporter = None
+                    if status_message:
+                        comp_tracker = UploadProgressTracker(
+                            media_title=title,
+                            total_bytes=comp_size_bytes,
+                            media_type="video",
+                            part_info="Optimized"
+                        )
+                        comp_reporter = AsyncUploadProgressReporter(status_message, comp_tracker)
+                        comp_reporter.start()
+
+                    comp_video = TrackedFSInputFile(str(compressed_file), tracker=comp_tracker, chunk_size=512 * 1024)
+                    try:
+                        await bot.send_video(
+                            chat_id=chat_id,
+                            video=comp_video,
+                            caption=f"🎬 *{title}*\n📺 *Resolution:* {height}p (Optimized for Telegram Cloud)",
+                            duration=duration,
+                            width=width,
+                            height=height,
+                            thumbnail=thumb_file,
+                            supports_streaming=True,
+                            parse_mode="Markdown"
+                        )
+                        return True
+                    finally:
+                        if comp_reporter:
+                            await comp_reporter.stop()
             except Exception as comp_err:
                 logger.error(f"Fallback compression failed: {comp_err}")
 
@@ -341,6 +393,8 @@ class TelegramService:
             )
             return False
         finally:
+            if upload_reporter:
+                await upload_reporter.stop()
             stop_action.set()
             await action_task
 

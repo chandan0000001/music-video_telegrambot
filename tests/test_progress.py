@@ -2,11 +2,14 @@
 Unit Tests for Download Progress Tracker & Loading Screen Generator
 """
 import pytest
+from pathlib import Path
 from utils.progress import (
     make_progress_bar,
     format_bytes,
     format_seconds,
-    DownloadProgressTracker
+    DownloadProgressTracker,
+    UploadProgressTracker,
+    TrackedFSInputFile
 )
 from keyboards.quality_keyboard import get_retry_keyboard
 
@@ -89,3 +92,53 @@ def test_retry_keyboard():
     assert buttons[1][0].text == "🔙 Change Quality"
     assert buttons[1][0].callback_data == "opt_video:Xkqy6u0KJso"
     assert buttons[1][1].text == "❌ Cancel"
+
+
+def test_upload_progress_tracker():
+    """Verify upload progress tracking calculations and rendering."""
+    total_bytes = 40 * 1024 * 1024
+    tracker = UploadProgressTracker(
+        media_title="Sample Video Headshots 34 Kill",
+        total_bytes=total_bytes,
+        media_type="video",
+        part_info="Part 1 of 3"
+    )
+
+    # Read 20 MB chunk
+    tracker.on_bytes_read(20 * 1024 * 1024)
+    assert tracker.uploaded_bytes == 20 * 1024 * 1024
+    assert tracker.percentage == 50.0
+
+    card = tracker.render_upload_card()
+    assert "Uploading Video" in card
+    assert "Part 1 of 3" in card
+    assert "50.0%" in card
+    assert "20.0 MB / 40.0 MB" in card
+
+
+@pytest.mark.asyncio
+async def test_tracked_fs_input_file(tmp_path: Path):
+    """Verify TrackedFSInputFile correctly reads chunks and notifies tracker."""
+    test_file = tmp_path / "test_media.dat"
+    test_data = b"X" * (1024 * 1024)  # 1 MB
+    test_file.write_bytes(test_data)
+
+    tracker = UploadProgressTracker(
+        media_title="Test Media",
+        total_bytes=len(test_data),
+        media_type="audio"
+    )
+
+    tracked_file = TrackedFSInputFile(
+        path=test_file,
+        tracker=tracker,
+        chunk_size=256 * 1024
+    )
+
+    read_data = bytearray()
+    async for chunk in tracked_file.read(bot=None):  # bot is not used for file streaming
+        read_data.extend(chunk)
+
+    assert bytes(read_data) == test_data
+    assert tracker.uploaded_bytes == len(test_data)
+    assert tracker.percentage == 100.0
