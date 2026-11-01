@@ -83,13 +83,13 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
         f"💰 **Amount to Pay:** `₹{amount:.2f}`\n"
         f"⏰ **Valid For:** `{ORDER_EXPIRY_MINUTES} Minutes` (Complete payment before expiry)\n\n"
         f"📱 **Pay with ANY UPI App:**\n"
-        f"• Google Pay • PhonePe • Paytm • FamPay • BHIM • CRED • Amazon Pay • Any Bank App\n"
-        f"• **UPI ID:** `{PAYMENT_UPI_ID}`\n\n"
+        f"• Google Pay • PhonePe • Paytm • FamPay • BHIM • CRED • Any Bank App\n"
+        f"• **UPI ID (Tap to Copy):** `{PAYMENT_UPI_ID}`\n\n"
         f"**How to Complete Payment:**\n"
-        f"1️⃣ Scan the QR with **any UPI app** or tap the button below.\n"
+        f"1️⃣ Scan this QR code or send payment to `{PAYMENT_UPI_ID}`.\n"
         f"2️⃣ Pay the exact amount of **₹{amount:.2f}**.\n"
-        f"3️⃣ Tap **✅ Submit 12-Digit UTR** below and send your transaction ID.\n\n"
-        f"⚡ *Your payment will be verified automatically in 2 seconds!*"
+        f"3️⃣ Tap **✅ Submit 12-Digit UTR** below and submit your 12-digit transaction number.\n\n"
+        f"⚡ *Once verified, your video is downloaded & delivered to you automatically!*"
     )
 
     qr_file = BufferedInputFile(qr_bytes, filename=f"payment_{order_id}.png")

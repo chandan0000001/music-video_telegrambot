@@ -5,6 +5,8 @@ Interactive inline buttons for choosing audio formats/bitrates and video resolut
 from typing import List, Dict, Optional
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from config import PRICE_SINGLE_720P, PRICE_SINGLE_1080P, SUBSCRIPTION_PLANS
+
 
 def get_audio_format_keyboard(video_id: str) -> InlineKeyboardMarkup:
     """Generate audio format selection buttons (MP3, M4A, WAV)."""
@@ -66,9 +68,9 @@ def get_video_quality_keyboard(
         if res in ("144p", "240p", "360p", "480p"):
             btn_text = f"🎬 {res} (Free)"
         elif res == "720p":
-            btn_text = f"🔒 720p (₹29)"
+            btn_text = f"🔒 720p (₹{PRICE_SINGLE_720P})"
         else:
-            btn_text = f"🔒 {res} (₹49)"
+            btn_text = f"🔒 {res} (₹{PRICE_SINGLE_1080P})"
         row.append(InlineKeyboardButton(text=btn_text, callback_data=f"vdl:{video_id}:{res}"))
         if len(row) == 2:
             buttons.append(row)
@@ -86,7 +88,11 @@ def get_video_quality_keyboard(
 
 def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
     """Keyboard for selecting plan when clicking premium 720p / 1080p."""
-    price = 29 if quality == "720p" else 49
+    price = PRICE_SINGLE_720P if quality == "720p" else PRICE_SINGLE_1080P
+    go_p = SUBSCRIPTION_PLANS.get("go", {}).get("price", 35)
+    pro_p = SUBSCRIPTION_PLANS.get("pro", {}).get("price", 100)
+    ultra_p = SUBSCRIPTION_PLANS.get("ultra", {}).get("price", 299)
+    max_p = SUBSCRIPTION_PLANS.get("max", {}).get("price", 799)
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -97,21 +103,21 @@ def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="⚡ Go Pass (20 HD/d • 7d) — ₹38",
+                    text=f"⚡ Go Pass (20 HD/d • 7d) — ₹{go_p}",
                     callback_data=f"pay:go:{video_id}:{quality}"
                 ),
                 InlineKeyboardButton(
-                    text="🚀 Pro (45 HD/d • 30d) — ₹120",
+                    text=f"🚀 Pro (45 HD/d • 30d) — ₹{pro_p}",
                     callback_data=f"pay:pro:{video_id}:{quality}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="⚡ Ultra (80 HD/d • 90d) — ₹299",
+                    text=f"⚡ Ultra (80 HD/d • 90d) — ₹{ultra_p}",
                     callback_data=f"pay:ultra:{video_id}:{quality}"
                 ),
                 InlineKeyboardButton(
-                    text="👑 Max VIP (150 HD/d • 1yr) — ₹799",
+                    text=f"👑 Max VIP (150 HD/d • 1yr) — ₹{max_p}",
                     callback_data=f"pay:max:{video_id}:{quality}"
                 )
             ],
@@ -126,13 +132,10 @@ def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
     )
 
 
-def get_payment_qr_keyboard(order_id: str, upi_uri: str) -> InlineKeyboardMarkup:
+def get_payment_qr_keyboard(order_id: str, upi_uri: str = "") -> InlineKeyboardMarkup:
     """Keyboard shown under Dynamic QR Code."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📱 Open Any UPI App (GPay/PhonePe/Paytm)", url=upi_uri)
-            ],
             [
                 InlineKeyboardButton(
                     text="✅ Submit 12-Digit UTR",

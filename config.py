@@ -95,8 +95,8 @@ PAYMENT_MERCHANT_NAME: str = os.getenv("PAYMENT_MERCHANT_NAME", "Telegram_mv_bot
 GMAIL_USER: str = os.getenv("GMAIL_USER", "srikantap571@gmail.com")
 GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
 
-PRICE_SINGLE_720P: int = int(os.getenv("PRICE_SINGLE_720P", "29"))
-PRICE_SINGLE_1080P: int = int(os.getenv("PRICE_SINGLE_1080P", "49"))
+PRICE_SINGLE_720P: int = int(os.getenv("PRICE_SINGLE_720P", "19"))
+PRICE_SINGLE_1080P: int = int(os.getenv("PRICE_SINGLE_1080P", "27"))
 
 # Subscription Plans (Normal, Go, Pro, Ultra, Max)
 SUBSCRIPTION_PLANS = {
@@ -111,7 +111,7 @@ SUBSCRIPTION_PLANS = {
     "go": {
         "name": "Go",
         "badge": "⚡ Go Pass",
-        "price": int(os.getenv("PRICE_TIER_GO", "38")),
+        "price": int(os.getenv("PRICE_TIER_GO", "35")),
         "days": int(os.getenv("DAYS_TIER_GO", "7")),
         "daily_limit": int(os.getenv("LIMIT_TIER_GO_DAILY", "20")),
         "description": "20 HD Videos/day (720p/1080p) + High Priority"
@@ -119,7 +119,7 @@ SUBSCRIPTION_PLANS = {
     "pro": {
         "name": "Pro",
         "badge": "🚀 Pro Pass",
-        "price": int(os.getenv("PRICE_TIER_PRO", "120")),
+        "price": int(os.getenv("PRICE_TIER_PRO", "100")),
         "days": int(os.getenv("DAYS_TIER_PRO", "30")),
         "daily_limit": int(os.getenv("LIMIT_TIER_PRO_DAILY", "45")),
         "description": "45 HD Videos/day (1080p 60fps) + 8-stream Turbo"

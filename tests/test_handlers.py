@@ -152,8 +152,8 @@ def test_video_quality_keyboard_badges():
     assert any("144p (Free)" in t for t in button_texts)
     assert any("360p (Free)" in t for t in button_texts)
     assert any("480p (Free)" in t for t in button_texts)
-    assert any("720p (₹29)" in t for t in button_texts)
-    assert any("1080p (₹49)" in t for t in button_texts)
+    assert any("720p (₹19)" in t for t in button_texts)
+    assert any("1080p (₹27)" in t for t in button_texts)
 
     pay_kb = get_paywall_keyboard("test_vid", "720p")
     pay_callbacks = [btn.callback_data for row in pay_kb.inline_keyboard for btn in row if btn.callback_data]
@@ -169,15 +169,15 @@ def test_payment_pricing_and_qr_generation():
     from services.payment_service import payment_service
     from config import PAYMENT_UPI_ID
 
-    assert payment_service.get_price("single", "720p") == 29.0
-    assert payment_service.get_price("single", "1080p") == 49.0
-    assert payment_service.get_price("sub_weekly") == 38.0
-    assert payment_service.get_price("sub_monthly") == 120.0
+    assert payment_service.get_price("single", "720p") == 19.0
+    assert payment_service.get_price("single", "1080p") == 27.0
+    assert payment_service.get_price("sub_weekly") == 35.0
+    assert payment_service.get_price("sub_monthly") == 100.0
 
-    qr_bytes, upi_uri = payment_service.generate_qr_bytes(29.0, "ORD_TEST_123")
+    qr_bytes, upi_uri = payment_service.generate_qr_bytes(19.0, "ORD_TEST_123")
     assert len(qr_bytes) > 200
     assert PAYMENT_UPI_ID in upi_uri
-    assert "29.00" in upi_uri
+    assert "19.00" in upi_uri
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,7 @@ async def test_database_orders_and_subscriptions():
     order_id = await db.create_order(
         telegram_id=test_user,
         order_type="single_720",
-        amount_inr=29.0,
+        amount_inr=19.0,
         media_id="vid_test_123",
         quality="720p"
     )
@@ -199,7 +199,7 @@ async def test_database_orders_and_subscriptions():
 
     order = await db.get_order(order_id)
     assert order["status"] == "pending"
-    assert order["amount_inr"] == 29.0
+    assert order["amount_inr"] == 19.0
 
     # Mark paid with UTR
     import uuid
@@ -212,7 +212,7 @@ async def test_database_orders_and_subscriptions():
     sub_order_id = await db.create_order(
         telegram_id=test_user,
         order_type="sub_weekly",
-        amount_inr=38.0
+        amount_inr=35.0
     )
     sub_utr = f"88{uuid.uuid4().int % 10000000000:010d}"
     await db.mark_order_paid(sub_order_id, sub_utr)
@@ -237,8 +237,8 @@ def test_subscription_tier_plans_config():
     assert "ultra" in SUBSCRIPTION_PLANS
     assert "max" in SUBSCRIPTION_PLANS
 
-    assert SUBSCRIPTION_PLANS["go"]["price"] == 38
-    assert SUBSCRIPTION_PLANS["pro"]["price"] == 120
+    assert SUBSCRIPTION_PLANS["go"]["price"] == 35
+    assert SUBSCRIPTION_PLANS["pro"]["price"] == 100
     assert SUBSCRIPTION_PLANS["ultra"]["price"] == 299
     assert SUBSCRIPTION_PLANS["max"]["price"] == 799
 
@@ -276,6 +276,16 @@ async def test_admin_subscription_activate_and_revoke():
     await db.deactivate_subscription(target_user)
     sub_revoked = await db.get_user_subscription(target_user)
     assert sub_revoked is None
+
+
+def test_payment_qr_keyboard_no_unsupported_urls():
+    """Verify QR keyboard has only valid Telegram-supported URL schemes (never upi://)."""
+    from keyboards.quality_keyboard import get_payment_qr_keyboard
+    kb = get_payment_qr_keyboard("ORD_TEST_999", "upi://pay?pa=test@okaxis")
+    for row in kb.inline_keyboard:
+        for btn in row:
+            if btn.url:
+                assert btn.url.startswith(("http://", "https://", "tg://")), f"Invalid URL scheme in button: {btn.url}"
 
 
 

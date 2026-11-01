@@ -6,7 +6,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 
-from config import ADMIN_IDS
+from config import ADMIN_IDS, PRICE_SINGLE_720P, PRICE_SINGLE_1080P, SUBSCRIPTION_PLANS
 from database import db
 from services.media_service import media_service
 from services.telegram_service import telegram_service
@@ -105,7 +105,11 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
                 )
                 return
 
-            price = 29 if resolution == "720p" else 49
+            price = PRICE_SINGLE_720P if resolution == "720p" else PRICE_SINGLE_1080P
+            go_price = SUBSCRIPTION_PLANS.get("go", {}).get("price", 35)
+            pro_price = SUBSCRIPTION_PLANS.get("pro", {}).get("price", 100)
+            ultra_price = SUBSCRIPTION_PLANS.get("ultra", {}).get("price", 299)
+            max_price = SUBSCRIPTION_PLANS.get("max", {}).get("price", 799)
             paywall_text = (
                 f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n"
                 f"   💎 **PREMIUM VIDEO ACCESS ({resolution})** 💎\n"
@@ -113,10 +117,10 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
                 f"Standard qualities (`144p` - `480p`) & music are **100% Free (Normal Tier)**.\n"
                 f"To unlock **{resolution} Full HD**, choose an access pass below:\n\n"
                 f"⚡ **Single Video:** `₹{price}` (Unlock this video only)\n"
-                f"⚡ **Go Pass:** `₹38 / 7 Days` (20 HD videos/day)\n"
-                f"🚀 **Pro Pass:** `₹120 / 30 Days` (45 HD videos/day)\n"
-                f"⚡ **Ultra Pass:** `₹299 / 90 Days` (80 HD videos/day)\n"
-                f"👑 **Max VIP:** `₹799 / 365 Days` (150 HD videos/day + 2GB Bandwidth)\n\n"
+                f"⚡ **Go Pass:** `₹{go_price} / 7 Days` (20 HD videos/day)\n"
+                f"🚀 **Pro Pass:** `₹{pro_price} / 30 Days` (45 HD videos/day)\n"
+                f"⚡ **Ultra Pass:** `₹{ultra_price} / 90 Days` (80 HD videos/day)\n"
+                f"👑 **Max VIP:** `₹{max_price} / 365 Days` (150 HD videos/day + 2GB Bandwidth)\n\n"
                 f"👇 *Tap a button below to get your instant UPI QR code:*"
             )
             await status_msg.edit_text(

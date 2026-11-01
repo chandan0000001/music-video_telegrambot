@@ -368,12 +368,12 @@ Upon launching, the bot output will confirm:
 The bot includes a **100% automated, zero-fee payment pipeline** using Google Pay / Universal UPI and Gmail IMAP verification:
 - **Free Video & Audio (Normal Tier):** All music searches, MP3 (128k–320k), M4A, WAV audio downloads, and video resolutions from `144p` to `480p` are **100% Free** for all users.
 - **Single Video Unlocks:**
-  - ⚡ **Single 720p Video:** `₹29` (Downloads this video only)
-  - ⚡ **Single 1080p Video:** `₹49` (Downloads this video only)
+  - ⚡ **Single 720p Video:** `₹19` (Downloads this video only)
+  - ⚡ **Single 1080p Video:** `₹27` (Downloads this video only)
 - **All-Access Subscription Tiers:**
   - 🟢 **Normal (Free):** Standard 144p–480p videos, unlimited music downloads
-  - ⚡ **Go Pass:** `₹38 / 7 Days` (20 HD videos/day + high priority queue)
-  - 🚀 **Pro Pass (Most Popular):** `₹120 / 30 Days` (45 HD videos/day up to 1080p 60fps + 8-stream Turbo)
+  - ⚡ **Go Pass:** `₹35 / 7 Days` (20 HD videos/day + high priority queue)
+  - 🚀 **Pro Pass (Most Popular):** `₹100 / 30 Days` (45 HD videos/day up to 1080p 60fps + 8-stream Turbo)
   - ⚡ **Ultra Pass:** `₹299 / 90 Days` (80 HD videos/day + VIP Queue priority)
   - 👑 **Max VIP Pass:** `₹799 / 365 Days (1 Full Year):` 150 HD/4K videos/day + dedicated 2GB MTProto bandwidth + VIP badge
 - **10-Minute Dynamic QR Code Validity:** Dynamic QR codes automatically expire after 10 minutes to prevent stale or conflicting payments.
@@ -580,7 +580,8 @@ tests/test_handlers.py::test_payment_pricing_and_qr_generation PASSED    [ 31%]
 tests/test_handlers.py::test_database_orders_and_subscriptions PASSED    [ 31%]
 tests/test_handlers.py::test_subscription_tier_plans_config PASSED       [ 34%]
 tests/test_handlers.py::test_order_10_minute_expiry_logic PASSED         [ 36%]
-tests/test_handlers.py::test_admin_subscription_activate_and_revoke PASSED [ 39%]
+tests/test_handlers.py::test_admin_subscription_activate_and_revoke PASSED [ 38%]
+tests/test_handlers.py::test_payment_qr_keyboard_no_unsupported_urls PASSED [ 40%]
 tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 85%]
 tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 87%]
 tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 90%]
@@ -588,7 +589,7 @@ tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 92%
 tests/test_validators.py::test_validate_media_limits PASSED              [ 95%]
 tests/test_validators.py::test_youtube_music_urls PASSED                 [ 97%]
 tests/test_validators.py::test_youtube_music_fast_keyboard PASSED        [100%]
-============================== 41 passed in 4.24s ==============================
+============================== 42 passed in 3.12s ==============================
 ```
 
 ---
