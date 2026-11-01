@@ -3,7 +3,7 @@
 > **Bot Name:** Music & Video Downloader ([@songsuperzxbot](https://t.me/songsuperzxbot))  
 > **Developer:** Chandan ([@coder_chandan](https://t.me/coder_chandan))  
 > **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)  
-> **Demo Video:** [Watch Live Bot Walkthrough on Google Drive](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
+> **HD Demo Video:** [Watch on Streamable (1080p)](https://streamable.com/or78t5) | [Google Drive Mirror](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
 
 A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
 
@@ -14,16 +14,23 @@ A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aio
 Watch the bot in action performing real-time music searches, quality selection, animated progress bar updates, and instant media delivery:
 
 <div align="center">
-  <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4">
+  <a href="https://streamable.com/or78t5" target="_blank">
     <img src="assets/demo.gif" alt="Telegram Music & Video Bot Live Demo" width="720" style="border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);" />
   </a>
-  <br>
-  <p><em>⚡ <b>Live Bot Walkthrough</b> (Click preview above or <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4"><b>watch full 1080p video with audio</b></a>)</em></p>
+  <br><br>
+  <a href="https://streamable.com/or78t5">
+    <img src="https://img.shields.io/badge/Streamable-Watch_in_Crystal_Clear_1080p-00D2B4?style=for-the-badge&logo=streamable&logoColor=white" alt="Watch on Streamable" />
+  </a>
+  <a href="https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto">
+    <img src="https://img.shields.io/badge/Google_Drive-Permanent_HD_Mirror-4285F4?style=for-the-badge&logo=googledrive&logoColor=white" alt="Watch on Google Drive" />
+  </a>
+  <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4">
+    <img src="https://img.shields.io/badge/GitHub-Direct_MP4_Download-181717?style=for-the-badge&logo=github&logoColor=white" alt="Download Direct MP4" />
+  </a>
+  <p><em>⚡ <b>Live Bot Walkthrough</b> (Click preview or buttons above to stream in full 1080p 60fps with audio)</em></p>
 </div>
 
 https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4
-
-[![Watch on Google Drive](https://img.shields.io/badge/Google_Drive-Alternative_Video_Mirror-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
 
 ---
 
