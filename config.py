@@ -88,3 +88,18 @@ YTDLP_TIMEOUT: int = int(os.getenv("YTDLP_TIMEOUT", "1800"))
 
 # Downloader Acceleration (Disabled by default: YouTube throttles aria2c to 300KB/s; native yt-dlp reaches 10+ MB/s)
 USE_ARIA2: bool = os.getenv("USE_ARIA2", "false").lower() in ("true", "1", "yes")
+
+# Payment & Subscription Configuration (INR)
+PAYMENT_UPI_ID: str = os.getenv("PAYMENT_UPI_ID", "srikantap571-1@okaxis")
+PAYMENT_MERCHANT_NAME: str = os.getenv("PAYMENT_MERCHANT_NAME", "Telegram_mv_bot")
+GMAIL_USER: str = os.getenv("GMAIL_USER", "srikantap571@gmail.com")
+GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
+
+PRICE_SINGLE_720P: int = int(os.getenv("PRICE_SINGLE_720P", "29"))
+PRICE_SINGLE_1080P: int = int(os.getenv("PRICE_SINGLE_1080P", "49"))
+PRICE_WEEKLY_PASS: int = int(os.getenv("PRICE_WEEKLY_PASS", "38"))
+PRICE_MONTHLY_PASS: int = int(os.getenv("PRICE_MONTHLY_PASS", "120"))
+
+LIMIT_WEEKLY_DAILY_VIDEOS: int = int(os.getenv("LIMIT_WEEKLY_DAILY_VIDEOS", "20"))
+LIMIT_MONTHLY_DAILY_VIDEOS: int = int(os.getenv("LIMIT_MONTHLY_DAILY_VIDEOS", "45"))
+

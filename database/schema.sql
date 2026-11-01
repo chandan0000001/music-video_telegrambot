@@ -43,6 +43,36 @@ CREATE TABLE IF NOT EXISTS bot_statistics (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Orders / Payments Table (Tracks individual orders and 12-digit UTRs)
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT UNIQUE NOT NULL,
+    telegram_id INTEGER NOT NULL,
+    order_type TEXT NOT NULL,           -- 'single_720', 'single_1080', 'sub_weekly', 'sub_monthly'
+    amount_inr REAL NOT NULL,
+    status TEXT DEFAULT 'pending',      -- 'pending', 'paid', 'expired', 'failed'
+    media_id TEXT,                      -- Video ID to unlock
+    media_title TEXT,
+    quality TEXT,                       -- '720p', '1080p'
+    utr_number TEXT UNIQUE,             -- 12-digit UTR (Unique prevents double-spending)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    paid_at TIMESTAMP,
+    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+);
+
+-- User Subscriptions Table (Tracks active passes & daily quotas)
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+    telegram_id INTEGER PRIMARY KEY,
+    plan_tier TEXT NOT NULL,            -- 'weekly', 'monthly'
+    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expiry_date TIMESTAMP NOT NULL,
+    daily_video_limit INTEGER NOT NULL, -- 20 or 45
+    today_video_used INTEGER DEFAULT 0,
+    last_reset_date TEXT NOT NULL,      -- 'YYYY-MM-DD'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+);
+
 -- Initialize singleton statistics row if not exists
 INSERT OR IGNORE INTO bot_statistics (id, total_users, total_searches, total_successful_downloads, total_failed_downloads)
 VALUES (1, 0, 0, 0, 0);
@@ -54,3 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_search_history_searched_at ON search_history(sear
 CREATE INDEX IF NOT EXISTS idx_downloads_telegram_id ON downloads(telegram_id);
 CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
 CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_telegram_id ON orders(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_orders_utr_number ON orders(utr_number);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_expiry ON user_subscriptions(expiry_date);

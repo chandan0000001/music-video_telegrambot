@@ -56,13 +56,19 @@ def get_video_quality_keyboard(
 ) -> InlineKeyboardMarkup:
     """
     Generate video quality buttons sorted strictly from low to high.
-    Only genuinely available resolutions are displayed.
+    144p - 480p marked Free.
+    720p and higher marked with premium price badges.
     """
     buttons = []
     # Two buttons per row for neat presentation
     row = []
     for res in available_resolutions:
-        btn_text = f"🎬 {res} (MP4)"
+        if res in ("144p", "240p", "360p", "480p"):
+            btn_text = f"🎬 {res} (Free)"
+        elif res == "720p":
+            btn_text = f"🔒 720p (₹29)"
+        else:
+            btn_text = f"🔒 {res} (₹49)"
         row.append(InlineKeyboardButton(text=btn_text, callback_data=f"vdl:{video_id}:{res}"))
         if len(row) == 2:
             buttons.append(row)
@@ -76,6 +82,103 @@ def get_video_quality_keyboard(
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
+    """Keyboard for selecting plan when clicking premium 720p / 1080p."""
+    price = 29 if quality == "720p" else 49
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"⚡ Unlock This {quality} Video — ₹{price}",
+                    callback_data=f"pay:single:{video_id}:{quality}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💎 Weekly Pass (20 HD/day) — ₹38",
+                    callback_data=f"pay:weekly:{video_id}:{quality}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👑 Monthly VIP (45 HD/day) — ₹120",
+                    callback_data=f"pay:monthly:{video_id}:{quality}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Free Qualities (144p - 480p)",
+                    callback_data=f"opt_video:{video_id}"
+                ),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")
+            ]
+        ]
+    )
+
+
+def get_payment_qr_keyboard(order_id: str, upi_uri: str) -> InlineKeyboardMarkup:
+    """Keyboard shown under Dynamic QR Code."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📱 Pay with Google Pay / UPI App", url=upi_uri)
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ Submit 12-Digit UTR",
+                    callback_data=f"submit_utr:{order_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💬 Contact Admin",
+                    url="https://t.me/coder_chandan"
+                ),
+                InlineKeyboardButton(text="❌ Cancel Order", callback_data="cancel_action")
+            ]
+        ]
+    )
+
+
+def get_utr_check_again_keyboard(order_id: str, utr: str) -> InlineKeyboardMarkup:
+    """Keyboard shown if UTR is not yet detected in Gmail (e.g. slight delay)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Check Again",
+                    callback_data=f"recheck_utr:{order_id}:{utr}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💬 Contact Admin (@coder_chandan)",
+                    url="https://t.me/coder_chandan"
+                ),
+                InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
+            ]
+        ]
+    )
+
+
+def get_admin_payment_alert_keyboard(order_id: str, utr: str) -> InlineKeyboardMarkup:
+    """Allows Admin to 1-tap force approve an order if needed."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Force Approve & Deliver",
+                    callback_data=f"admin_approve:{order_id}:{utr}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Reject",
+                    callback_data=f"admin_reject:{order_id}"
+                )
+            ]
+        ]
+    )
 
 
 def get_retry_keyboard(

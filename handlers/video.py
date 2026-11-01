@@ -4,15 +4,17 @@ Video Download and FFmpeg Remuxing Handler
 import asyncio
 import logging
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
+from config import ADMIN_IDS
 from database import db
 from services.media_service import media_service
 from services.telegram_service import telegram_service
 from keyboards.quality_keyboard import (
     get_video_quality_keyboard,
     get_retry_keyboard,
-    get_cancel_download_keyboard
+    get_cancel_download_keyboard,
+    get_paywall_keyboard
 )
 from utils.rate_limiter import concurrency_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter
@@ -69,7 +71,7 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("vdl:"))
 async def cb_start_video_download(callback: CallbackQuery) -> None:
-    """Download, remux, and deliver video."""
+    """Check permissions, subscription quota, or trigger paywall."""
     parts = callback.data.split(":")
     video_id = parts[1]
     resolution = parts[2]
@@ -81,10 +83,71 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
         await callback.answer("Restricted user.", show_alert=True)
         return
 
-    await callback.answer(f"Starting {resolution} video download...")
     status_msg = callback.message
     if not status_msg:
         return
+
+    # Check paywall for 720p and higher resolutions
+    if resolution in ("720p", "1080p", "1440p", "2160p"):
+        is_admin = user_id in ADMIN_IDS
+        sub = await db.get_user_subscription(user_id)
+        has_active_sub = bool(sub and sub.get("is_active") and sub.get("today_remaining", 0) > 0)
+
+        if not is_admin and not has_active_sub:
+            if sub and sub.get("is_active") and sub.get("today_remaining", 0) <= 0:
+                await callback.answer("Daily video quota reached!", show_alert=True)
+                await status_msg.edit_text(
+                    f"⚠️ **Daily Video Limit Reached**\n\n"
+                    f"You have used all **{sub['daily_limit']} HD videos** for today on your {sub['plan_tier'].capitalize()} plan.\n\n"
+                    f"Your quota automatically resets at midnight.\n"
+                    f"Standard qualities (144p - 480p) and music downloads remain completely free!",
+                    parse_mode="Markdown"
+                )
+                return
+
+            price = 29 if resolution == "720p" else 49
+            paywall_text = (
+                f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n"
+                f"   💎 **PREMIUM VIDEO QUALITY ({resolution})** 💎\n"
+                f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n\n"
+                f"You selected **{resolution} Full HD**.\n"
+                f"Standard qualities (`144p` to `480p`) and music downloads are **100% Free**.\n\n"
+                f"✨ **Choose an Option to Unlock:**\n"
+                f"• ⚡ **Single {resolution} Video:** Only `₹{price}`\n"
+                f"• 💎 **Weekly Pass:** `₹38 / week` (20 HD videos/day)\n"
+                f"• 👑 **Monthly VIP:** `₹120 / month` (45 HD videos/day)\n\n"
+                f"👇 *Select your preferred plan below:*"
+            )
+            await status_msg.edit_text(
+                text=paywall_text,
+                reply_markup=get_paywall_keyboard(video_id, resolution),
+                parse_mode="Markdown"
+            )
+            await callback.answer()
+            return
+        elif has_active_sub and not is_admin:
+            await db.use_subscription_video_quota(user_id)
+
+    await callback.answer(f"Starting {resolution} video download...")
+    await execute_video_download_pipeline(
+        status_msg=status_msg,
+        video_id=video_id,
+        resolution=resolution,
+        user_id=user_id,
+        bot=callback.bot
+    )
+
+
+async def execute_video_download_pipeline(
+    status_msg: Message,
+    video_id: str,
+    resolution: str,
+    user_id: int,
+    bot=None
+) -> None:
+    """Download, remux, and deliver video file with progress tracking."""
+    if bot is None:
+        bot = status_msg.bot
 
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -118,7 +181,6 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
         await concurrency_manager.acquire()
         acquired_slot = True
 
-        # Extract title for loading screen if available
         media_title = f"YouTube Video ({video_id})"
         if status_msg.text and "Title:" in status_msg.text:
             try:
@@ -159,7 +221,7 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             return
 
         sent = await telegram_service.send_video_file(
-            bot=callback.bot,
+            bot=bot,
             chat_id=user_id,
             file_path=result["file_path"],
             title=result["title"],

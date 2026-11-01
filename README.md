@@ -364,6 +364,18 @@ Upon launching, the bot output will confirm:
   - **Intel VAAPI / QuickSync Acceleration:** Encodings run at ~10x speed using hardware GPU render nodes (`/dev/dri/renderD128`) with zero CPU stress.
   - **Smart Routing & 2 GB Uploads:** Videos and songs up to **2000 MB** deliver directly without compression degradation when MTProto is configured. Files under 48 MB route via high-speed HTTP Bot API.
 
+### Automated Google Pay UPI Payment & Premium Video Passes
+The bot includes a **100% automated, zero-fee payment pipeline** using Google Pay UPI and Gmail IMAP verification:
+- **Free Video & Audio:** All music searches, MP3 (128k–320k), M4A, WAV audio downloads, and video resolutions from `144p` to `480p` are **100% Free** for all users.
+- **HD Video Paywall (720p & 1080p):**
+  - ⚡ **Single 720p Video:** `₹29`
+  - ⚡ **Single 1080p Video:** `₹49`
+  - 💎 **Weekly All-Access Pass:** `₹38 / week` (20 HD videos/day)
+  - 👑 **Monthly VIP Pass:** `₹120 / month` (45 HD videos/day)
+- **Dynamic UPI QR Code:** Generates custom high-contrast QR codes pre-encoded with your UPI ID (`srikantap571-1@okaxis`), dynamic order amount, and transaction note.
+- **100% Automated 12-Digit UTR Verification:** User submits the 12-digit transaction ID; the bot queries Gmail IMAP server-side in ~0.3s to match the credit receipt without any manual admin approval needed.
+- **Anti-Fraud & Replay Protection:** UTRs are uniquely indexed in SQLite (`orders.utr_number UNIQUE`) to prevent double-spending or replay attacks.
+
 ### In-Flight Download Cancellation
 - Every active download presents a real-time progress card with an inline **🛑 Cancel Download** button.
 - Clicking the button instantly terminates ongoing `yt-dlp` stream downloads and kills `ffmpeg` subprocesses on the server, purging all temporary data and releasing the worker slot immediately.
@@ -554,14 +566,17 @@ tests/test_services.py::test_ffmpeg_split_video_into_chunks PASSED       [ 83%]
 tests/test_handlers.py::test_main_menu_keyboard_has_ytmusic PASSED       [ 22%]
 tests/test_handlers.py::test_welcome_text_personalization PASSED         [ 25%]
 tests/test_handlers.py::test_ytmusic_command_prompts_hub PASSED          [ 28%]
-tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 82%]
-tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 85%]
-tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 88%]
-tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 91%]
+tests/test_handlers.py::test_video_quality_keyboard_badges PASSED        [ 28%]
+tests/test_handlers.py::test_payment_pricing_and_qr_generation PASSED    [ 31%]
+tests/test_handlers.py::test_database_orders_and_subscriptions PASSED    [ 34%]
+tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 84%]
+tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 86%]
+tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 89%]
+tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 92%]
 tests/test_validators.py::test_validate_media_limits PASSED              [ 94%]
 tests/test_validators.py::test_youtube_music_urls PASSED                 [ 97%]
 tests/test_validators.py::test_youtube_music_fast_keyboard PASSED        [100%]
-============================== 35 passed in 4.07s ==============================
+============================== 38 passed in 4.19s ==============================
 ```
 
 ---

@@ -142,3 +142,87 @@ async def test_ytmusic_command_prompts_hub():
     msg.answer.assert_awaited_once()
     assert "YOUTUBE MUSIC DOWNLOADER" in msg.answer.call_args[1]["text"]
 
+
+def test_video_quality_keyboard_badges():
+    """Verify video keyboard marks 144p-480p Free and 720p+ with premium price."""
+    from keyboards.quality_keyboard import get_video_quality_keyboard, get_paywall_keyboard
+    kb = get_video_quality_keyboard("test_vid", ["144p", "360p", "480p", "720p", "1080p"])
+    
+    button_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+    assert any("144p (Free)" in t for t in button_texts)
+    assert any("360p (Free)" in t for t in button_texts)
+    assert any("480p (Free)" in t for t in button_texts)
+    assert any("720p (₹29)" in t for t in button_texts)
+    assert any("1080p (₹49)" in t for t in button_texts)
+
+    pay_kb = get_paywall_keyboard("test_vid", "720p")
+    pay_callbacks = [btn.callback_data for row in pay_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert any("pay:single:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:weekly:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:monthly:test_vid:720p" in c for c in pay_callbacks)
+
+
+def test_payment_pricing_and_qr_generation():
+    """Verify pricing logic and dynamic QR byte generation."""
+    from services.payment_service import payment_service
+    from config import PAYMENT_UPI_ID
+
+    assert payment_service.get_price("single", "720p") == 29.0
+    assert payment_service.get_price("single", "1080p") == 49.0
+    assert payment_service.get_price("sub_weekly") == 38.0
+    assert payment_service.get_price("sub_monthly") == 120.0
+
+    qr_bytes, upi_uri = payment_service.generate_qr_bytes(29.0, "ORD_TEST_123")
+    assert len(qr_bytes) > 200
+    assert PAYMENT_UPI_ID in upi_uri
+    assert "29.00" in upi_uri
+
+
+@pytest.mark.asyncio
+async def test_database_orders_and_subscriptions():
+    """Verify order creation, UTR anti-fraud, and subscription quota enforcement."""
+    from database import db
+    await db.init_db()
+
+    test_user = 888777666
+    await db.add_or_update_user(test_user, "testuser", "Test")
+    order_id = await db.create_order(
+        telegram_id=test_user,
+        order_type="single_720",
+        amount_inr=29.0,
+        media_id="vid_test_123",
+        quality="720p"
+    )
+    assert order_id.startswith("ORD_")
+
+    order = await db.get_order(order_id)
+    assert order["status"] == "pending"
+    assert order["amount_inr"] == 29.0
+
+    # Mark paid with UTR
+    import uuid
+    test_utr = f"99{uuid.uuid4().int % 10000000000:010d}"
+    assert await db.is_utr_already_used(test_utr) is False
+    await db.mark_order_paid(order_id, test_utr)
+    assert await db.is_utr_already_used(test_utr) is True
+
+    # Test Subscription activation & quota
+    sub_order_id = await db.create_order(
+        telegram_id=test_user,
+        order_type="sub_weekly",
+        amount_inr=38.0
+    )
+    sub_utr = f"88{uuid.uuid4().int % 10000000000:010d}"
+    await db.mark_order_paid(sub_order_id, sub_utr)
+
+    sub = await db.get_user_subscription(test_user)
+    assert sub["is_active"] is True
+    assert sub["plan_tier"] == "weekly"
+    assert sub["today_remaining"] == 20
+
+    # Use 1 quota
+    await db.use_subscription_video_quota(test_user)
+    sub_after = await db.get_user_subscription(test_user)
+    assert sub_after["today_remaining"] == 19
+
+

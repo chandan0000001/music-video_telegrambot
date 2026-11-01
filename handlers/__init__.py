@@ -6,6 +6,7 @@ from handlers.ytmusic import router as ytmusic_router
 from handlers.search import router as search_router
 from handlers.audio import router as audio_router
 from handlers.video import router as video_router
+from handlers.payment import router as payment_router
 from handlers.history import router as history_router
 from handlers.admin import router as admin_router
 
@@ -16,6 +17,7 @@ def setup_routers() -> Router:
     root_router.include_router(admin_router)
     root_router.include_router(start_router)
     root_router.include_router(ytmusic_router)
+    root_router.include_router(payment_router)
     root_router.include_router(history_router)
     root_router.include_router(audio_router)
     root_router.include_router(video_router)

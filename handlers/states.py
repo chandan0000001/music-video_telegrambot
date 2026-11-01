@@ -9,6 +9,7 @@ class UserStates(StatesGroup):
     waiting_for_audio_link = State()
     waiting_for_video_link = State()
     waiting_for_ytmusic = State()
+    waiting_for_utr = State()
 
 
 class AdminStates(StatesGroup):

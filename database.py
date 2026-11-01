@@ -335,6 +335,187 @@ class Database:
 
             return output.getvalue()
 
+    # ------------------ Orders & Payments ------------------
+
+    async def create_order(
+        self,
+        telegram_id: int,
+        order_type: str,
+        amount_inr: float,
+        media_id: Optional[str] = None,
+        media_title: Optional[str] = None,
+        quality: Optional[str] = None
+    ) -> str:
+        """Create new pending order and return unique order_id."""
+        import time
+        import uuid
+        order_id = f"ORD_{int(time.time() * 1000)}_{telegram_id}_{uuid.uuid4().hex[:6].upper()}"
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO orders (order_id, telegram_id, order_type, amount_inr, status, media_id, media_title, quality)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+                """,
+                (order_id, telegram_id, order_type, amount_inr, media_id, media_title, quality)
+            )
+            await conn.commit()
+        return order_id
+
+    async def get_order(self, order_id: str) -> Optional[dict[str, Any]]:
+        """Retrieve order record by order_id."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM orders WHERE order_id = ?",
+                (order_id,)
+            )
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def is_utr_already_used(self, utr_number: str) -> bool:
+        """Check if UTR has already been successfully redeemed (anti-fraud)."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT id FROM orders WHERE utr_number = ? AND status = 'paid'",
+                (utr_number,)
+            )
+            row = await cur.fetchone()
+            return row is not None
+
+    async def record_order_utr(self, order_id: str, utr_number: str) -> bool:
+        """Attach UTR number to order."""
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "UPDATE orders SET utr_number = ? WHERE order_id = ?",
+                (utr_number, order_id)
+            )
+            await conn.commit()
+            return True
+
+    async def mark_order_paid(self, order_id: str, utr_number: Optional[str] = None) -> Optional[dict[str, Any]]:
+        """Mark order as paid and activate subscription if order_type is a pass."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+            order = await cur.fetchone()
+            if not order:
+                return None
+
+            order_dict = dict(order)
+            update_sql = "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP"
+            params = []
+            if utr_number:
+                update_sql += ", utr_number = ?"
+                params.append(utr_number)
+            update_sql += " WHERE order_id = ?"
+            params.append(order_id)
+
+            await conn.execute(update_sql, tuple(params))
+            await conn.commit()
+
+        # If it's a subscription pass, activate it!
+        if order_dict["order_type"] in ("sub_weekly", "sub_monthly"):
+            plan = "weekly" if order_dict["order_type"] == "sub_weekly" else "monthly"
+            await self.activate_subscription(order_dict["telegram_id"], plan)
+
+        order_dict["status"] = "paid"
+        return order_dict
+
+    # ------------------ Subscriptions ------------------
+
+    async def activate_subscription(self, telegram_id: int, plan_tier: str) -> dict[str, Any]:
+        """Activate or extend user subscription."""
+        from datetime import datetime, timezone, timedelta
+        from config import LIMIT_WEEKLY_DAILY_VIDEOS, LIMIT_MONTHLY_DAILY_VIDEOS
+
+        now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
+
+        days = 7 if plan_tier == "weekly" else 30
+        daily_limit = LIMIT_WEEKLY_DAILY_VIDEOS if plan_tier == "weekly" else LIMIT_MONTHLY_DAILY_VIDEOS
+        expiry_date = now + timedelta(days=days)
+        expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
+
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_subscriptions (telegram_id, plan_tier, start_date, expiry_date, daily_video_limit, today_video_used, last_reset_date)
+                VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, 0, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    plan_tier = excluded.plan_tier,
+                    expiry_date = excluded.expiry_date,
+                    daily_video_limit = excluded.daily_video_limit,
+                    today_video_used = 0,
+                    last_reset_date = excluded.last_reset_date
+                """,
+                (telegram_id, plan_tier, expiry_str, daily_limit, today_str)
+            )
+            await conn.commit()
+
+        return {
+            "telegram_id": telegram_id,
+            "plan_tier": plan_tier,
+            "expiry_date": expiry_str,
+            "daily_video_limit": daily_limit
+        }
+
+    async def get_user_subscription(self, telegram_id: int) -> Optional[dict[str, Any]]:
+        """Get user subscription status, auto-resetting daily count if midnight passed."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
+
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM user_subscriptions WHERE telegram_id = ?",
+                (telegram_id,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+
+            sub = dict(row)
+            try:
+                exp_dt = datetime.fromisoformat(sub["expiry_date"].replace(" ", "T")).replace(tzinfo=timezone.utc)
+            except Exception:
+                exp_dt = now
+
+            if exp_dt < now:
+                return {
+                    "is_active": False,
+                    "plan_tier": sub["plan_tier"],
+                    "expired": True,
+                    "today_remaining": 0
+                }
+
+            if sub["last_reset_date"] != today_str:
+                await conn.execute(
+                    "UPDATE user_subscriptions SET today_video_used = 0, last_reset_date = ? WHERE telegram_id = ?",
+                    (today_str, telegram_id)
+                )
+                await conn.commit()
+                sub["today_video_used"] = 0
+                sub["last_reset_date"] = today_str
+
+            remaining = max(0, sub["daily_video_limit"] - sub["today_video_used"])
+            return {
+                "is_active": True,
+                "plan_tier": sub["plan_tier"],
+                "daily_limit": sub["daily_video_limit"],
+                "today_used": sub["today_video_used"],
+                "today_remaining": remaining,
+                "expiry_date": sub["expiry_date"],
+                "expired": False
+            }
+
+    async def use_subscription_video_quota(self, telegram_id: int) -> bool:
+        """Increment daily video usage for subscriber."""
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "UPDATE user_subscriptions SET today_video_used = today_video_used + 1 WHERE telegram_id = ?",
+                (telegram_id,)
+            )
+            await conn.commit()
+            return True
+
 
 # Default singleton instance
 db = Database()
