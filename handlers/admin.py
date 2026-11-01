@@ -42,11 +42,10 @@ def get_admin_dashboard_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🔎 Lookup User", callback_data="admin:lookup")
             ],
             [
-                InlineKeyboardButton(text="👑 Active Subscriptions", callback_data="admin:subscriptions"),
-                InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers")
+                InlineKeyboardButton(text="👑 Subscriptions & Plans", callback_data="admin:plan_subscribers"),
+                InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders")
             ],
             [
-                InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders"),
                 InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
             ],
             [
@@ -524,63 +523,8 @@ async def cb_export_csv(callback: CallbackQuery) -> None:
         await callback.message.answer(f"❌ Export failed: {e}")
 
 
-@router.callback_query(F.data == "admin:subscriptions")
-async def cb_admin_view_subscriptions(callback: CallbackQuery) -> None:
-    """View active subscribers list and plan breakdown."""
-    user = callback.from_user
-    if not user or not is_admin(user.id):
-        await callback.answer("Access Denied.", show_alert=True)
-        return
-
-    async with db._get_connection() as conn:
-        cur = await conn.execute(
-            """
-            SELECT s.telegram_id, s.plan_tier, s.daily_video_limit, s.today_video_used, s.expiry_date, u.username, u.first_name
-            FROM user_subscriptions s
-            LEFT JOIN users u ON s.telegram_id = u.telegram_id
-            WHERE datetime(s.expiry_date) > datetime('now')
-            ORDER BY s.expiry_date ASC
-            LIMIT 15
-            """
-        )
-        subs = await cur.fetchall()
-
-    lines = ["👑 <b>Active Subscribers Overview</b>\n"]
-    if subs:
-        for idx, s in enumerate(subs, start=1):
-            name = html.escape(s["username"] or s["first_name"] or str(s["telegram_id"]))
-            lines.append(
-                f"{idx}. <b>{name}</b> (<code>{s['telegram_id']}</code>)\n"
-                f"   └ Plan: <b>{s['plan_tier'].upper()}</b> | Quota: {s['today_video_used']}/{s['daily_video_limit']} used\n"
-                f"   └ Expiry: <code>{s['expiry_date']}</code>"
-            )
-    else:
-        lines.append("<i>No active subscribers currently found.</i>")
-
-    lines.append("\n<b>Admin Commands:</b>")
-    lines.append("• <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>")
-    lines.append("• <code>/sub_deactivate &lt;user_id&gt;</code>")
-    lines.append("• <code>/sub_deactivate_all</code>")
-    lines.append("• <code>/sub_status &lt;user_id&gt;</code>")
-
-    if callback.message:
-        await callback.message.edit_text(
-            text="\n".join(lines),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers"),
-                    InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders")
-                ],
-                [
-                    InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")
-                ]
-            ]),
-            parse_mode="HTML"
-        )
-    await callback.answer()
-
-
 @router.message(Command("subscribers"))
+@router.callback_query(F.data == "admin:subscriptions")
 @router.callback_query(F.data == "admin:plan_subscribers")
 async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
     """View all subscribers and their respective plans with username and user ID."""
@@ -591,6 +535,9 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
         else:
             await event.answer("⛔ Access Denied.")
         return
+
+    if isinstance(event, CallbackQuery):
+        await event.answer()
 
     async with db._get_connection() as conn:
         cur = await conn.execute(
@@ -646,7 +593,7 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
     }
 
     lines = [
-        "💎 <b>Subscribers Directory &amp; Plan Breakdown</b>\n",
+        "👑 <b>Subscribers Directory &amp; Plan Breakdown</b>\n",
         "📊 <b>Active Subscribers per Plan:</b>",
         f"• 👑 Max VIP: <b>{counts.get('max', 0)}</b> user(s)",
         f"• ⚡ Ultra Pass: <b>{counts.get('ultra', 0)}</b> user(s)",
@@ -659,9 +606,11 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
         for idx, sub in enumerate(subscribers, start=1):
             uname = f"@{html.escape(sub['username'])}" if sub.get("username") else "<i>No username</i>"
             name = html.escape(sub.get("first_name") or "User")
-            plan_name = tier_badges.get(sub["plan_tier"].lower(), sub["plan_tier"].upper())
-            status = "🟢 <b>ACTIVE</b>" if sub["is_active"] else "🔴 <b>EXPIRED</b>"
-            exp = sub.get("expiry_date", "").split(".")[0]
+            plan_raw = (sub.get("plan_tier") or "normal").lower()
+            plan_name = tier_badges.get(plan_raw, plan_raw.upper())
+            status = "🟢 <b>ACTIVE</b>" if sub.get("is_active") else "🔴 <b>EXPIRED</b>"
+            raw_exp = sub.get("expiry_date") or ""
+            exp = raw_exp.split(".")[0] if raw_exp else "Never"
             lines.append(
                 f"{idx}. 👤 <b>{name}</b> ({uname})\n"
                 f"   ├ 🆔 <b>User ID:</b> <code>{sub['telegram_id']}</code>\n"
@@ -673,7 +622,11 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
     else:
         lines.append("<i>No active or recorded subscriptions found.</i>")
 
-    lines.append("\n💡 <b>Manage:</b> <code>/sub_activate &lt;id&gt; &lt;plan&gt; [days]</code> | <code>/sub_deactivate &lt;id&gt;</code> | <code>/sub_deactivate_all</code>")
+    lines.append("\n<b>Admin Commands:</b>")
+    lines.append("• <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>")
+    lines.append("• <code>/sub_deactivate &lt;user_id&gt;</code>")
+    lines.append("• <code>/sub_deactivate_all</code>")
+    lines.append("• <code>/sub_status &lt;user_id&gt;</code>")
 
     text = "\n".join(lines)
     keyboard = InlineKeyboardMarkup(
@@ -691,8 +644,10 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
 
     if isinstance(event, CallbackQuery):
         if event.message:
-            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        await event.answer()
+            try:
+                await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception:
+                pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -708,6 +663,9 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
         else:
             await event.answer("⛔ Access Denied.")
         return
+
+    if isinstance(event, CallbackQuery):
+        await event.answer()
 
     async with db._get_connection() as conn:
         cur = await conn.execute(
@@ -771,7 +729,7 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="🔄 Refresh", callback_data="admin:payment_orders"),
-                InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers")
+                InlineKeyboardButton(text="👑 Subscriptions & Plans", callback_data="admin:plan_subscribers")
             ],
             [
                 InlineKeyboardButton(text="📥 CSV Orders", callback_data="admin:export:orders"),
@@ -782,8 +740,10 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
 
     if isinstance(event, CallbackQuery):
         if event.message:
-            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        await event.answer()
+            try:
+                await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception:
+                pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
