@@ -90,6 +90,9 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "2000"))
 MAX_UPLOAD_SIZE_BYTES: int = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
+# Optional: Proxy for yt-dlp on Datacenter/AWS IPs (e.g., socks5://127.0.0.1:40000 via Cloudflare WARP)
+YTDLP_PROXY: Optional[str] = os.getenv("YTDLP_PROXY")
+
 # Maximum allowed duration for media processing (in seconds, e.g., 14400 = 4 hours, 0 = unlimited)
 MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "14400"))
 

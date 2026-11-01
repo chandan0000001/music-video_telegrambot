@@ -52,10 +52,12 @@ class MediaService:
 
     def _get_common_ydl_opts(self) -> Dict[str, Any]:
         """Base options for yt-dlp metadata and downloads."""
-        from config import get_cookie_file
+        from config import get_cookie_file, YTDLP_PROXY
         opts: Dict[str, Any] = {
             "remote_components": ["ejs:github"],
         }
+        if YTDLP_PROXY:
+            opts["proxy"] = YTDLP_PROXY
         cookie_file = get_cookie_file()
         if cookie_file:
             opts["cookiefile"] = str(cookie_file)
