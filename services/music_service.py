@@ -61,7 +61,7 @@ class MusicService:
                     fallback_opts = dict(ydl_opts)
                     fallback_opts["extractor_args"] = {
                         "youtube": {
-                            "player_client": ["android", "ios"]
+                            "player_client": ["tv", "web", "ios"]
                         }
                     }
                     with yt_dlp.YoutubeDL(fallback_opts) as ydl:

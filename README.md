@@ -3,6 +3,7 @@
 > **Bot Name:** Music & Video Downloader ([@songsuperzxbot](https://t.me/songsuperzxbot))  
 > **Developer:** Chandan ([@coder_chandan](https://t.me/coder_chandan))  
 > **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)  
+> **Production Status:** 🟢 **Live on AWS EC2 (Mumbai `ap-south-1`) — 24/7 Always-On**  
 > **HD Demo Video:** [Watch on Streamable (1080p)](https://streamable.com/or78t5) | [Google Drive Mirror](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
 
 A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
@@ -441,6 +442,52 @@ From the `/admin` dashboard, click:
 - `📥 CSV Downloads` — Downloads media download logs as CSV.
 - `📥 CSV Subscriptions` — Downloads subscribers and active plans as CSV.
 - `📥 CSV Orders` — Downloads all payment orders and UTR logs as CSV.
+
+---
+
+## ☁️ Production Deployment on AWS EC2 (Mumbai `ap-south-1`)
+
+The bot is deployed in active production on **Amazon Web Services (AWS)** in the Asia Pacific (Mumbai) region:
+
+### 1. Server Architecture & Specifications
+- **Cloud Provider:** Amazon Web Services (AWS EC2)
+- **Instance Type:** `c7i-flex.large` (2 vCPU, 3.7 GB RAM, High-Compute)
+- **Region & Zone:** Asia Pacific (`ap-south-1a`, Mumbai)
+- **Public Networking:** Dedicated Elastic IPv4 (`13.207.136.231`)
+- **Storage:** 50 GB High-Speed NVMe SSD (`gp3`)
+- **Operating System:** Ubuntu Linux LTS (`ubuntu@ip-172-31-42-169`)
+
+### 2. 24/7 Always-On Daemon (`systemd`)
+The bot operates completely independently of any local machine. You can shut down your personal laptop, disconnect from Wi-Fi, or travel—the bot continues running 24/7/365 uninterrupted.
+- **Service Configuration:** `/etc/systemd/system/musicbot.service`
+- **Auto-Boot:** Automatically initializes on server boot (`multi-user.target`)
+- **Auto-Recovery:** Crashes or memory pressure automatically trigger instant auto-restarts (`Restart=always`, `RestartSec=5`)
+- **Process Isolation:** Clean signal handling with `SIGINT` and 20-second graceful job drain
+
+### 3. YouTube Anti-Bot & Signature Cipher Solution
+YouTube aggressively blocks datacenter IP ranges (AWS, GCP, Azure, Oracle) with bot challenges (`Sign in to confirm you're not a bot`). This deployment incorporates a dual-layer bypass architecture:
+1. **Deno EJS JavaScript Challenge Solver:** Modern YouTube extraction requires solving dynamic JavaScript signature ciphers. System-wide **Deno** (`/usr/local/bin/deno`) enables `yt-dlp` to solve JavaScript challenges locally via `--remote-components ejs:github`.
+2. **Native AWS-IP Session Cookies:** Rather than exporting cookies from a home residential IP (which Google immediately revokes upon detecting an AWS datacenter IP), Google Chrome was launched directly on the AWS server using **SSH X11 GUI Forwarding** (`ssh -Y aws`). Logging into Google from AWS produced **100% native AWS-IP-bound cookies** stored at `/home/ubuntu/music_bot/cookies.txt`, eliminating bot challenges and token rotation issues.
+
+### 4. Clean Production Database State
+- Deployed with a fresh, optimized **SQLite 3 (WAL mode)** database on AWS.
+- All previous local development and test user data have been discarded to guarantee a clean slate for real production users.
+- Production PRAGMAs: 64 MB memory cache (`cache_size = -64000`), 256 MB memory-mapped I/O (`mmap_size = 268435456`), `synchronous = NORMAL`, and multi-column composite indexes on orders, downloads, and search logs.
+
+### 5. Server Management & Monitoring Cheat Sheet
+```bash
+# Check 24/7 service status
+sudo systemctl status musicbot.service
+
+# Stream live real-time logs
+journalctl -u musicbot.service -f
+
+# Restart bot after updates
+sudo systemctl restart musicbot.service
+
+# Stop bot
+sudo systemctl stop musicbot.service
+```
 
 ---
 
