@@ -291,13 +291,23 @@ async def test_admin_subscription_activate_and_revoke():
 
 
 def test_payment_qr_keyboard_no_unsupported_urls():
-    """Verify QR keyboard has only valid Telegram-supported URL schemes (never upi://)."""
-    from keyboards.quality_keyboard import get_payment_qr_keyboard
+    """Verify QR keyboard has only valid Telegram-supported URL schemes and proper cancel callback."""
+    from keyboards.quality_keyboard import get_payment_qr_keyboard, get_utr_input_keyboard
     kb = get_payment_qr_keyboard("ORD_TEST_999", "upi://pay?pa=test@okaxis")
     for row in kb.inline_keyboard:
         for btn in row:
             if btn.url:
                 assert btn.url.startswith(("http://", "https://", "tg://")), f"Invalid URL scheme in button: {btn.url}"
+    
+    # Check Cancel Order button
+    callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "cancel_order:ORD_TEST_999" in callbacks
+    assert "submit_utr:ORD_TEST_999" in callbacks
+
+    # Check UTR input cancel keyboard
+    utr_kb = get_utr_input_keyboard("ORD_TEST_999")
+    utr_callbacks = [btn.callback_data for row in utr_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "cancel_order:ORD_TEST_999" in utr_callbacks
 
 
 

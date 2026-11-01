@@ -139,18 +139,29 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
     try:
         if callback.message:
-            try:
-                await callback.message.edit_text(
-                    text=welcome,
-                    reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                    parse_mode="Markdown"
-                )
-            except Exception:
+            if callback.message.photo:
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
                 await callback.message.answer(
                     text=welcome,
                     reply_markup=get_main_menu_keyboard(is_admin=is_admin),
                     parse_mode="Markdown"
                 )
+            else:
+                try:
+                    await callback.message.edit_text(
+                        text=welcome,
+                        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    await callback.message.answer(
+                        text=welcome,
+                        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+                        parse_mode="Markdown"
+                    )
     finally:
         await callback.answer()
 
@@ -160,31 +171,66 @@ async def cb_help_menu(callback: CallbackQuery) -> None:
     """Display help from menu."""
     try:
         if callback.message:
-            try:
-                await callback.message.edit_text(
-                    text=HELP_TEXT,
-                    reply_markup=get_back_to_main_keyboard(),
-                    parse_mode="Markdown"
-                )
-            except Exception:
+            if callback.message.photo:
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
                 await callback.message.answer(
                     text=HELP_TEXT,
                     reply_markup=get_back_to_main_keyboard(),
                     parse_mode="Markdown"
                 )
+            else:
+                try:
+                    await callback.message.edit_text(
+                        text=HELP_TEXT,
+                        reply_markup=get_back_to_main_keyboard(),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    await callback.message.answer(
+                        text=HELP_TEXT,
+                        reply_markup=get_back_to_main_keyboard(),
+                        parse_mode="Markdown"
+                    )
     finally:
         await callback.answer()
 
 
 @router.callback_query(F.data == "cancel_action")
 async def cb_cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
-    """Cancel current state and action."""
+    """Cancel current state and action, cleanly returning to main menu."""
     await state.clear()
+    user_id = callback.from_user.id if callback.from_user else 0
+    first_name = (callback.from_user.first_name or "Music Lover") if callback.from_user else "Music Lover"
+    is_admin = user_id in ADMIN_IDS
+    welcome = get_welcome_text(first_name)
+
     if callback.message:
-        try:
-            await callback.message.edit_text("❌ *Operation cancelled.*", parse_mode="Markdown")
-        except Exception:
-            pass
+        if callback.message.photo:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(
+                text=f"❌ *Action cancelled.*\n\n{welcome}",
+                reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+                parse_mode="Markdown"
+            )
+        else:
+            try:
+                await callback.message.edit_text(
+                    text=f"❌ *Action cancelled.*\n\n{welcome}",
+                    reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                await callback.message.answer(
+                    text=f"❌ *Action cancelled.*\n\n{welcome}",
+                    reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+                    parse_mode="Markdown"
+                )
     await callback.answer("Cancelled")
 
 

@@ -381,6 +381,7 @@ The bot includes a **100% automated, zero-fee payment pipeline** using Google Pa
 - **100% Automated 12-Digit UTR Verification:** User submits the 12-digit transaction ID; the bot queries Gmail IMAP server-side in ~0.3s to match the credit receipt without any manual admin approval needed.
 - **Permanent Admin Proof Receipts:** Every successful payment automatically forwards a full transaction receipt to the administrator with Order ID, User ID, Username, Plan, Amount, UTR, and timestamp for permanent dispute proof.
 - **Fail-Safe Manual Verification Guide:** If a bank alert email is delayed, the bot provides the administrator with step-by-step instructions on how to check GPay history and a 1-tap `[ ✅ Force Approve ]` button.
+- **Clean Order Cancellation & Back Navigation:** Tapping **`❌ Cancel Order`** on the QR payment screen or during UTR input cleanly deletes the QR code photo, marks the order cancelled in SQLite, and seamlessly returns the user back to the video resolution choices for that video (or to the interactive Main Menu).
 
 ### In-Flight Download Cancellation
 - Every active download presents a real-time progress card with an inline **🛑 Cancel Download** button.

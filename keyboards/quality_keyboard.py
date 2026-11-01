@@ -130,7 +130,7 @@ def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="🔙 Free Qualities (144p - 480p)",
+                    text="🔙 Back to Video Qualities",
                     callback_data=f"opt_video:{video_id}"
                 ),
                 InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")
@@ -154,7 +154,24 @@ def get_payment_qr_keyboard(order_id: str, upi_uri: str = "") -> InlineKeyboardM
                     text="💬 Contact Admin (@coder_chandan)",
                     url="https://t.me/coder_chandan"
                 ),
-                InlineKeyboardButton(text="❌ Cancel Order", callback_data="cancel_action")
+                InlineKeyboardButton(
+                    text="❌ Cancel Order",
+                    callback_data=f"cancel_order:{order_id}"
+                )
+            ]
+        ]
+    )
+
+
+def get_utr_input_keyboard(order_id: str) -> InlineKeyboardMarkup:
+    """Keyboard shown when prompting user for 12-digit UTR submission."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Cancel Order",
+                    callback_data=f"cancel_order:{order_id}"
+                )
             ]
         ]
     )

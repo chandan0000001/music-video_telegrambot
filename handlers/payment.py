@@ -15,8 +15,10 @@ from services.payment_service import payment_service
 from services.media_service import media_service
 from keyboards.quality_keyboard import (
     get_payment_qr_keyboard,
+    get_utr_input_keyboard,
     get_utr_check_again_keyboard,
     get_admin_payment_alert_keyboard,
+    get_video_quality_keyboard,
 )
 from handlers.states import UserStates
 
@@ -141,8 +143,83 @@ async def cb_prompt_utr_submission(callback: CallbackQuery, state: FSMContext) -
         "👉 *Send your 12-digit UTR now:*"
     )
     if callback.message:
-        await callback.message.answer(prompt, parse_mode="Markdown")
+        await callback.message.answer(
+            prompt,
+            reply_markup=get_utr_input_keyboard(order_id),
+            parse_mode="Markdown"
+        )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cancel_order:"))
+async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
+    """Cancel pending payment order and cleanly return back to video options or main menu."""
+    await state.clear()
+    parts = callback.data.split(":")
+    order_id = parts[1] if len(parts) > 1 else ""
+    order = await db.get_order(order_id) if order_id else None
+
+    # Cancel pending order in database
+    if order and order.get("status") == "pending":
+        async with db._get_connection() as conn:
+            await conn.execute("UPDATE orders SET status = 'cancelled' WHERE order_id = ?", (order_id,))
+            await conn.commit()
+
+    user = callback.from_user
+    user_id = user.id if user else 0
+    is_admin = user_id in ADMIN_IDS
+
+    # Cleanly remove the QR code photo message
+    if callback.message:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    # If this order was for a specific video, return back to that video's quality selection!
+    media_id = order.get("media_id") if order else None
+    if media_id and callback.message:
+        success, info, _ = await media_service.get_media_info(f"https://www.youtube.com/watch?v={media_id}")
+        if success and info:
+            resolutions = info.get("available_resolutions", [])
+            sub = await db.get_user_subscription(user_id)
+            has_active_sub = bool(sub and sub.get("is_active") and sub.get("today_remaining", 0) > 0)
+            admin_banner = "👑 **Admin Access:** All resolutions unlocked (Free & Unlimited)\n" if is_admin else (
+                f"⚡ **VIP Pass Active ({sub['plan_tier'].capitalize()}):** {sub['today_remaining']}/{sub['daily_limit']} HD videos remaining today\n" if has_active_sub else ""
+            )
+            text = (
+                f"❌ *Order `{order_id}` was cancelled.*\n\n"
+                f"🎬 **Video Resolution Selection**\n\n"
+                f"**Title:** {info['title']}\n"
+                f"**Duration:** `{info['duration_str']}`\n\n"
+                f"{admin_banner}"
+                f"Select a genuinely available resolution below (low to high):"
+            )
+            await callback.message.answer(
+                text=text,
+                reply_markup=get_video_quality_keyboard(
+                    video_id=media_id,
+                    available_resolutions=resolutions,
+                    is_admin=is_admin,
+                    has_active_sub=has_active_sub
+                ),
+                parse_mode="Markdown"
+            )
+            await callback.answer("Order cancelled. Returned to video options.")
+            return
+
+    # Fallback / General cancel: Return to Main Menu
+    if callback.message:
+        from handlers.start import get_welcome_text
+        from keyboards.main_menu import get_main_menu_keyboard
+        first_name = (user.first_name or "Music Lover") if user else "Music Lover"
+        welcome = get_welcome_text(first_name)
+        await callback.message.answer(
+            text=f"❌ *Order cancelled.*\n\n{welcome}",
+            reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+            parse_mode="Markdown"
+        )
+    await callback.answer("Order cancelled.")
 
 
 @router.message(UserStates.waiting_for_utr)
