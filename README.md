@@ -9,13 +9,11 @@ A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aio
 
 ---
 
-## 🎬 Live Demo & Video Walkthrough
-
-Watch the bot in action performing real-time music searches, quality selection, animated progress bar updates, and instant media delivery:
+## 🎬 Video Demo
 
 <div align="center">
   <a href="https://streamable.com/or78t5" target="_blank">
-    <img src="assets/demo.gif" alt="Telegram Music & Video Bot Live Demo" width="720" style="border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);" />
+    <img src="assets/demo.gif" alt="Telegram Music & Video Bot Demo" width="720" style="border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);" />
   </a>
   <br><br>
   <a href="https://streamable.com/or78t5">
@@ -27,10 +25,7 @@ Watch the bot in action performing real-time music searches, quality selection, 
   <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4">
     <img src="https://img.shields.io/badge/GitHub-Direct_MP4_Download-181717?style=for-the-badge&logo=github&logoColor=white" alt="Download Direct MP4" />
   </a>
-  <p><em>⚡ <b>Live Bot Walkthrough</b> (Click preview or buttons above to stream in full 1080p 60fps with audio)</em></p>
 </div>
-
-https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4
 
 ---
 
