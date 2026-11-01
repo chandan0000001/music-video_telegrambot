@@ -109,10 +109,62 @@ The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**
 | **Normal (Free)** | **₹0** | Lifetime | Unlimited | Standard `144p`–`480p` MP4 & all music formats (`128k`–`320k`) |
 | **Single 720p HD** | **₹19** | 1 Video | 1 Video | Direct 720p HD video unlock |
 | **Single 1080p HD** | **₹27** | 1 Video | 1 Video | Direct 1080p Full HD video unlock |
-| **⚡ Go Pass** | **₹35** | 7 Days | 20 Videos/day | High priority HD queue |
-| **🚀 Pro Pass** | **₹100** | 30 Days | 45 Videos/day | Full HD 60fps + 8-stream Turbo download |
-| **⚡ Ultra Pass** | **₹299** | 90 Days | 80 Videos/day | 2K video support + VIP Queue Priority |
-| **👑 Max VIP** | **₹799** | 365 Days | 150 Videos/day | 4K video support + 2GB Bandwidth + VIP Badge |
+| **⚡ Go Pass** | **₹35** | 7 Days | 20 Videos/day | High priority HD queue + 10 Concurrent Downloads |
+| **🚀 Pro Pass** | **₹100** | 30 Days | 45 Videos/day | Full HD 60fps + VIP Fast-Track Queue Priority |
+| **⚡ Ultra Pass** | **₹299** | 90 Days | 80 Videos/day | 2K video support + Anti-Spam Immunity |
+| **👑 Max VIP** | **₹799** | 365 Days | 150 Videos/day | 4K video support + 2GB Bandwidth + Absolute VIP Fast-Track |
+
+---
+
+### 5. Advanced Concurrency, VIP Priority & Anti-Spam Engine
+
+```mermaid
+flowchart TD
+    UserReq([User Request / Link]) --> CheckSpam{"Is User VIP / Admin?"}
+    CheckSpam -- "Yes (Paid or Admin)" --> BypassSpam["⚡ Anti-Spam Cooldown Bypassed"]
+    CheckSpam -- "No (Free User)" --> CooldownCheck{"Cooldown < 6s?"}
+    CooldownCheck -- "Yes (<6s)" --> SpamWarning["⚠️ Warning: Ladle, don't spam here!"]
+    CooldownCheck -- "3 violations in 30s" --> TempBan["🚫 10-Minute Temporary Ban"]
+    CooldownCheck -- "No" --> ConcurrentCheck
+    BypassSpam --> ConcurrentCheck
+
+    ConcurrentCheck{"Active Concurrent Jobs?"}
+    ConcurrentCheck -- "Free User >= 3" --> DenyUser["⚠️ Concurrent Limit: Max 3 active downloads"]
+    ConcurrentCheck -- "Paid User >= 10" --> DenyUser
+    ConcurrentCheck -- "Allowed" --> GlobalCheck{"Server Slots Busy? (>= 8)"}
+
+    GlobalCheck -- "Slots Open (< 8)" --> StartDownload["⬇️ Start Download Immediately"]
+    GlobalCheck -- "Busy (>= 8)" --> QueueCheck{"User Priority Tier?"}
+    
+    QueueCheck -- "Admin" --> AdminBypass["👑 Instant Queue Bypass"]
+    QueueCheck -- "Paid VIP" --> VIPQueue["⚡ Front of Queue (Ahead of Free Users)"]
+    QueueCheck -- "Free User" --> StandardQueue["👥 Standard FIFO Queue"]
+    
+    AdminBypass --> StartDownload
+    VIPQueue --> LiveUI["🔄 Telegram Live Counter: updates position every 1-2s"]
+    StandardQueue --> LiveUI
+    LiveUI --> SlotFrees["Slot Frees ➔ Auto-Launch Download with 0-100% Meter"]
+```
+
+#### Key Enterprise Capabilities:
+1. **👑 Tiered VIP Priority & Queue Bypass:**
+   - **Administrators:** Absolute bypass of all queues and concurrent limits.
+   - **Paid Plan Subscribers (`Go`, `Pro`, `Ultra`, `Max`):** Jump straight to the **front of the queue** ahead of free users (`VIP Fast-Track`), allowed up to **10 concurrent downloads**, and completely immune to the 6-second link cooldown.
+   - **Free Users:** Standard FIFO queue, limited to **3 concurrent downloads**.
+2. **⚡ Global Concurrency Safety (8 Downloads / 8 Uploads):**
+   - The entire AWS EC2 instance strictly caps active operations to **8 downloads** and **8 uploads**, safeguarding network bandwidth and RAM.
+3. **🔄 Real-Time Dynamic Queue UI:**
+   - When slots are full, waiting users receive a dynamic Telegram status message that automatically updates every **1.5 seconds** showing their current `#1, #2, #3...` position and estimated wait time until a slot frees up.
+4. **🛡️ 6-Second Link Spam Guard:**
+   - Prevents link flooding by requiring 6 seconds between link submissions.
+   - Triggers friendly warnings: *"⚠️ Ladle, don't spam here! Otherwise you will be banned."*
+   - Repeated abuse (3 violations within 30 seconds) triggers an automated **10-minute temporary ban**.
+5. **🧹 Automated Temp Storage Cleaner:**
+   - Background worker executes every 15 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
+6. **📸 Instagram & 🐦 X (Twitter) Multi-Media Downloaders:**
+   - **Instagram:** Reels, high-res photos, videos, and multi-item carousels (up to 15 items).
+   - **X (Twitter):** Original raw photos (`?name=orig`), HD MP4 videos, looping GIFs, and multi-media albums.
+   - Both feature live 0% to 100% download and upload progress meters with speed, ETA, and size metrics.
 
 ---
 

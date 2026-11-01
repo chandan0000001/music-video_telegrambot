@@ -1,9 +1,11 @@
 """
-Two-Tier Queue and Concurrency Manager
+Two-Tier Queue and Concurrency Manager with VIP Priority Support
 Enforces:
 1. Server Global Limit: 8 active downloads, 8 active uploads.
-2. Per-User Limit: Max 3 active concurrent jobs per user.
-3. Live Dynamic FIFO Queue: Auto-updates queue position (#1, #2, #3...) every 1.5 seconds.
+2. Tiered Per-User Limits: Free users max 3, Paid users max 10, Admins unlimited.
+3. VIP Priority Fast-Track: Admins bypass queue entirely; Paid subscribers jump
+   ahead of free users in the queue.
+4. Live Dynamic Queue: Real-time countdown updates (#1, #2, #3...) every 1.5 seconds.
 """
 import time
 import asyncio
@@ -11,20 +13,28 @@ import logging
 from typing import Dict, List, Optional
 from aiogram.types import Message
 
+from utils.vip_manager import (
+    vip_manager,
+    PRIORITY_FREE,
+    PRIORITY_PAID,
+    PRIORITY_ADMIN
+)
+
 logger = logging.getLogger(__name__)
 
 MAX_GLOBAL_DOWNLOADS = 8
 MAX_GLOBAL_UPLOADS = 8
-MAX_PER_USER_JOBS = 3
+MAX_PER_USER_JOBS_FREE = 3
 
 
 class QueueItem:
-    """Represents a job waiting in the FIFO queue for a download slot."""
+    """Represents a job waiting in the queue for a download slot."""
 
-    def __init__(self, user_id: int, media_title: str, status_msg: Message):
+    def __init__(self, user_id: int, media_title: str, status_msg: Message, priority: int = PRIORITY_FREE):
         self.user_id = user_id
         self.media_title = media_title
         self.status_msg = status_msg
+        self.priority = priority
         self.ready_event = asyncio.Event()
         self.is_cancelled = False
         self.enqueued_at = time.time()
@@ -35,18 +45,16 @@ class QueueItem:
 class DownloadQueueManager:
     """
     Coordinates global bandwidth limits, per-user limits, and dynamic
-    queue position notifications with real-time Telegram message updates.
+    VIP priority queue notifications with real-time Telegram message updates.
     """
 
     def __init__(
         self,
         max_downloads: int = MAX_GLOBAL_DOWNLOADS,
-        max_uploads: int = MAX_GLOBAL_UPLOADS,
-        max_per_user: int = MAX_PER_USER_JOBS
+        max_uploads: int = MAX_GLOBAL_UPLOADS
     ):
         self.max_downloads = max_downloads
         self.max_uploads = max_uploads
-        self.max_per_user = max_per_user
 
         self._active_downloads: int = 0
         self._active_uploads: int = 0
@@ -62,12 +70,16 @@ class DownloadQueueManager:
             self._queue_worker_task = asyncio.create_task(self._queue_loop())
 
     async def can_user_start_job(self, user_id: int) -> tuple[bool, str]:
-        """Check if user has exceeded their max 3 concurrent active jobs."""
+        """Check if user has exceeded their tiered concurrent active jobs limit."""
+        priority = await vip_manager.get_user_priority(user_id)
+        max_allowed = vip_manager.get_max_concurrent_jobs(priority)
+
         async with self._lock:
             active = self._user_active_jobs.get(user_id, 0)
-            if active >= self.max_per_user:
+            if active >= max_allowed:
+                tier_label = "VIP Pass" if priority >= PRIORITY_PAID else "Free Tier"
                 return False, (
-                    f"⚠️ **Concurrent Limit Reached!**\n\n"
+                    f"⚠️ **Concurrent Limit Reached!** ({tier_label})\n\n"
                     f"You already have **{active} downloads** running at the same time.\n"
                     f"Please wait for one of your downloads to complete before starting a new one."
                 )
@@ -81,23 +93,39 @@ class DownloadQueueManager:
     ) -> bool:
         """
         Acquire 1 of the 8 global download slots.
-        If all slots are occupied, enters the FIFO queue and updates position
-        every 1.5 seconds until a slot becomes available.
-        Returns True if acquired, False if cancelled by user.
+        - Admins: Absolute queue bypass.
+        - Paid Subscribers: Priority Fast-Track ahead of free users.
+        - Free Users: Standard FIFO queue.
         """
         self.start_worker()
+        priority = await vip_manager.get_user_priority(user_id)
 
         async with self._lock:
-            # If slot is immediately available and no one is waiting in queue
-            if self._active_downloads < self.max_downloads and len(self._waiting_queue) == 0:
+            # 1. Admin absolute bypass: Never wait in queue
+            if priority >= PRIORITY_ADMIN:
                 self._active_downloads += 1
                 self._user_active_jobs[user_id] = self._user_active_jobs.get(user_id, 0) + 1
                 return True
 
-            # Otherwise, must wait in the FIFO queue
-            item = QueueItem(user_id=user_id, media_title=media_title, status_msg=status_msg)
+            # 2. If slots are open and no one with higher/equal priority is waiting
+            has_higher_waiting = any(q.priority >= priority and not q.is_cancelled for q in self._waiting_queue)
+            if self._active_downloads < self.max_downloads and not has_higher_waiting:
+                self._active_downloads += 1
+                self._user_active_jobs[user_id] = self._user_active_jobs.get(user_id, 0) + 1
+                return True
+
+            # 3. Enter queue with priority weighting
+            item = QueueItem(
+                user_id=user_id,
+                media_title=media_title,
+                status_msg=status_msg,
+                priority=priority
+            )
             self._waiting_queue.append(item)
-            position = len(self._waiting_queue)
+            # Higher priority items jump ahead of lower priority items
+            self._sort_queue()
+
+            position = self._get_item_position(item)
             active_now = self._active_downloads
 
         # Render initial queue screen immediately
@@ -114,21 +142,39 @@ class DownloadQueueManager:
 
         return True
 
+    def _sort_queue(self) -> None:
+        """Sort waiting queue: highest priority first, then FIFO by enqueued time."""
+        self._waiting_queue.sort(key=lambda x: (-x.priority, x.enqueued_at))
+
+    def _get_item_position(self, item: QueueItem) -> int:
+        """Get 1-based position of item among active waiting items."""
+        pos = 1
+        for q in self._waiting_queue:
+            if q is item:
+                return pos
+            if not q.is_cancelled:
+                pos += 1
+        return pos
+
     def release_download_slot(self, user_id: int) -> None:
-        """Release a download slot and advance the waiting queue immediately."""
+        """Release a download slot and advance the highest priority waiting job."""
         asyncio.create_task(self._release_download_async())
 
     async def _release_download_async(self) -> None:
         async with self._lock:
             self._active_downloads = max(0, self._active_downloads - 1)
+            self._sort_queue()
+
             # Find next waiting item that is not cancelled
             while self._waiting_queue:
                 next_item = self._waiting_queue.pop(0)
                 if not next_item.is_cancelled:
                     self._active_downloads += 1
+                    is_vip = next_item.priority >= PRIORITY_PAID
+                    msg_prefix = "👑 *VIP Fast-Track:* " if is_vip else "🚀 "
                     try:
                         await next_item.status_msg.edit_text(
-                            "🚀 *Slot opened! Starting download now...*",
+                            f"{msg_prefix}*Slot opened! Starting download now...*",
                             parse_mode="Markdown"
                         )
                     except Exception:
@@ -138,12 +184,19 @@ class DownloadQueueManager:
 
     async def acquire_upload_slot(self, user_id: int) -> None:
         """Wait for 1 of the 8 global upload slots."""
+        priority = await vip_manager.get_user_priority(user_id)
+        # Admin immediate upload bypass
+        if priority >= PRIORITY_ADMIN:
+            async with self._lock:
+                self._active_uploads += 1
+                return
+
         while True:
             async with self._lock:
                 if self._active_uploads < self.max_uploads:
                     self._active_uploads += 1
                     return
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.4)
 
     def release_upload_slot(self, user_id: int) -> None:
         """Release an upload slot and decrement user's active job counter."""
@@ -174,26 +227,31 @@ class DownloadQueueManager:
         while True:
             await asyncio.sleep(1.5)
             async with self._lock:
-                items_snapshot = list(self._waiting_queue)
+                self._sort_queue()
+                items_snapshot = [q for q in self._waiting_queue if not q.is_cancelled]
                 active_count = self._active_downloads
 
             if not items_snapshot:
                 continue
 
             for idx, item in enumerate(items_snapshot):
-                if item.is_cancelled:
-                    continue
                 pos = idx + 1
                 await self._render_queue_message(item, pos, active_count)
 
     async def _render_queue_message(self, item: QueueItem, position: int, active_count: int = 8) -> None:
         title = item.media_title[:38] + "..." if len(item.media_title) > 38 else item.media_title
         ahead = position - 1
-        wait_est = max(3, ahead * 8)
+        wait_est = max(2, ahead * 8)
+
+        is_vip = item.priority >= PRIORITY_PAID
+        badge = "👑 *VIP Fast-Track Active*" if is_vip else "👥 *Standard Queue*"
+        pos_suffix = " (VIP Priority)" if is_vip else ""
+
         text = (
             f"⏳ *Server Busy: You are in Queue*\n"
             f"🎬 *Media:* `{title}`\n\n"
-            f"👥 *Your Queue Position:* `#{position}`\n"
+            f"{badge}\n"
+            f"📊 *Your Queue Position:* `#{position}{pos_suffix}`\n"
             f"⏳ *Downloads ahead of you:* `{ahead}`\n"
             f"⚡ *Server Load:* `{active_count}/8 active downloads`\n"
             f"⏱ *Estimated wait:* `~{wait_est}s`\n\n"

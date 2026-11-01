@@ -96,7 +96,8 @@ class LinkSpamGuard:
         Check if user is spamming links.
         Returns (is_blocked, message_to_user).
         """
-        if user_id in ADMIN_IDS:
+        from utils.vip_manager import vip_manager
+        if await vip_manager.is_vip(user_id):
             return False, ""
 
         now = time.time()
