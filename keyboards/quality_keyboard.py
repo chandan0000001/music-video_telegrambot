@@ -178,13 +178,17 @@ def get_utr_input_keyboard(order_id: str) -> InlineKeyboardMarkup:
 
 
 def get_utr_check_again_keyboard(order_id: str, utr: str) -> InlineKeyboardMarkup:
-    """Keyboard shown if UTR is not yet detected in Gmail (e.g. slight delay)."""
+    """Keyboard shown if UTR is not yet detected in Gmail (e.g. slight delay or typo)."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="🔄 Check Again",
                     callback_data=f"recheck_utr:{order_id}:{utr}"
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Re-enter UTR",
+                    callback_data=f"submit_utr:{order_id}"
                 )
             ],
             [

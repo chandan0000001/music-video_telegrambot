@@ -99,7 +99,7 @@ class PaymentService:
             return True, "✅ Order has already been paid and activated."
 
         # Anti-fraud check: Has this UTR been used in another order?
-        if await db.is_utr_already_used(utr_clean):
+        if await db.is_utr_already_used(utr_clean, exclude_order_id=order_id):
             return False, "❌ Fraud Alert: This UTR has already been claimed by another transaction."
 
         # Record UTR against order

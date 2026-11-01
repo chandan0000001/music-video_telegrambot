@@ -309,6 +309,24 @@ async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Order not found.", show_alert=True)
         return
 
+    # If the order is ALREADY marked as paid (e.g. approved by Admin), deliver immediately!
+    if order.get("status") == "paid":
+        await state.clear()
+        if callback.message:
+            await callback.message.edit_text(
+                f"🎉 **Payment Verified Successfully!**\n\n"
+                f"• **Amount:** `₹{order['amount_inr']:.2f}`\n"
+                f"• **UTR:** `{utr}`\n\n"
+                f"🚀 *Starting fulfillment now...*",
+                parse_mode="Markdown"
+            )
+            user = callback.from_user
+            user_name = user.username or user.first_name if user else "User"
+            user_id = user.id if user else 0
+            await notify_admin_payment_proof(callback.bot, order, utr, user_name, user_id, auto_verified=False)
+            await fulfill_paid_order(callback.message, order)
+        return
+
     if db.is_order_expired(order):
         await callback.answer("Order expired. Please create a new request.", show_alert=True)
         return
@@ -342,7 +360,7 @@ async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.edit_text(
                 f"⏳ **Verification Pending**\n\n"
                 f"UTR `{utr}` has not arrived in the Gmail alerts yet.\n"
-                f"Please tap **🔄 Check Again** in 15 seconds or contact admin.",
+                f"Please tap **🔄 Check Again** in 15 seconds, tap **✏️ Re-enter UTR** to correct any typos, or contact admin.",
                 reply_markup=get_utr_check_again_keyboard(order_id, utr),
                 parse_mode="Markdown"
             )
@@ -367,13 +385,16 @@ async def cb_admin_force_approve(callback: CallbackQuery) -> None:
 
     await callback.answer("✅ Order approved successfully!")
     if callback.message:
-        await callback.message.edit_text(
-            f"✅ **Order {order_id} Force-Approved by Admin**\n"
-            f"• UTR: `{utr}`\n"
-            f"• User ID: `{order['telegram_id']}`\n"
-            f"• Amount: `₹{order['amount_inr']:.2f}`",
-            parse_mode="Markdown"
-        )
+        try:
+            await callback.message.edit_text(
+                f"✅ **Order** `{order_id}` **Force-Approved by Admin**\n"
+                f"• UTR: `{utr}`\n"
+                f"• User ID: `{order['telegram_id']}`\n"
+                f"• Amount: `₹{order['amount_inr']:.2f}`",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.warning(f"Could not edit admin message: {e}")
 
     # Deliver to user
     try:
@@ -397,9 +418,35 @@ async def cb_admin_reject(callback: CallbackQuery) -> None:
         return
 
     order_id = callback.data.split(":")[1]
+    order = await db.get_order(order_id)
+    if order and order.get("status") == "pending":
+        async with db._get_connection() as conn:
+            await conn.execute("UPDATE orders SET status = 'rejected' WHERE order_id = ?", (order_id,))
+            await conn.commit()
+
     if callback.message:
-        await callback.message.edit_text(f"❌ **Order {order_id} Rejected.**")
+        try:
+            await callback.message.edit_text(
+                f"❌ **Order** `{order_id}` **Rejected by Admin.**",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
     await callback.answer("Rejected.")
+
+    if order:
+        try:
+            await callback.bot.send_message(
+                chat_id=order["telegram_id"],
+                text=(
+                    f"❌ **Payment Not Verified**\n\n"
+                    f"Your payment for order `{order_id}` could not be verified by the administrator.\n"
+                    f"If you completed the payment, please contact @coder_chandan directly with your payment receipt screenshot."
+                ),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify user of order rejection: {e}")
 
 
 async def notify_admin_payment_proof(bot, order: dict, utr: str, user_name: str, user_id: int, auto_verified: bool = True) -> None:

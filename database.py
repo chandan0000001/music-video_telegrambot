@@ -401,28 +401,38 @@ class Database:
         except Exception:
             return False
 
-    async def is_utr_already_used(self, utr_number: str) -> bool:
+    async def is_utr_already_used(self, utr_number: str, exclude_order_id: Optional[str] = None) -> bool:
         """Check if UTR has already been successfully redeemed (anti-fraud)."""
         async with self._get_connection() as conn:
-            cur = await conn.execute(
-                "SELECT id FROM orders WHERE utr_number = ? AND status = 'paid'",
-                (utr_number,)
-            )
+            if exclude_order_id:
+                cur = await conn.execute(
+                    "SELECT id FROM orders WHERE utr_number = ? AND status = 'paid' AND order_id != ?",
+                    (utr_number, exclude_order_id)
+                )
+            else:
+                cur = await conn.execute(
+                    "SELECT id FROM orders WHERE utr_number = ? AND status = 'paid'",
+                    (utr_number,)
+                )
             row = await cur.fetchone()
             return row is not None
 
     async def record_order_utr(self, order_id: str, utr_number: str) -> bool:
         """Attach UTR number to order."""
         async with self._get_connection() as conn:
-            await conn.execute(
-                "UPDATE orders SET utr_number = ? WHERE order_id = ?",
-                (utr_number, order_id)
-            )
-            await conn.commit()
-            return True
+            try:
+                await conn.execute(
+                    "UPDATE orders SET utr_number = ? WHERE order_id = ?",
+                    (utr_number, order_id)
+                )
+                await conn.commit()
+                return True
+            except Exception as e:
+                logger.warning(f"Could not record UTR {utr_number} for {order_id}: {e}")
+                return False
 
     async def mark_order_paid(self, order_id: str, utr_number: Optional[str] = None) -> Optional[dict[str, Any]]:
-        """Mark order as paid and activate subscription if order_type is a pass."""
+        """Mark order as paid and activate subscription if order_type is a pass (Idempotent)."""
         async with self._get_connection() as conn:
             cur = await conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
             order = await cur.fetchone()
@@ -430,15 +440,34 @@ class Database:
                 return None
 
             order_dict = dict(order)
-            update_sql = "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP"
-            params = []
-            if utr_number:
-                update_sql += ", utr_number = ?"
-                params.append(utr_number)
-            update_sql += " WHERE order_id = ?"
-            params.append(order_id)
+            if order_dict.get("status") == "paid":
+                # Already marked paid; update utr_number if provided and not yet set
+                if utr_number and not order_dict.get("utr_number"):
+                    try:
+                        await conn.execute("UPDATE orders SET utr_number = ? WHERE order_id = ?", (utr_number, order_id))
+                        await conn.commit()
+                        order_dict["utr_number"] = utr_number
+                    except Exception:
+                        pass
+                return order_dict
 
-            await conn.execute(update_sql, tuple(params))
+            try:
+                if utr_number:
+                    await conn.execute(
+                        "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP, utr_number = ? WHERE order_id = ?",
+                        (utr_number, order_id)
+                    )
+                else:
+                    await conn.execute(
+                        "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+                        (order_id,)
+                    )
+            except Exception as e:
+                logger.warning(f"Error updating order {order_id} with UTR {utr_number}: {e}. Fallback updating status.")
+                await conn.execute(
+                    "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+                    (order_id,)
+                )
             await conn.commit()
 
         # If it's a subscription pass, activate it!
@@ -447,6 +476,8 @@ class Database:
             await self.activate_subscription(order_dict["telegram_id"], plan)
 
         order_dict["status"] = "paid"
+        if utr_number:
+            order_dict["utr_number"] = utr_number
         return order_dict
 
     # ------------------ Subscriptions ------------------
