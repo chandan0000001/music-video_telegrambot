@@ -560,6 +560,7 @@ async def cb_admin_view_subscriptions(callback: CallbackQuery) -> None:
     lines.append("\n<b>Admin Commands:</b>")
     lines.append("• <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>")
     lines.append("• <code>/sub_deactivate &lt;user_id&gt;</code>")
+    lines.append("• <code>/sub_deactivate_all</code>")
     lines.append("• <code>/sub_status &lt;user_id&gt;</code>")
 
     if callback.message:
@@ -672,7 +673,7 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
     else:
         lines.append("<i>No active or recorded subscriptions found.</i>")
 
-    lines.append("\n💡 <b>Manage:</b> <code>/sub_activate &lt;id&gt; &lt;plan&gt; [days]</code> | <code>/sub_deactivate &lt;id&gt;</code>")
+    lines.append("\n💡 <b>Manage:</b> <code>/sub_activate &lt;id&gt; &lt;plan&gt; [days]</code> | <code>/sub_deactivate &lt;id&gt;</code> | <code>/sub_deactivate_all</code>")
 
     text = "\n".join(lines)
     keyboard = InlineKeyboardMarkup(
@@ -880,6 +881,23 @@ async def cmd_admin_deactivate_sub(message: Message) -> None:
         )
     except Exception:
         pass
+
+
+@router.message(Command("sub_deactivate_all"))
+@router.message(Command("sub_revoke_all"))
+async def cmd_admin_deactivate_all_subs(message: Message) -> None:
+    """Admin command to revoke all user subscriptions: /sub_deactivate_all"""
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        await message.answer("🚫 Access Denied.")
+        return
+
+    count = await db.deactivate_all_subscriptions()
+    await message.answer(
+        f"✅ <b>All Subscriptions Revoked!</b>\n\n"
+        f"• Total users reset to Normal (Free) tier: <code>{count}</code>",
+        parse_mode="HTML"
+    )
 
 
 @router.message(Command("sub_status"))

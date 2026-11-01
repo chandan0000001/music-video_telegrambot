@@ -25,10 +25,15 @@ class Database:
             conn.row_factory = aiosqlite.Row
             await conn.execute("PRAGMA foreign_keys = ON;")
             await conn.execute("PRAGMA journal_mode = WAL;")
+            await conn.execute("PRAGMA synchronous = NORMAL;")
+            await conn.execute("PRAGMA temp_store = MEMORY;")
+            await conn.execute("PRAGMA cache_size = -64000;")
+            await conn.execute("PRAGMA mmap_size = 268435456;")
+            await conn.execute("PRAGMA busy_timeout = 5000;")
             yield conn
 
     async def init_db(self, schema_path: Optional[Path | str] = None) -> None:
-        """Initialize database tables, indexes, and triggers."""
+        """Initialize and optimize database tables, indexes, and triggers."""
         schema_file = Path(schema_path or (BASE_DIR / "database" / "schema.sql"))
         if not schema_file.exists():
             raise FileNotFoundError(f"Schema file not found at {schema_file}")
@@ -41,8 +46,16 @@ class Database:
                 await conn.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
             except Exception:
                 pass
+            # Clean up any legacy redundant duplicate indexes
+            for legacy_idx in ("idx_users_telegram_id", "idx_orders_order_id", "idx_orders_utr_number"):
+                try:
+                    await conn.execute(f"DROP INDEX IF EXISTS {legacy_idx}")
+                except Exception:
+                    pass
             await conn.commit()
-        logger.info(f"Database initialized successfully at {self.db_path}")
+            await conn.execute("PRAGMA optimize;")
+            await conn.commit()
+        logger.info(f"Database initialized and optimized successfully at {self.db_path}")
 
     async def add_or_update_user(
         self,
@@ -536,14 +549,23 @@ class Database:
             )
             await conn.commit()
             return True
-            await conn.commit()
 
-        return {
-            "telegram_id": telegram_id,
-            "plan_tier": plan_tier,
-            "expiry_date": expiry_str,
-            "daily_video_limit": daily_limit
-        }
+    async def deactivate_all_subscriptions(self) -> int:
+        """Deactivate/revoke all subscriptions for all users immediately."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute("DELETE FROM user_subscriptions")
+            count = cur.rowcount
+            await conn.commit()
+            logger.info(f"Deactivated all user subscriptions. Total revoked: {count}")
+            return count
+
+    async def optimize_database(self) -> None:
+        """Run SQLite query optimizer and analysis for maximum execution performance."""
+        async with self._get_connection() as conn:
+            await conn.execute("ANALYZE;")
+            await conn.execute("PRAGMA optimize;")
+            await conn.commit()
+            logger.info("SQLite database optimization & ANALYZE completed.")
 
     async def get_user_subscription(self, telegram_id: int) -> Optional[dict[str, Any]]:
         """Get user subscription status, auto-resetting daily count if midnight passed."""

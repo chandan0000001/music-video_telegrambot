@@ -90,14 +90,28 @@ flowchart TD
 
 ---
 
-### 3. Database Structure
+### 3. Database Architecture & Optimization
 
-The bot uses SQLite with **Write-Ahead Logging (WAL)** and foreign keys enabled:
+The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**, and a **64MB Memory Cache** for high-concurrency non-blocking async operations:
 
 - **`users`**: Records Telegram ID, username, first name, join timestamp, last active timestamp, and blocked status.
-- **`search_history`**: Records every search query with user ID, timestamp, and source.
-- **`downloads`**: Tracks all download requests, media type, format, bitrate/resolution, status (`pending`, `completed`, `failed`), and created timestamp.
+- **`search_history`**: Records every search query with user ID, timestamp, and source (indexed on `(telegram_id, searched_at DESC)` and `search_query`).
+- **`downloads`**: Tracks all download requests, media type, format, bitrate/resolution, status (`pending`, `completed`, `failed`, `cancelled`), and timestamp.
+- **`orders`**: Tracks payment transactions, order IDs, 10-minute expiry timestamps, 12-digit UTR numbers, and fulfillment status (indexed on `(status, id DESC)` and `(utr_number, status)`).
+- **`user_subscriptions`**: Tracks active passes (Go, Pro, Ultra, Max), daily quotas, and reset timestamps.
 - **`bot_statistics`**: Real-time aggregated counters for total users, total searches, successful downloads, and failed downloads.
+
+### 4. Subscription & Pricing Matrix
+
+| Tier | Price (INR) | Validity | Daily Quota | Features & Perks |
+| :--- | :--- | :--- | :--- | :--- |
+| **Normal (Free)** | **₹0** | Lifetime | Unlimited | Standard `144p`–`480p` MP4 & all music formats (`128k`–`320k`) |
+| **Single 720p HD** | **₹19** | 1 Video | 1 Video | Direct 720p HD video unlock |
+| **Single 1080p HD** | **₹27** | 1 Video | 1 Video | Direct 1080p Full HD video unlock |
+| **⚡ Go Pass** | **₹35** | 7 Days | 20 Videos/day | High priority HD queue |
+| **🚀 Pro Pass** | **₹100** | 30 Days | 45 Videos/day | Full HD 60fps + 8-stream Turbo download |
+| **⚡ Ultra Pass** | **₹299** | 90 Days | 80 Videos/day | 2K video support + VIP Queue Priority |
+| **👑 Max VIP** | **₹799** | 365 Days | 150 Videos/day | 4K video support + 2GB Bandwidth + VIP Badge |
 
 ---
 
