@@ -39,14 +39,23 @@ TWITTER_DOMAINS = {
 }
 TWITTER_STATUS_PATTERN = re.compile(r"^/([a-zA-Z0-9_]+)/status/([0-9]+)")
 
-# Instagram Hostnames & Pattern
+# Instagram Hostnames & Patterns
 INSTAGRAM_DOMAINS = {
     "instagram.com",
     "www.instagram.com",
     "ddinstagram.com",
     "instagr.am"
 }
-INSTAGRAM_PATTERN = re.compile(r"^/(p|reel|reels|tv)/([a-zA-Z0-9_-]+)")
+INSTAGRAM_POST_PATTERN = re.compile(r"^/(p|reel|reels|tv)/([a-zA-Z0-9_-]+)")
+INSTAGRAM_HIGHLIGHT_PATTERN = re.compile(r"^/(?:stories/highlights/([0-9]+)|s/([a-zA-Z0-9_-]+))")
+INSTAGRAM_STORY_PATTERN = re.compile(r"^/stories/([a-zA-Z0-9_.-]+)(?:/([0-9]+))?")
+INSTAGRAM_PROFILE_PATTERN = re.compile(r"^/([a-zA-Z0-9_.-]{1,30})/?$")
+
+INSTAGRAM_RESERVED_ROUTES = {
+    "", "p", "reel", "reels", "tv", "stories", "explore", "accounts",
+    "direct", "developer", "about", "legal", "terms", "privacy", "help",
+    "api", "static", "directory", "settings"
+}
 
 # Dangerous characters in filenames
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\?%*:|"<>^\x00-\x1f]')
@@ -162,7 +171,14 @@ def is_valid_twitter_url(url: str) -> bool:
 
 
 def extract_instagram_info(url: str) -> Optional[Tuple[str, str]]:
-    """Extract (media_type, shortcode) from Instagram reel/post/tv URLs."""
+    """
+    Extract (category, identifier) from Instagram URLs.
+    Supports:
+    - Posts & Reels: ('reel'|'p'|'tv', shortcode)
+    - Stories: ('story', story_id_or_user)
+    - Highlights: ('highlight', highlight_id)
+    - Profiles: ('profile', username)
+    """
     if not url or not is_safe_url(url):
         return None
     try:
@@ -170,17 +186,65 @@ def extract_instagram_info(url: str) -> Optional[Tuple[str, str]]:
         domain = (parsed.netloc or "").lower().split(":")[0]
         if domain not in INSTAGRAM_DOMAINS:
             return None
-        match = INSTAGRAM_PATTERN.match(parsed.path)
-        if match:
-            media_type = match.group(1).rstrip("s")  # 'reel', 'p', 'tv'
-            return media_type, match.group(2)
+
+        path = parsed.path.rstrip("/")
+        if not path:
+            return None
+
+        # 1. Check Posts / Reels / TV
+        post_match = INSTAGRAM_POST_PATTERN.match(parsed.path)
+        if post_match:
+            media_type = post_match.group(1).rstrip("s")
+            return media_type, post_match.group(2)
+
+        # 2. Check Highlights
+        hl_match = INSTAGRAM_HIGHLIGHT_PATTERN.match(parsed.path)
+        if hl_match:
+            hl_id = hl_match.group(1) or hl_match.group(2)
+            return "highlight", hl_id
+
+        # 3. Check Stories
+        story_match = INSTAGRAM_STORY_PATTERN.match(parsed.path)
+        if story_match:
+            user = story_match.group(1)
+            story_id = story_match.group(2) or user
+            return "story", story_id
+
+        # 4. Check Profile
+        prof_match = INSTAGRAM_PROFILE_PATTERN.match(parsed.path)
+        if prof_match:
+            username = prof_match.group(1)
+            if username.lower() not in INSTAGRAM_RESERVED_ROUTES:
+                return "profile", username
+
         return None
     except Exception:
         return None
 
 
+def parse_instagram_input(input_str: str) -> Optional[Tuple[str, str]]:
+    """Parse either an Instagram URL or an @username/username handle."""
+    if not input_str:
+        return None
+    clean = input_str.strip()
+    if clean.startswith("@"):
+        uname = clean[1:].strip()
+        if re.match(r"^[a-zA-Z0-9_.-]{1,30}$", uname) and uname.lower() not in INSTAGRAM_RESERVED_ROUTES:
+            return "profile", uname
+        return None
+
+    if "://" in clean or any(d in clean.lower() for d in INSTAGRAM_DOMAINS):
+        return extract_instagram_info(clean)
+
+    # Bare username fallback (e.g. 'cristiano')
+    if re.match(r"^[a-zA-Z0-9_.-]{1,30}$", clean) and clean.lower() not in INSTAGRAM_RESERVED_ROUTES:
+        return "profile", clean
+
+    return None
+
+
 def is_valid_instagram_url(url: str) -> bool:
-    """Return True if the URL is a valid Instagram post, reel, or TV URL."""
+    """Return True if the URL is a valid Instagram post, reel, story, highlight, or profile URL."""
     return extract_instagram_info(url) is not None
 
 

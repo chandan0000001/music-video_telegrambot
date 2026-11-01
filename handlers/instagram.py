@@ -1,11 +1,16 @@
 """
-Dedicated Instagram Media Downloader Handler
-Supports HD Reels, Videos, Photos, and Multi-Item Carousels from public Instagram posts.
+Dedicated Instagram Media & Profile Downloader Handler
+Supports:
+1. HD Reels, Videos, Photos, and Multi-Item Carousels (up to 15 items)
+2. Stories & Highlights
+3. Profile Pictures (Full HD DP) and Account Stats/Bio for Public & Private Accounts
 Integrated with:
-1. 8/8 Global & 3 Per-User Queue Engine
-2. 5-8s Anti-Spam Link Cooldown Guard
-3. Real-time 0-100% Download and Upload Progress Meters
+- 8/8 Global & 3 Per-User Queue Engine with VIP Priority
+- 6s Anti-Spam Link Cooldown Guard
+- Real-time 0-100% Download and Upload Progress Meters
+- Clean Universal Back Navigation
 """
+import html
 import asyncio
 import logging
 from pathlib import Path
@@ -14,7 +19,8 @@ from aiogram.types import (
     Message,
     CallbackQuery,
     InputMediaPhoto,
-    InputMediaVideo
+    InputMediaVideo,
+    FSInputFile
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -22,7 +28,11 @@ from aiogram.fsm.context import FSMContext
 from database import db
 from services.instagram_service import instagram_service
 from keyboards.main_menu import get_back_to_main_keyboard, get_instagram_menu_keyboard
-from utils.validators import is_valid_instagram_url
+from utils.validators import (
+    is_valid_instagram_url,
+    extract_instagram_info,
+    parse_instagram_input
+)
 from utils.rate_limiter import link_spam_guard
 from utils.queue_manager import queue_manager
 from utils.progress import (
@@ -39,9 +49,13 @@ router = Router(name="instagram_router")
 
 INSTAGRAM_HUB_TEXT = (
     "📸 **Instagram Downloader**\n"
-    "*Original HD Reels, Videos, Photos & Carousels*\n\n"
-    "Paste any public Instagram post or Reel link below to download original media.\n\n"
-    "👉 *Paste your Instagram link below:*"
+    "*HD Reels, Posts, Carousels, Stories, Highlights & Profile DP*\n\n"
+    "Supported options:\n"
+    "• **Reels & Posts:** Send any Reel, Video, or Photo link\n"
+    "• **Carousels:** Albums with multiple photos/videos (up to 15 items)\n"
+    "• **Stories & Highlights:** Send any active story or highlight link\n"
+    "• **Profile DP & Bio:** Send profile link or `@username` (both public & private accounts supported)\n\n"
+    "👉 *Paste your Instagram link or @username below:*"
 )
 
 
@@ -87,6 +101,107 @@ async def cmd_instagram(message: Message, state: FSMContext) -> None:
     )
 
 
+async def _execute_instagram_profile(message: Message, username: str) -> None:
+    """Fetch Instagram profile card and original HD DP (Profile Picture)."""
+    user = message.from_user
+    user_id = user.id if user else 0
+
+    # 1. Anti-Spam Link Cooldown Check
+    is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
+    if is_spam:
+        await message.answer(spam_msg, parse_mode="Markdown")
+        return
+
+    # 2. Per-User Concurrent Download Limit Check
+    can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
+    if not can_start:
+        await message.answer(limit_msg, parse_mode="Markdown")
+        return
+
+    clean_user = username.strip().lstrip("@")
+    status_msg = await message.answer(f"🔍 <i>Fetching Instagram profile for @{html.escape(clean_user)}...</i>", parse_mode="HTML")
+
+    success, profile, err_msg = await instagram_service.get_instagram_profile(clean_user)
+    if not success or not profile:
+        await status_msg.edit_text(
+            f"❌ {err_msg or f'Could not find profile for @{html.escape(clean_user)}.'}",
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    u_name = html.escape(profile.get("username") or clean_user)
+    full_name = html.escape(profile.get("full_name") or clean_user)
+    bio = html.escape(profile.get("biography") or "None")
+    followers = profile.get("followers_count", 0)
+    following = profile.get("following_count", 0)
+    posts = profile.get("posts_count", 0)
+    is_private = profile.get("is_private", False)
+    is_verified = profile.get("is_verified", False)
+    badge = " ✅" if is_verified else ""
+    privacy_badge = "🔒 <b>Private Account</b>" if is_private else "🌐 <b>Public Account</b>"
+
+    caption_lines = [
+        f"📸 <b>Instagram Profile:</b> @{u_name}{badge}",
+        f"👤 <b>Name:</b> {full_name}",
+        f"📝 <b>Bio:</b> <i>{bio[:300]}</i>\n",
+        f"👥 <b>Followers:</b> <code>{followers:,}</code> | <b>Following:</b> <code>{following:,}</code>",
+        f"📦 <b>Total Posts:</b> <code>{posts:,}</code>",
+        f"🔐 <b>Account Status:</b> {privacy_badge}\n"
+    ]
+
+    if is_private:
+        caption_lines.append(
+            "⚠️ <b>Private Account Notice:</b>\n"
+            "<i>This account is private. Posts, reels, and stories cannot be downloaded without mutual follow access, but the original HD profile picture has been fetched above.</i>"
+        )
+    else:
+        caption_lines.append(
+            "💡 <i>Tip: Send any Post, Reel, Story, or Highlight link to download media!</i>"
+        )
+
+    caption = "\n".join(caption_lines)
+    dp_url = profile.get("profile_pic_url_hd")
+
+    if dp_url:
+        job_dir = instagram_service._get_job_dir()
+        dp_file = job_dir / f"profile_{clean_user}.jpg"
+        downloaded_ok = await instagram_service.download_file(dp_url, dp_file)
+        if downloaded_ok and dp_file.exists() and dp_file.stat().st_size > 0:
+            try:
+                await message.answer_photo(
+                    photo=FSInputFile(str(dp_file)),
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=get_back_to_main_keyboard()
+                )
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+                await db.record_download(
+                    telegram_id=user_id,
+                    media_title=f"Instagram Profile DP: @{u_name}",
+                    source=f"https://instagram.com/{clean_user}",
+                    media_type="instagram_profile_dp",
+                    selected_quality="Original HD",
+                    selected_format="jpg",
+                    status="completed"
+                )
+                return
+            except Exception as e:
+                logger.error(f"Failed to send profile photo for @{clean_user}: {e}")
+            finally:
+                instagram_service.cleanup_job_dir(job_dir)
+
+    # Fallback if photo couldn't be sent
+    await status_msg.edit_text(
+        text=caption,
+        parse_mode="HTML",
+        reply_markup=get_back_to_main_keyboard()
+    )
+
+
 async def _execute_instagram_download(message: Message, url: str) -> None:
     """Core download and dispatch pipeline for Instagram media with queue and live meters."""
     user = message.from_user
@@ -104,17 +219,43 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
         await message.answer(limit_msg, parse_mode="Markdown")
         return
 
-    status_msg = await message.answer("🔍 *Inspecting Instagram post...*", parse_mode="Markdown")
+    status_msg = await message.answer("🔍 *Inspecting Instagram link...*", parse_mode="Markdown")
+
+    info_tuple = extract_instagram_info(url)
+    cat = info_tuple[0] if info_tuple else "post"
 
     success, media_items, err_msg = await instagram_service.get_instagram_media(url)
     if not success or not media_items:
+        if "private" in (err_msg or "").lower():
+            notice = (
+                "🔒 <b>Private Account Notice:</b>\n"
+                "This media belongs to a private Instagram account and cannot be downloaded.\n\n"
+                "💡 <i>Tip: Send their @username or profile link to view their HD profile picture and bio!</i>"
+            )
+            await status_msg.edit_text(
+                notice,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+            return
+
         await status_msg.edit_text(
-            f"❌ {err_msg or 'Could not retrieve media from this post.'}",
-            parse_mode="Markdown"
+            f"❌ {err_msg or 'Could not retrieve media from this link.'}",
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
         )
         return
 
-    media_label = "Photo" if media_items[0]["type"] == "photo" else "Reel/Video"
+    if cat == "story":
+        cat_name = "Story"
+    elif cat == "highlight":
+        cat_name = "Highlight"
+    elif cat == "reel":
+        cat_name = "Reel"
+    else:
+        cat_name = "Post"
+
+    media_label = "Photo" if media_items[0]["type"] == "photo" else cat_name
     title = f"Instagram {media_label}" if len(media_items) == 1 else f"Instagram Carousel ({len(media_items)} items)"
 
     # 3. Acquire Global Download Slot from 8/8 Queue
@@ -147,7 +288,11 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
         queue_manager.release_download_slot(user_id)
 
     if not downloaded:
-        await status_msg.edit_text("❌ *Failed to download media files. Please try again.*", parse_mode="Markdown")
+        await status_msg.edit_text(
+            "❌ *Failed to download media files. Please try again.*",
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="Markdown"
+        )
         instagram_service.cleanup_job_dir(job_dir)
         return
 
@@ -175,13 +320,15 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
             if item_type == "photo":
                 await message.answer_photo(
                     photo=tracked_file,
-                    caption="📸 *Instagram Photo (Original HD)*",
+                    caption=f"📸 *Instagram {media_label} (Original HD)*",
+                    reply_markup=get_back_to_main_keyboard(),
                     parse_mode="Markdown"
                 )
             else:  # video / reel
                 await message.answer_video(
                     video=tracked_file,
-                    caption="🎬 *Instagram Reel / Video (Original HD)*",
+                    caption=f"🎬 *Instagram {media_label} (Original HD)*",
+                    reply_markup=get_back_to_main_keyboard(),
                     parse_mode="Markdown"
                 )
         else:
@@ -237,7 +384,11 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
     except Exception as e:
         logger.error(f"Error delivering Instagram media to user {user_id}: {e}", exc_info=True)
         try:
-            await status_msg.edit_text(f"❌ *Failed to deliver media:* {str(e)[:100]}", parse_mode="Markdown")
+            await status_msg.edit_text(
+                f"❌ *Failed to deliver media:* {str(e)[:100]}",
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="Markdown"
+            )
         except Exception:
             pass
     finally:
@@ -253,17 +404,28 @@ async def handle_instagram_waiting_input(message: Message, state: FSMContext) ->
     if not text:
         return
 
-    if is_valid_instagram_url(text):
-        await state.clear()
-        await _execute_instagram_download(message, text)
-    else:
-        await message.answer(
-            "⚠️ *Invalid Instagram URL!*\n\n"
-            "Please paste a valid link to an Instagram Reel or Post.\n\n"
-            "💡 *Example:* `https://www.instagram.com/reel/C8...`",
-            reply_markup=get_back_to_main_keyboard(),
-            parse_mode="Markdown"
-        )
+    parsed = parse_instagram_input(text)
+    if parsed:
+        cat, identifier = parsed
+        if cat == "profile":
+            await state.clear()
+            await _execute_instagram_profile(message, identifier)
+            return
+        else:
+            await state.clear()
+            await _execute_instagram_download(message, text)
+            return
+
+    await message.answer(
+        "⚠️ <b>Invalid Instagram Input!</b>\n\n"
+        "Please provide one of the following:\n"
+        "• <b>Reel or Post:</b> <code>https://instagram.com/reel/C8...</code>\n"
+        "• <b>Story or Highlight:</b> <code>https://instagram.com/stories/...</code>\n"
+        "• <b>Profile HD DP &amp; Bio:</b> <code>@username</code> or <code>https://instagram.com/username</code>\n\n"
+        "👉 <i>Paste a valid link or @username below:</i>",
+        reply_markup=get_back_to_main_keyboard(),
+        parse_mode="HTML"
+    )
 
 
 @router.message(F.text.func(lambda text: bool(text and is_valid_instagram_url(text))))
@@ -274,4 +436,8 @@ async def handle_direct_instagram_url(message: Message, state: FSMContext) -> No
         return
 
     await state.clear()
-    await _execute_instagram_download(message, text)
+    info = extract_instagram_info(text)
+    if info and info[0] == "profile":
+        await _execute_instagram_profile(message, info[1])
+    else:
+        await _execute_instagram_download(message, text)

@@ -162,8 +162,13 @@ flowchart TD
 5. **🧹 Automated Temp Storage Cleaner:**
    - Background worker executes every 15 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
 6. **📸 Instagram & 🐦 X (Twitter) Multi-Media Downloaders:**
-   - **Instagram:** Reels, high-res photos, videos, and multi-item carousels (up to 15 items).
+   - **Instagram Suite:**
+     - **Reels & Posts:** High-definition single MP4 videos, full-resolution photos, and carousels (albums up to 15 items).
+     - **Stories & Highlights:** Download active public stories and highlight collections directly.
+     - **Profile DP & Bio Downloader:** Send profile links or `@username` to fetch original HD profile avatars and full account bios with follower/following stats.
+     - **Private Account Graceful Handling:** For private profiles, fetches full HD profile pictures and public bio data while cleanly notifying users that posts/stories remain private.
    - **X (Twitter):** Original raw photos (`?name=orig`), HD MP4 videos, looping GIFs, and multi-media albums.
+   - **Clean Sub-Menu Navigation:** Every sub-section (Instagram, X, YouTube Music, Search, Audio, Video, Help) displays a dedicated, uncluttered `[ 🔙 Back to Main Menu ]` button.
    - Both feature live 0% to 100% download and upload progress meters with speed, ETA, and size metrics.
 
 ---

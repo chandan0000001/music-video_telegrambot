@@ -39,56 +39,25 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
 
 def get_ytmusic_menu_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for dedicated YouTube Music Downloader hub."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔍 Search Music Instead", callback_data="menu:search"),
-                InlineKeyboardButton(text="🎬 Video Downloader", callback_data="menu:video"),
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")
-            ]
-        ]
-    )
+    return get_back_to_main_keyboard()
 
 
 def get_twitter_menu_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for dedicated X (Twitter) Downloader hub."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎵 Search Music", callback_data="menu:search"),
-                InlineKeyboardButton(text="🔴 YouTube Music", callback_data="menu:ytmusic"),
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")
-            ]
-        ]
-    )
+    return get_back_to_main_keyboard()
 
 
 def get_instagram_menu_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for dedicated Instagram Downloader hub."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎵 Search Music", callback_data="menu:search"),
-                InlineKeyboardButton(text="🐦 X (Twitter)", callback_data="menu:twitter"),
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")
-            ]
-        ]
-    )
+    return get_back_to_main_keyboard()
 
 
 def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
-    """Generate simple 'Back to Main Menu' keyboard."""
+    """Generate universal clean 'Back to Main Menu' keyboard for all sub-sections."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main"),
-                InlineKeyboardButton(text="👨‍💻 Contact Developer", url="https://t.me/coder_chandan")
+                InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")
             ]
         ]
     )

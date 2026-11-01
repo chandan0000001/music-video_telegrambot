@@ -42,7 +42,7 @@ def get_admin_dashboard_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🔎 Lookup User", callback_data="admin:lookup")
             ],
             [
-                InlineKeyboardButton(text="👑 Subscriptions & Plans", callback_data="admin:plan_subscribers"),
+                InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers"),
                 InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders")
             ],
             [
@@ -606,7 +606,7 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
     }
 
     lines = [
-        "👑 <b>Subscribers Directory &amp; Plan Breakdown</b>\n",
+        "💎 <b>Plan Subscribers Directory &amp; Breakdown</b>\n",
         "📊 <b>Active Subscribers per Plan:</b>",
         f"• 👑 Max VIP: <b>{counts.get('max', 0)}</b> user(s)",
         f"• ⚡ Ultra Pass: <b>{counts.get('ultra', 0)}</b> user(s)",
@@ -615,8 +615,9 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
         "👥 <b>Subscribers List (Username &amp; User ID):</b>"
     ]
 
-    if subscribers:
-        for idx, sub in enumerate(subscribers, start=1):
+    displayed_subs = subscribers[:12]
+    if displayed_subs:
+        for idx, sub in enumerate(displayed_subs, start=1):
             uname = f"@{html.escape(sub['username'])}" if sub.get("username") else "<i>No username</i>"
             name = html.escape(sub.get("first_name") or "User")
             plan_raw = (sub.get("plan_tier") or "normal").lower()
@@ -632,10 +633,12 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
                 f"   ├ ⏰ <b>Expires:</b> <code>{exp}</code>\n"
                 f"   └ 📊 <b>Status:</b> {status}\n"
             )
+        if len(subscribers) > 12:
+            lines.append(f"<i>...and {len(subscribers) - 12} more. Click CSV Subscriptions for full data.</i>\n")
     else:
-        lines.append("<i>No active or recorded subscriptions found.</i>")
+        lines.append("<i>No active or recorded subscriptions found.</i>\n")
 
-    lines.append("\n<b>Admin Commands:</b>")
+    lines.append("<b>Admin Commands:</b>")
     lines.append("• <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>")
     lines.append("• <code>/sub_deactivate &lt;user_id&gt;</code>")
     lines.append("• <code>/sub_deactivate_all</code>")
@@ -659,8 +662,15 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
         if event.message:
             try:
                 await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-            except Exception:
-                pass
+            except Exception as e:
+                if "message is not modified" in str(e).lower():
+                    pass
+                else:
+                    logger.warning(f"edit_text failed in plan_subscribers, replying with answer: {e}")
+                    try:
+                        await event.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+                    except Exception:
+                        pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -742,7 +752,7 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="🔄 Refresh", callback_data="admin:payment_orders"),
-                InlineKeyboardButton(text="👑 Subscriptions & Plans", callback_data="admin:plan_subscribers")
+                InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers")
             ],
             [
                 InlineKeyboardButton(text="📥 CSV Orders", callback_data="admin:export:orders"),
@@ -755,8 +765,15 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
         if event.message:
             try:
                 await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-            except Exception:
-                pass
+            except Exception as e:
+                if "message is not modified" in str(e).lower():
+                    pass
+                else:
+                    logger.warning(f"edit_text failed in payment_orders, replying with answer: {e}")
+                    try:
+                        await event.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+                    except Exception:
+                        pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
