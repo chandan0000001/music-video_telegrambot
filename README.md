@@ -11,12 +11,19 @@ A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aio
 
 ## 🎬 Live Demo & Video Walkthrough
 
-Watch the bot in action performing music searches, format selection, live progress updates, and instant media delivery:
+Watch the bot in action performing real-time music searches, quality selection, animated progress bar updates, and instant media delivery:
 
-[![Watch Demo Video on Google Drive](https://img.shields.io/badge/Google_Drive-Watch_Live_Demo_Video-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
+<div align="center">
+  <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4">
+    <img src="assets/demo.gif" alt="Telegram Music & Video Bot Live Demo" width="720" style="border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);" />
+  </a>
+  <br>
+  <p><em>⚡ <b>Live Bot Walkthrough</b> (Click preview above or <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4"><b>watch full 1080p video with audio</b></a>)</em></p>
+</div>
 
-> 📹 **Video Link:** [Google Drive Demo Folder](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)  
-> *Walkthrough highlights: Instant song search, quality selection (128k–320k / 144p–1080p), real-time animated download cards, and fast delivery.*
+https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4
+
+[![Watch on Google Drive](https://img.shields.io/badge/Google_Drive-Alternative_Video_Mirror-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
 
 ---
 
