@@ -97,9 +97,51 @@ GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
 
 PRICE_SINGLE_720P: int = int(os.getenv("PRICE_SINGLE_720P", "29"))
 PRICE_SINGLE_1080P: int = int(os.getenv("PRICE_SINGLE_1080P", "49"))
-PRICE_WEEKLY_PASS: int = int(os.getenv("PRICE_WEEKLY_PASS", "38"))
-PRICE_MONTHLY_PASS: int = int(os.getenv("PRICE_MONTHLY_PASS", "120"))
 
-LIMIT_WEEKLY_DAILY_VIDEOS: int = int(os.getenv("LIMIT_WEEKLY_DAILY_VIDEOS", "20"))
-LIMIT_MONTHLY_DAILY_VIDEOS: int = int(os.getenv("LIMIT_MONTHLY_DAILY_VIDEOS", "45"))
+# Subscription Plans (Normal, Go, Pro, Ultra, Max)
+SUBSCRIPTION_PLANS = {
+    "normal": {
+        "name": "Normal",
+        "badge": "🟢 Normal (Free)",
+        "price": 0,
+        "days": 0,
+        "daily_limit": 0,
+        "description": "Standard 144p-480p videos & unlimited music"
+    },
+    "go": {
+        "name": "Go",
+        "badge": "⚡ Go Pass",
+        "price": int(os.getenv("PRICE_TIER_GO", "38")),
+        "days": int(os.getenv("DAYS_TIER_GO", "7")),
+        "daily_limit": int(os.getenv("LIMIT_TIER_GO_DAILY", "20")),
+        "description": "20 HD Videos/day (720p/1080p) + High Priority"
+    },
+    "pro": {
+        "name": "Pro",
+        "badge": "🚀 Pro Pass",
+        "price": int(os.getenv("PRICE_TIER_PRO", "120")),
+        "days": int(os.getenv("DAYS_TIER_PRO", "30")),
+        "daily_limit": int(os.getenv("LIMIT_TIER_PRO_DAILY", "45")),
+        "description": "45 HD Videos/day (1080p 60fps) + 8-stream Turbo"
+    },
+    "ultra": {
+        "name": "Ultra",
+        "badge": "⚡ Ultra Pass",
+        "price": int(os.getenv("PRICE_TIER_ULTRA", "299")),
+        "days": int(os.getenv("DAYS_TIER_ULTRA", "90")),
+        "daily_limit": int(os.getenv("LIMIT_TIER_ULTRA_DAILY", "80")),
+        "description": "80 HD/2K Videos/day + VIP Queue Priority"
+    },
+    "max": {
+        "name": "Max",
+        "badge": "👑 Max VIP Pass",
+        "price": int(os.getenv("PRICE_TIER_MAX", "799")),
+        "days": int(os.getenv("DAYS_TIER_MAX", "365")),
+        "daily_limit": int(os.getenv("LIMIT_TIER_MAX_DAILY", "150")),
+        "description": "150 HD/4K Videos/day + 2GB Bandwidth + VIP Badge"
+    }
+}
+
+ORDER_EXPIRY_MINUTES: int = int(os.getenv("ORDER_EXPIRY_MINUTES", "10"))
+
 

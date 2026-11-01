@@ -42,12 +42,13 @@ def get_admin_dashboard_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🔎 Lookup User", callback_data="admin:lookup")
             ],
             [
+                InlineKeyboardButton(text="👑 Active Subscriptions", callback_data="admin:subscriptions"),
+                InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
+            ],
+            [
                 InlineKeyboardButton(text="📥 CSV Users", callback_data="admin:export:users"),
                 InlineKeyboardButton(text="📥 CSV Searches", callback_data="admin:export:search_history"),
                 InlineKeyboardButton(text="📥 CSV Downloads", callback_data="admin:export:downloads")
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
             ]
         ]
     )
@@ -517,3 +518,186 @@ async def cb_export_csv(callback: CallbackQuery) -> None:
     except Exception as e:
         logger.exception(f"Failed exporting CSV for table {table_name}: {e}")
         await callback.message.answer(f"❌ Export failed: {e}")
+
+
+@router.callback_query(F.data == "admin:subscriptions")
+async def cb_admin_view_subscriptions(callback: CallbackQuery) -> None:
+    """View active subscribers list and plan breakdown."""
+    user = callback.from_user
+    if not user or not is_admin(user.id):
+        await callback.answer("Access Denied.", show_alert=True)
+        return
+
+    async with db._get_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT s.telegram_id, s.plan_tier, s.daily_video_limit, s.today_video_used, s.expiry_date, u.username, u.first_name
+            FROM user_subscriptions s
+            LEFT JOIN users u ON s.telegram_id = u.telegram_id
+            WHERE datetime(s.expiry_date) > datetime('now')
+            ORDER BY s.expiry_date ASC
+            LIMIT 15
+            """
+        )
+        subs = await cur.fetchall()
+
+    lines = ["👑 <b>Active Subscribers Overview</b>\n"]
+    if subs:
+        for idx, s in enumerate(subs, start=1):
+            name = html.escape(s["username"] or s["first_name"] or str(s["telegram_id"]))
+            lines.append(
+                f"{idx}. <b>{name}</b> (<code>{s['telegram_id']}</code>)\n"
+                f"   └ Plan: <b>{s['plan_tier'].upper()}</b> | Quota: {s['today_video_used']}/{s['daily_video_limit']} used\n"
+                f"   └ Expiry: <code>{s['expiry_date']}</code>"
+            )
+    else:
+        lines.append("<i>No active subscribers currently found.</i>")
+
+    lines.append("\n<b>Admin Commands:</b>")
+    lines.append("• <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>")
+    lines.append("• <code>/sub_deactivate &lt;user_id&gt;</code>")
+    lines.append("• <code>/sub_status &lt;user_id&gt;</code>")
+
+    if callback.message:
+        await callback.message.edit_text(
+            text="\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")
+            ]]),
+            parse_mode="HTML"
+        )
+    await callback.answer()
+
+
+@router.message(Command("sub_activate"))
+async def cmd_admin_activate_sub(message: Message) -> None:
+    """Admin command to grant or override a subscription: /sub_activate <user_id> <plan> [days]"""
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        await message.answer("🚫 Access Denied.")
+        return
+
+    args = (message.text or "").split()[1:]
+    if len(args) < 2:
+        await message.answer(
+            "📖 <b>Usage:</b> <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>\n\n"
+            "• <b>Plans:</b> <code>go</code>, <code>pro</code>, <code>ultra</code>, <code>max</code>\n"
+            "• <i>Examples:</i>\n"
+            "  <code>/sub_activate 123456789 pro</code>\n"
+            "  <code>/sub_activate 123456789 max 365</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        target_uid = int(args[0])
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Must be numeric Telegram ID.")
+        return
+
+    plan_key = args[1].lower()
+    custom_days = int(args[2]) if len(args) > 2 and args[2].isdigit() else None
+
+    await db.add_or_update_user(target_uid, username=None, first_name=None)
+    result = await db.activate_subscription(target_uid, plan_key, custom_days)
+
+    await message.answer(
+        f"✅ <b>Subscription Activated!</b>\n\n"
+        f"• <b>User ID:</b> <code>{target_uid}</code>\n"
+        f"• <b>Plan:</b> <b>{result['plan_tier'].capitalize()} Pass</b>\n"
+        f"• <b>Daily HD Quota:</b> <code>{result['daily_video_limit']} videos/day</code>\n"
+        f"• <b>Valid Duration:</b> <code>{result['days']} days</code>\n"
+        f"• <b>Expires At:</b> <code>{result['expiry_date']} UTC</code>",
+        parse_mode="HTML"
+    )
+
+    try:
+        await message.bot.send_message(
+            chat_id=target_uid,
+            text=(
+                f"🎉 <b>Subscription Activated by Administrator!</b>\n\n"
+                f"You have been upgraded to the <b>{result['plan_tier'].capitalize()} Pass</b>!\n"
+                f"• Daily HD Video Quota: <b>{result['daily_video_limit']} videos/day</b>\n"
+                f"• Valid Until: <code>{result['expiry_date']} UTC</code>\n\n"
+                f"Enjoy unlimited high-speed downloads!"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Could not alert user {target_uid}: {e}")
+
+
+@router.message(Command("sub_deactivate"))
+@router.message(Command("sub_revoke"))
+async def cmd_admin_deactivate_sub(message: Message) -> None:
+    """Admin command to revoke a subscription: /sub_deactivate <user_id>"""
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        await message.answer("🚫 Access Denied.")
+        return
+
+    args = (message.text or "").split()[1:]
+    if not args:
+        await message.answer("📖 <b>Usage:</b> <code>/sub_deactivate &lt;user_id&gt;</code>", parse_mode="HTML")
+        return
+
+    try:
+        target_uid = int(args[0])
+    except ValueError:
+        await message.answer("❌ Invalid User ID.")
+        return
+
+    await db.deactivate_subscription(target_uid)
+    await message.answer(
+        f"✅ <b>Subscription Revoked!</b>\n"
+        f"User <code>{target_uid}</code> has been returned to the Normal (Free) tier.",
+        parse_mode="HTML"
+    )
+
+    try:
+        await message.bot.send_message(
+            chat_id=target_uid,
+            text="⚠️ Your premium subscription has been ended by the administrator.",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
+@router.message(Command("sub_status"))
+async def cmd_admin_sub_status(message: Message) -> None:
+    """Admin command to check user's subscription: /sub_status <user_id>"""
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        await message.answer("🚫 Access Denied.")
+        return
+
+    args = (message.text or "").split()[1:]
+    if not args:
+        await message.answer("📖 <b>Usage:</b> <code>/sub_status &lt;user_id&gt;</code>", parse_mode="HTML")
+        return
+
+    try:
+        target_uid = int(args[0])
+    except ValueError:
+        await message.answer("❌ Invalid User ID.")
+        return
+
+    sub = await db.get_user_subscription(target_uid)
+    if not sub or not sub.get("is_active"):
+        await message.answer(
+            f"ℹ️ User <code>{target_uid}</code> has <b>no active subscription</b> (Normal Free Tier).",
+            parse_mode="HTML"
+        )
+        return
+
+    await message.answer(
+        f"👑 <b>Subscription Status for User <code>{target_uid}</code></b>\n\n"
+        f"• <b>Tier:</b> <code>{sub['plan_tier'].capitalize()} Pass</code>\n"
+        f"• <b>Daily HD Limit:</b> <code>{sub['daily_limit']} videos/day</code>\n"
+        f"• <b>Used Today:</b> <code>{sub['today_used']} videos</code>\n"
+        f"• <b>Remaining Today:</b> <code>{sub['today_remaining']} videos</code>\n"
+        f"• <b>Expires At:</b> <code>{sub['expiry_date']} UTC</code>\n"
+        f"• <b>Status:</b> 🟢 Active",
+        parse_mode="HTML"
+    )

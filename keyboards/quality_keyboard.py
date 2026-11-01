@@ -97,14 +97,22 @@ def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="💎 Weekly Pass (20 HD/day) — ₹38",
-                    callback_data=f"pay:weekly:{video_id}:{quality}"
+                    text="⚡ Go Pass (20 HD/d • 7d) — ₹38",
+                    callback_data=f"pay:go:{video_id}:{quality}"
+                ),
+                InlineKeyboardButton(
+                    text="🚀 Pro (45 HD/d • 30d) — ₹120",
+                    callback_data=f"pay:pro:{video_id}:{quality}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="👑 Monthly VIP (45 HD/day) — ₹120",
-                    callback_data=f"pay:monthly:{video_id}:{quality}"
+                    text="⚡ Ultra (80 HD/d • 90d) — ₹299",
+                    callback_data=f"pay:ultra:{video_id}:{quality}"
+                ),
+                InlineKeyboardButton(
+                    text="👑 Max VIP (150 HD/d • 1yr) — ₹799",
+                    callback_data=f"pay:max:{video_id}:{quality}"
                 )
             ],
             [
@@ -123,7 +131,7 @@ def get_payment_qr_keyboard(order_id: str, upi_uri: str) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📱 Pay with Google Pay / UPI App", url=upi_uri)
+                InlineKeyboardButton(text="📱 Open Any UPI App (GPay/PhonePe/Paytm)", url=upi_uri)
             ],
             [
                 InlineKeyboardButton(
@@ -133,7 +141,7 @@ def get_payment_qr_keyboard(order_id: str, upi_uri: str) -> InlineKeyboardMarkup
             ],
             [
                 InlineKeyboardButton(
-                    text="💬 Contact Admin",
+                    text="💬 Contact Admin (@coder_chandan)",
                     url="https://t.me/coder_chandan"
                 ),
                 InlineKeyboardButton(text="❌ Cancel Order", callback_data="cancel_action")

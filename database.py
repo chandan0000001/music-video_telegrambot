@@ -37,6 +37,10 @@ class Database:
             with open(schema_file, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
             await conn.executescript(schema_sql)
+            try:
+                await conn.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
+            except Exception:
+                pass
             await conn.commit()
         logger.info(f"Database initialized successfully at {self.db_path}")
 
@@ -346,17 +350,23 @@ class Database:
         media_title: Optional[str] = None,
         quality: Optional[str] = None
     ) -> str:
-        """Create new pending order and return unique order_id."""
+        """Create new pending order with 10-minute validity and return unique order_id."""
         import time
         import uuid
+        from datetime import datetime, timezone, timedelta
+        from config import ORDER_EXPIRY_MINUTES
+
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(minutes=ORDER_EXPIRY_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
         order_id = f"ORD_{int(time.time() * 1000)}_{telegram_id}_{uuid.uuid4().hex[:6].upper()}"
+
         async with self._get_connection() as conn:
             await conn.execute(
                 """
-                INSERT INTO orders (order_id, telegram_id, order_type, amount_inr, status, media_id, media_title, quality)
-                VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+                INSERT INTO orders (order_id, telegram_id, order_type, amount_inr, status, media_id, media_title, quality, expires_at)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                 """,
-                (order_id, telegram_id, order_type, amount_inr, media_id, media_title, quality)
+                (order_id, telegram_id, order_type, amount_inr, media_id, media_title, quality, expires_at)
             )
             await conn.commit()
         return order_id
@@ -370,6 +380,26 @@ class Database:
             )
             row = await cur.fetchone()
             return dict(row) if row else None
+
+    def is_order_expired(self, order: dict[str, Any]) -> bool:
+        """Check if order has exceeded its 10-minute validity."""
+        from datetime import datetime, timezone
+        from config import ORDER_EXPIRY_MINUTES
+
+        expires_at_str = order.get("expires_at")
+        if not expires_at_str:
+            try:
+                created_str = order.get("created_at", "")
+                created_dt = datetime.fromisoformat(created_str.replace(" ", "T")).replace(tzinfo=timezone.utc)
+                return (datetime.now(timezone.utc) - created_dt).total_seconds() > (ORDER_EXPIRY_MINUTES * 60)
+            except Exception:
+                return False
+
+        try:
+            exp_dt = datetime.fromisoformat(expires_at_str.replace(" ", "T")).replace(tzinfo=timezone.utc)
+            return datetime.now(timezone.utc) > exp_dt
+        except Exception:
+            return False
 
     async def is_utr_already_used(self, utr_number: str) -> bool:
         """Check if UTR has already been successfully redeemed (anti-fraud)."""
@@ -412,8 +442,8 @@ class Database:
             await conn.commit()
 
         # If it's a subscription pass, activate it!
-        if order_dict["order_type"] in ("sub_weekly", "sub_monthly"):
-            plan = "weekly" if order_dict["order_type"] == "sub_weekly" else "monthly"
+        if order_dict["order_type"].startswith("sub_"):
+            plan = order_dict["order_type"].replace("sub_", "")
             await self.activate_subscription(order_dict["telegram_id"], plan)
 
         order_dict["status"] = "paid"
@@ -421,16 +451,24 @@ class Database:
 
     # ------------------ Subscriptions ------------------
 
-    async def activate_subscription(self, telegram_id: int, plan_tier: str) -> dict[str, Any]:
-        """Activate or extend user subscription."""
+    async def activate_subscription(
+        self,
+        telegram_id: int,
+        plan_tier: str,
+        custom_days: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Activate or extend user subscription (Go, Pro, Ultra, Max)."""
         from datetime import datetime, timezone, timedelta
-        from config import LIMIT_WEEKLY_DAILY_VIDEOS, LIMIT_MONTHLY_DAILY_VIDEOS
+        from config import SUBSCRIPTION_PLANS
 
         now = datetime.now(timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
 
-        days = 7 if plan_tier == "weekly" else 30
-        daily_limit = LIMIT_WEEKLY_DAILY_VIDEOS if plan_tier == "weekly" else LIMIT_MONTHLY_DAILY_VIDEOS
+        plan_key = plan_tier.lower().replace("sub_", "")
+        plan_info = SUBSCRIPTION_PLANS.get(plan_key, SUBSCRIPTION_PLANS["go"])
+
+        days = custom_days if (custom_days and custom_days > 0) else plan_info["days"]
+        daily_limit = plan_info["daily_limit"]
         expiry_date = now + timedelta(days=days)
         expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -446,8 +484,27 @@ class Database:
                     today_video_used = 0,
                     last_reset_date = excluded.last_reset_date
                 """,
-                (telegram_id, plan_tier, expiry_str, daily_limit, today_str)
+                (telegram_id, plan_key, expiry_str, daily_limit, today_str)
             )
+            await conn.commit()
+
+        return {
+            "telegram_id": telegram_id,
+            "plan_tier": plan_key,
+            "expiry_date": expiry_str,
+            "daily_video_limit": daily_limit,
+            "days": days
+        }
+
+    async def deactivate_subscription(self, telegram_id: int) -> bool:
+        """Deactivate/revoke user subscription immediately."""
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM user_subscriptions WHERE telegram_id = ?",
+                (telegram_id,)
+            )
+            await conn.commit()
+            return True
             await conn.commit()
 
         return {

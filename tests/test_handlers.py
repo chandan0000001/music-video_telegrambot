@@ -158,8 +158,10 @@ def test_video_quality_keyboard_badges():
     pay_kb = get_paywall_keyboard("test_vid", "720p")
     pay_callbacks = [btn.callback_data for row in pay_kb.inline_keyboard for btn in row if btn.callback_data]
     assert any("pay:single:test_vid:720p" in c for c in pay_callbacks)
-    assert any("pay:weekly:test_vid:720p" in c for c in pay_callbacks)
-    assert any("pay:monthly:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:go:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:pro:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:ultra:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:max:test_vid:720p" in c for c in pay_callbacks)
 
 
 def test_payment_pricing_and_qr_generation():
@@ -224,5 +226,56 @@ async def test_database_orders_and_subscriptions():
     await db.use_subscription_video_quota(test_user)
     sub_after = await db.get_user_subscription(test_user)
     assert sub_after["today_remaining"] == 19
+
+
+def test_subscription_tier_plans_config():
+    """Verify Go, Pro, Ultra, Max plan configurations and pricing."""
+    from config import SUBSCRIPTION_PLANS
+    assert "normal" in SUBSCRIPTION_PLANS
+    assert "go" in SUBSCRIPTION_PLANS
+    assert "pro" in SUBSCRIPTION_PLANS
+    assert "ultra" in SUBSCRIPTION_PLANS
+    assert "max" in SUBSCRIPTION_PLANS
+
+    assert SUBSCRIPTION_PLANS["go"]["price"] == 38
+    assert SUBSCRIPTION_PLANS["pro"]["price"] == 120
+    assert SUBSCRIPTION_PLANS["ultra"]["price"] == 299
+    assert SUBSCRIPTION_PLANS["max"]["price"] == 799
+
+
+@pytest.mark.asyncio
+async def test_order_10_minute_expiry_logic():
+    """Verify 10-minute order expiry validation."""
+    from database import db
+    from datetime import datetime, timezone, timedelta
+
+    order_valid = {"expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")}
+    assert db.is_order_expired(order_valid) is False
+
+    order_expired = {"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")}
+    assert db.is_order_expired(order_expired) is True
+
+
+@pytest.mark.asyncio
+async def test_admin_subscription_activate_and_revoke():
+    """Verify Admin can activate any tier and revoke subscription for any user."""
+    from database import db
+    target_user = 555444333
+    await db.add_or_update_user(target_user, "target", "TargetUser")
+
+    # Activate Pro plan
+    res = await db.activate_subscription(target_user, "pro", custom_days=30)
+    assert res["plan_tier"] == "pro"
+    assert res["daily_video_limit"] == 45
+
+    sub = await db.get_user_subscription(target_user)
+    assert sub["is_active"] is True
+    assert sub["plan_tier"] == "pro"
+
+    # Revoke subscription
+    await db.deactivate_subscription(target_user)
+    sub_revoked = await db.get_user_subscription(target_user)
+    assert sub_revoked is None
+
 
 

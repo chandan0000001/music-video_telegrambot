@@ -108,15 +108,16 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             price = 29 if resolution == "720p" else 49
             paywall_text = (
                 f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n"
-                f"   💎 **PREMIUM VIDEO QUALITY ({resolution})** 💎\n"
+                f"   💎 **PREMIUM VIDEO ACCESS ({resolution})** 💎\n"
                 f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n\n"
-                f"You selected **{resolution} Full HD**.\n"
-                f"Standard qualities (`144p` to `480p`) and music downloads are **100% Free**.\n\n"
-                f"✨ **Choose an Option to Unlock:**\n"
-                f"• ⚡ **Single {resolution} Video:** Only `₹{price}`\n"
-                f"• 💎 **Weekly Pass:** `₹38 / week` (20 HD videos/day)\n"
-                f"• 👑 **Monthly VIP:** `₹120 / month` (45 HD videos/day)\n\n"
-                f"👇 *Select your preferred plan below:*"
+                f"Standard qualities (`144p` - `480p`) & music are **100% Free (Normal Tier)**.\n"
+                f"To unlock **{resolution} Full HD**, choose an access pass below:\n\n"
+                f"⚡ **Single Video:** `₹{price}` (Unlock this video only)\n"
+                f"⚡ **Go Pass:** `₹38 / 7 Days` (20 HD videos/day)\n"
+                f"🚀 **Pro Pass:** `₹120 / 30 Days` (45 HD videos/day)\n"
+                f"⚡ **Ultra Pass:** `₹299 / 90 Days` (80 HD videos/day)\n"
+                f"👑 **Max VIP:** `₹799 / 365 Days` (150 HD videos/day + 2GB Bandwidth)\n\n"
+                f"👇 *Tap a button below to get your instant UPI QR code:*"
             )
             await status_msg.edit_text(
                 text=paywall_text,

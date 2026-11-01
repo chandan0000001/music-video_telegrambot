@@ -13,8 +13,7 @@ from config import (
     PAYMENT_MERCHANT_NAME,
     PRICE_SINGLE_720P,
     PRICE_SINGLE_1080P,
-    PRICE_WEEKLY_PASS,
-    PRICE_MONTHLY_PASS,
+    SUBSCRIPTION_PLANS,
 )
 from database import db
 from services.gmail_service import gmail_service
@@ -32,10 +31,16 @@ class PaymentService:
             if quality == "720p":
                 return float(PRICE_SINGLE_720P)
             return float(PRICE_SINGLE_1080P)
-        elif order_type == "sub_weekly":
-            return float(PRICE_WEEKLY_PASS)
-        elif order_type == "sub_monthly":
-            return float(PRICE_MONTHLY_PASS)
+
+        plan_key = order_type.replace("sub_", "").lower()
+        if plan_key == "weekly":
+            plan_key = "go"
+        elif plan_key == "monthly":
+            plan_key = "pro"
+
+        if plan_key in SUBSCRIPTION_PLANS:
+            return float(SUBSCRIPTION_PLANS[plan_key]["price"])
+
         return float(PRICE_SINGLE_720P)
 
     @staticmethod
@@ -85,7 +90,10 @@ class PaymentService:
 
         order = await db.get_order(order_id)
         if not order:
-            return False, "❌ Order not found or expired."
+            return False, "❌ Order not found."
+
+        if db.is_order_expired(order):
+            return False, "❌ Order Expired: The 10-minute validity period has elapsed. Please start a new request to get a fresh QR."
 
         if order["status"] == "paid":
             return True, "✅ Order has already been paid and activated."
