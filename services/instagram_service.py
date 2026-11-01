@@ -198,7 +198,7 @@ class InstagramService:
         """
         Extract media items from an Instagram URL.
         Supports:
-        - Posts & Reels (Single photo, video, multi-item carousels)
+        - Posts & Reels (Single photo, video, multi-item mixed carousels)
         - Stories
         - Highlights
         """
@@ -213,30 +213,233 @@ class InstagramService:
         if category == "profile":
             return False, [], "ℹ️ This is a profile URL. Use the Profile Downloader feature to view details and HD DP."
 
-        # Strategy 1: Cobalt API extraction
-        try:
-            items = await self._extract_via_cobalt(url)
-            if items:
-                return True, items[:self.max_items_limit], None
-        except Exception as e:
-            logger.debug(f"Cobalt extraction failed for {url}: {e}")
+        canonical_url = f"https://www.instagram.com/{category}/{identifier}/"
 
-        # Strategy 2: Direct yt-dlp extraction
+        # Strategy 1: Direct Embed / Web HTML / GraphQL extraction (best for photos & mixed carousels)
         try:
-            items, err = await self._extract_via_ytdlp(url)
+            items = await self._extract_via_embed_and_html(identifier, category)
             if items:
                 return True, items[:self.max_items_limit], None
-            if err:
-                if "private" in err.lower() or "login" in err.lower():
-                    return False, [], "🔒 This content belongs to a Private Account and cannot be downloaded directly."
-                return False, [], err
         except Exception as e:
-            logger.error(f"yt-dlp Instagram extraction error for {url}: {e}")
+            logger.debug(f"Direct embed/HTML extraction failed for {identifier}: {e}")
+
+        # Strategy 2: Public Cobalt API extraction
+        try:
+            items = await self._extract_via_cobalt(canonical_url)
+            if items:
+                return True, items[:self.max_items_limit], None
+        except Exception as e:
+            logger.debug(f"Cobalt extraction failed for {canonical_url}: {e}")
+
+        # Strategy 3: Direct yt-dlp extraction
+        try:
+            items, err = await self._extract_via_ytdlp(canonical_url)
+            if items:
+                return True, items[:self.max_items_limit], None
+            if err and ("private" in err.lower() or "login" in err.lower()):
+                return False, [], "🔒 This content belongs to a Private Account and cannot be downloaded directly."
+        except Exception as e:
+            logger.debug(f"yt-dlp extraction error for {canonical_url}: {e}")
+
+        # Strategy 4: ddinstagram mirror extraction for multi-media carousels
+        try:
+            items = await self._extract_via_ddinstagram(identifier)
+            if items:
+                return True, items[:self.max_items_limit], None
+        except Exception as e:
+            logger.debug(f"ddinstagram extraction failed for {identifier}: {e}")
 
         if category in ("story", "highlight"):
             return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or from a private account."
 
         return False, [], "⚠️ Could not retrieve media from this Instagram post. It may be private or restricted."
+
+    async def _extract_via_embed_and_html(self, shortcode: str, category: str = "p") -> Optional[List[Dict[str, Any]]]:
+        """
+        Extract photos, videos, and mixed carousels directly from Instagram's public embed and web endpoints.
+        Bypasses 'No video formats found' issues for photo and mixed carousels.
+        """
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        urls_to_try = [
+            f"https://www.instagram.com/p/{shortcode}/embed/captioned/",
+            f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis",
+            f"https://www.instagram.com/{category}/{shortcode}/",
+        ]
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            for fetch_url in urls_to_try:
+                try:
+                    async with session.get(fetch_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status != 200:
+                            continue
+                        content_type = resp.headers.get("Content-Type", "")
+
+                        # 1. Check if JSON response (__a=1)
+                        if "json" in content_type:
+                            data = await resp.json()
+                            items = self._parse_instagram_json_payload(data)
+                            if items:
+                                return items
+
+                        # 2. Check HTML response
+                        html_text = await resp.text()
+                        items = self._parse_instagram_html_text(html_text)
+                        if items:
+                            return items
+                except Exception as e:
+                    logger.debug(f"Error fetching {fetch_url}: {e}")
+                    continue
+
+        return None
+
+    def _parse_instagram_json_payload(self, data: dict) -> List[Dict[str, Any]]:
+        """Parse structured Instagram API JSON items."""
+        items: List[Dict[str, Any]] = []
+        raw_items = data.get("items") or []
+        if not raw_items:
+            # Check graphql shortcode_media
+            media = data.get("graphql", {}).get("shortcode_media") or {}
+            if media:
+                return self._parse_graphql_media_node(media)
+            return items
+
+        first = raw_items[0]
+        # Check carousel
+        if first.get("carousel_media"):
+            for c_item in first["carousel_media"]:
+                if c_item.get("video_versions"):
+                    v_url = c_item["video_versions"][0]["url"]
+                    items.append({"type": "video", "url": v_url})
+                elif c_item.get("image_versions2", {}).get("candidates"):
+                    img_url = c_item["image_versions2"]["candidates"][0]["url"]
+                    items.append({"type": "photo", "url": img_url})
+            return items
+
+        # Single video
+        if first.get("video_versions"):
+            return [{"type": "video", "url": first["video_versions"][0]["url"]}]
+        # Single photo
+        if first.get("image_versions2", {}).get("candidates"):
+            return [{"type": "photo", "url": first["image_versions2"]["candidates"][0]["url"]}]
+
+        return items
+
+    def _parse_graphql_media_node(self, node: dict) -> List[Dict[str, Any]]:
+        """Parse GraphQL shortcode_media node."""
+        items: List[Dict[str, Any]] = []
+        sidecar = node.get("edge_sidecar_to_children", {}).get("edges", [])
+        if sidecar:
+            for edge in sidecar:
+                child = edge.get("node", {})
+                w = child.get("dimensions", {}).get("width", 0)
+                h = child.get("dimensions", {}).get("height", 0)
+                if child.get("is_video") and child.get("video_url"):
+                    items.append({"type": "video", "url": child["video_url"], "width": w, "height": h})
+                elif child.get("display_url"):
+                    best_url = child["display_url"]
+                    if child.get("display_resources"):
+                        best_res = max(child["display_resources"], key=lambda r: r.get("config_width", 0))
+                        best_url = best_res.get("src") or best_url
+                    items.append({"type": "photo", "url": best_url, "width": w, "height": h})
+            return items
+
+        if node.get("is_video") and node.get("video_url"):
+            return [{"type": "video", "url": node["video_url"]}]
+        if node.get("display_url"):
+            return [{"type": "photo", "url": node["display_url"]}]
+
+        return items
+
+    def _parse_instagram_html_text(self, html_text: str) -> List[Dict[str, Any]]:
+        """Parse Instagram HTML embed or post page for photos, videos, and mixed carousels."""
+        items: List[Dict[str, Any]] = []
+
+        # 1. Search for edge_sidecar_to_children in script tags
+        import json
+        sidecar_match = re.search(r'\"edge_sidecar_to_children\":\s*\{\s*\"edges\":\s*(\[.*?\])\s*\}', html_text, re.DOTALL)
+        if sidecar_match:
+            try:
+                edges = json.loads(sidecar_match.group(1))
+                for edge in edges:
+                    node = edge.get("node", {})
+                    w = node.get("dimensions", {}).get("width", 0)
+                    h = node.get("dimensions", {}).get("height", 0)
+                    if node.get("is_video") and node.get("video_url"):
+                        items.append({"type": "video", "url": node["video_url"], "width": w, "height": h})
+                    elif node.get("display_url"):
+                        best_url = node["display_url"]
+                        if node.get("display_resources"):
+                            best_res = max(node["display_resources"], key=lambda r: r.get("config_width", 0))
+                            best_url = best_res.get("src") or best_url
+                        items.append({"type": "photo", "url": best_url, "width": w, "height": h})
+                if items:
+                    return items
+            except Exception:
+                pass
+
+        # 2. Check single video_url or display_url in JSON-LD / scripts
+        vid_match = re.search(r'\"video_url\":\s*\"([^\"]+)\"', html_text)
+        if vid_match:
+            try:
+                vid_url = vid_match.group(1).encode().decode("unicode-escape").replace(r"\/", "/")
+                items.append({"type": "video", "url": vid_url})
+                return items
+            except Exception:
+                pass
+
+        img_match = re.search(r'\"display_url\":\s*\"([^\"]+)\"', html_text)
+        if img_match:
+            try:
+                img_url = img_match.group(1).encode().decode("unicode-escape").replace(r"\/", "/")
+                items.append({"type": "photo", "url": img_url})
+                return items
+            except Exception:
+                pass
+
+        # 3. OpenGraph tags in HTML
+        og_vid = re.search(r'<meta\s+(?:property|name)=[\"\']og:video(?::secure_url)?[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html_text)
+        if og_vid:
+            items.append({"type": "video", "url": og_vid.group(1).replace("&amp;", "&")})
+            return items
+
+        og_img = re.search(r'<meta\s+(?:property|name)=[\"\']og:image[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html_text)
+        if og_img:
+            items.append({"type": "photo", "url": og_img.group(1).replace("&amp;", "&")})
+            return items
+
+        return items
+
+    async def _extract_via_ddinstagram(self, shortcode: str) -> Optional[List[Dict[str, Any]]]:
+        """Attempt extraction via ddinstagram mirror for multi-media carousels."""
+        url = f"https://www.ddinstagram.com/p/{shortcode}/"
+        headers = {
+            "User-Agent": "TelegramBot (like TwitterBot)",
+            "Accept": "text/html,application/xhtml+xml",
+        }
+        try:
+            connector = aiohttp.TCPConnector(ssl=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        html_text = await resp.text()
+                        videos = re.findall(r'<meta\s+(?:property|name)=[\"\']og:video(?::secure_url)?[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html_text)
+                        images = re.findall(r'<meta\s+(?:property|name)=[\"\']og:image[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html_text)
+                        items = []
+                        for v in videos:
+                            items.append({"type": "video", "url": v.replace("&amp;", "&")})
+                        for im in images:
+                            items.append({"type": "photo", "url": im.replace("&amp;", "&")})
+                        if items:
+                            return items
+        except Exception:
+            pass
+        return None
 
     async def _extract_via_cobalt(self, url: str) -> Optional[List[Dict[str, Any]]]:
         """Attempt extraction via public Cobalt API instance."""
@@ -323,6 +526,11 @@ class InstagramService:
                     direct_url = entry.get("url")
                     if not direct_url and entry.get("formats"):
                         direct_url = entry["formats"][-1].get("url")
+                    if not direct_url and entry.get("thumbnail"):
+                        direct_url = entry.get("thumbnail")
+                    elif not direct_url and entry.get("thumbnails"):
+                        direct_url = entry["thumbnails"][-1].get("url")
+
                     if direct_url:
                         is_video = bool(entry.get("vcodec") and entry.get("vcodec") != "none") or (entry.get("ext") == "mp4")
                         items.append({
@@ -340,6 +548,8 @@ class InstagramService:
             direct_url = info.get("url")
             if not direct_url and info.get("formats"):
                 direct_url = info["formats"][-1].get("url")
+            if not direct_url and info.get("thumbnail"):
+                direct_url = info.get("thumbnail")
 
             if direct_url:
                 is_video = bool(info.get("vcodec") and info.get("vcodec") != "none") or (info.get("ext") == "mp4")
@@ -418,6 +628,13 @@ class InstagramService:
             dest_file = job_dir / f"media_1.{ext}"
             ok = await self.download_file(item["url"], dest_file, tracker=tracker)
             if ok and dest_file.exists() and dest_file.stat().st_size > 0:
+                if item_type == "video":
+                    from services.ffmpeg_service import ffmpeg_service
+                    capped_file = job_dir / f"capped_{dest_file.name}"
+                    did_cap = await ffmpeg_service.cap_video_to_1080p(dest_file, capped_file)
+                    if did_cap and capped_file.exists() and capped_file.stat().st_size > 0:
+                        dest_file.unlink(missing_ok=True)
+                        capped_file.rename(dest_file)
                 return [{**item, "file_path": dest_file, "index": 0}]
             return []
 
@@ -493,6 +710,18 @@ class InstagramService:
                 downloaded.append(res)
 
         downloaded.sort(key=lambda x: x.get("index", 0))
+
+        # Cap any videos exceeding 1080p to 1080p using FFmpeg; leave photos untouched at original quality
+        from services.ffmpeg_service import ffmpeg_service
+        for it in downloaded:
+            if it.get("type") == "video" and it.get("file_path"):
+                v_file = it["file_path"]
+                capped_file = job_dir / f"capped_{v_file.name}"
+                did_cap = await ffmpeg_service.cap_video_to_1080p(v_file, capped_file)
+                if did_cap and capped_file.exists() and capped_file.stat().st_size > 0:
+                    v_file.unlink(missing_ok=True)
+                    capped_file.rename(v_file)
+
         return downloaded
 
 

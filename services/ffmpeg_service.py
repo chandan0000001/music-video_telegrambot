@@ -268,6 +268,45 @@ class FFmpegService:
         success, _ = await self._run_command(cmd, timeout=FFMPEG_TIMEOUT * 2)
         return success and output_file.exists() and output_file.stat().st_size > 0
 
+    async def cap_video_to_1080p(self, input_file: Path, output_file: Path) -> bool:
+        """
+        If video exceeds 1080p (e.g. 2K, 4K), downscale to 1080p preserving original aspect ratio.
+        Returns True if downscaled, False if video is already <= 1080p.
+        """
+        probe = await self.probe_media(input_file)
+        if not probe or "streams" not in probe:
+            return False
+
+        v_stream = next((s for s in probe["streams"] if s.get("codec_type") == "video"), None)
+        if not v_stream:
+            return False
+
+        try:
+            width = int(v_stream.get("width") or 0)
+            height = int(v_stream.get("height") or 0)
+        except Exception:
+            return False
+
+        exceeds = (width > 1920 or height > 1920) or (min(width, height) > 1080)
+        if not exceeds:
+            return False
+
+        scale_filter = "scale='min(1080,iw)':-2" if height >= width else "scale=-2:'min(1080,ih)'"
+
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", str(input_file),
+            "-vf", scale_filter,
+            "-c:v", "libx264",
+            "-preset", "faster",
+            "-crf", "20",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            str(output_file)
+        ]
+        ok, _ = await self._run_command(cmd, timeout=FFMPEG_TIMEOUT * 2)
+        return ok and output_file.exists() and output_file.stat().st_size > 0
+
     async def split_video_into_chunks(
         self,
         input_file: Path,
