@@ -319,7 +319,7 @@ class Database:
 
     async def export_table_to_csv(self, table_name: str) -> str:
         """Export specified table data as a CSV formatted string."""
-        if table_name not in {"users", "search_history", "downloads"}:
+        if table_name not in {"users", "search_history", "downloads", "user_subscriptions", "orders"}:
             raise ValueError(f"Invalid table name: {table_name}")
 
         async with self._get_connection() as conn:

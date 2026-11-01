@@ -43,6 +43,10 @@ def get_admin_dashboard_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="👑 Active Subscriptions", callback_data="admin:subscriptions"),
+                InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers")
+            ],
+            [
+                InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders"),
                 InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
             ],
             [
@@ -561,12 +565,226 @@ async def cb_admin_view_subscriptions(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.edit_text(
             text="\n".join(lines),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")
-            ]]),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers"),
+                    InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders")
+                ],
+                [
+                    InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")
+                ]
+            ]),
             parse_mode="HTML"
         )
     await callback.answer()
+
+
+@router.message(Command("subscribers"))
+@router.callback_query(F.data == "admin:plan_subscribers")
+async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
+    """View all subscribers and their respective plans with username and user ID."""
+    user = event.from_user
+    if not user or not is_admin(user.id):
+        if isinstance(event, CallbackQuery):
+            await event.answer("Access Denied.", show_alert=True)
+        else:
+            await event.answer("⛔ Access Denied.")
+        return
+
+    async with db._get_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT 
+                s.telegram_id, 
+                s.plan_tier, 
+                s.daily_video_limit, 
+                s.today_video_used, 
+                s.start_date,
+                s.expiry_date, 
+                u.username, 
+                u.first_name,
+                CASE 
+                    WHEN datetime(s.expiry_date) > datetime('now') THEN 1 
+                    ELSE 0 
+                END as is_active
+            FROM user_subscriptions s
+            LEFT JOIN users u ON s.telegram_id = u.telegram_id
+            ORDER BY 
+                CASE s.plan_tier
+                    WHEN 'max' THEN 1
+                    WHEN 'ultra' THEN 2
+                    WHEN 'pro' THEN 3
+                    WHEN 'go' THEN 4
+                    WHEN 'weekly' THEN 4
+                    ELSE 5
+                END,
+                s.expiry_date DESC
+            LIMIT 30
+            """
+        )
+        subscribers = await cur.fetchall()
+
+        # Count active users per plan
+        cur = await conn.execute(
+            """
+            SELECT plan_tier, COUNT(*) as count 
+            FROM user_subscriptions 
+            WHERE datetime(expiry_date) > datetime('now')
+            GROUP BY plan_tier
+            """
+        )
+        counts = {row["plan_tier"]: row["count"] for row in await cur.fetchall()}
+
+    tier_badges = {
+        "max": "👑 MAX VIP",
+        "ultra": "⚡ ULTRA PASS",
+        "pro": "🚀 PRO PASS",
+        "go": "⚡ GO PASS",
+        "weekly": "⚡ GO PASS",
+        "normal": "🟢 NORMAL (Free)"
+    }
+
+    lines = [
+        "💎 <b>Subscribers Directory &amp; Plan Breakdown</b>\n",
+        "📊 <b>Active Subscribers per Plan:</b>",
+        f"• 👑 Max VIP: <b>{counts.get('max', 0)}</b> user(s)",
+        f"• ⚡ Ultra Pass: <b>{counts.get('ultra', 0)}</b> user(s)",
+        f"• 🚀 Pro Pass: <b>{counts.get('pro', 0)}</b> user(s)",
+        f"• ⚡ Go Pass: <b>{counts.get('go', 0) + counts.get('weekly', 0)}</b> user(s)\n",
+        "👥 <b>Subscribers List (Username &amp; User ID):</b>"
+    ]
+
+    if subscribers:
+        for idx, sub in enumerate(subscribers, start=1):
+            uname = f"@{html.escape(sub['username'])}" if sub.get("username") else "<i>No username</i>"
+            name = html.escape(sub.get("first_name") or "User")
+            plan_name = tier_badges.get(sub["plan_tier"].lower(), sub["plan_tier"].upper())
+            status = "🟢 <b>ACTIVE</b>" if sub["is_active"] else "🔴 <b>EXPIRED</b>"
+            exp = sub.get("expiry_date", "").split(".")[0]
+            lines.append(
+                f"{idx}. 👤 <b>{name}</b> ({uname})\n"
+                f"   ├ 🆔 <b>User ID:</b> <code>{sub['telegram_id']}</code>\n"
+                f"   ├ 💎 <b>Plan:</b> <b>{plan_name}</b>\n"
+                f"   ├ ⚡ <b>Daily Quota:</b> <code>{sub['today_video_used']}/{sub['daily_video_limit']}</code> used\n"
+                f"   ├ ⏰ <b>Expires:</b> <code>{exp}</code>\n"
+                f"   └ 📊 <b>Status:</b> {status}\n"
+            )
+    else:
+        lines.append("<i>No active or recorded subscriptions found.</i>")
+
+    lines.append("\n💡 <b>Manage:</b> <code>/sub_activate &lt;id&gt; &lt;plan&gt; [days]</code> | <code>/sub_deactivate &lt;id&gt;</code>")
+
+    text = "\n".join(lines)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Refresh", callback_data="admin:plan_subscribers"),
+                InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders")
+            ],
+            [
+                InlineKeyboardButton(text="📥 CSV Subscriptions", callback_data="admin:export:user_subscriptions"),
+                InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")
+            ]
+        ]
+    )
+
+    if isinstance(event, CallbackQuery):
+        if event.message:
+            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await event.answer()
+    else:
+        await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.message(Command("orders"))
+@router.callback_query(F.data == "admin:payment_orders")
+async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
+    """View recent payment orders with user IDs, usernames, and plans."""
+    user = event.from_user
+    if not user or not is_admin(user.id):
+        if isinstance(event, CallbackQuery):
+            await event.answer("Access Denied.", show_alert=True)
+        else:
+            await event.answer("⛔ Access Denied.")
+        return
+
+    async with db._get_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT 
+                o.order_id,
+                o.telegram_id,
+                o.order_type,
+                o.amount_inr,
+                o.quality,
+                o.media_title,
+                o.utr_number,
+                o.status,
+                o.paid_at,
+                o.created_at,
+                u.username,
+                u.first_name
+            FROM orders o
+            LEFT JOIN users u ON o.telegram_id = u.telegram_id
+            WHERE o.status = 'paid'
+            ORDER BY o.id DESC
+            LIMIT 15
+            """
+        )
+        orders = await cur.fetchall()
+
+    lines = [
+        "💳 <b>Recent Completed Payment Orders</b>\n",
+        "Showing last 15 verified transactions:\n"
+    ]
+
+    if orders:
+        for idx, o in enumerate(orders, start=1):
+            uname = f"@{html.escape(o['username'])}" if o.get("username") else "<i>No username</i>"
+            name = html.escape(o.get("first_name") or "User")
+            utr = o.get("utr_number") or "N/A"
+            paid_time = (o.get("paid_at") or o.get("created_at") or "").split(".")[0]
+            
+            # Format order type description
+            otype = o.get("order_type", "")
+            if otype.startswith("sub_"):
+                plan_str = f"Pass: {otype.replace('sub_', '').upper()}"
+            elif o.get("quality"):
+                plan_str = f"Single {o['quality']} HD"
+            else:
+                plan_str = otype.upper()
+
+            lines.append(
+                f"{idx}. 🧾 <code>{o['order_id']}</code>\n"
+                f"   ├ 👤 <b>{name}</b> ({uname})\n"
+                f"   ├ 🆔 <b>User ID:</b> <code>{o['telegram_id']}</code>\n"
+                f"   ├ 💎 <b>Plan / Item:</b> <b>{plan_str}</b> (₹{o['amount_inr']:.2f})\n"
+                f"   ├ 🏦 <b>UTR:</b> <code>{utr}</code>\n"
+                f"   └ 📅 <b>Date:</b> <code>{paid_time}</code>\n"
+            )
+    else:
+        lines.append("<i>No completed paid orders found yet.</i>")
+
+    text = "\n".join(lines)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Refresh", callback_data="admin:payment_orders"),
+                InlineKeyboardButton(text="💎 Plan Subscribers", callback_data="admin:plan_subscribers")
+            ],
+            [
+                InlineKeyboardButton(text="📥 CSV Orders", callback_data="admin:export:orders"),
+                InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")
+            ]
+        ]
+    )
+
+    if isinstance(event, CallbackQuery):
+        if event.message:
+            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await event.answer()
+    else:
+        await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 @router.message(Command("sub_activate"))

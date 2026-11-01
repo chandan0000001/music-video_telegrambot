@@ -417,12 +417,16 @@ Only IDs configured in `ADMIN_IDS` can access admin tools. Unauthorized users re
 | `/sub_activate <id> <plan> [days]` | Grant or extend user subscription (`go`, `pro`, `ultra`, `max`) |
 | `/sub_deactivate <id>` | Revoke a user's subscription and return them to Normal Free tier |
 | `/sub_status <id>` | View user's subscription tier, expiry date, and remaining daily quota |
+| `/subscribers` | View subscribers directory by plan with usernames, user IDs, and quotas |
+| `/orders` | View recent verified payment orders with usernames, user IDs, amounts, and UTRs |
 
 ### CSV Exports
 From the `/admin` dashboard, click:
 - `📥 CSV Users` — Downloads complete user directory as CSV.
 - `📥 CSV Searches` — Downloads search logs as CSV.
 - `📥 CSV Downloads` — Downloads media download logs as CSV.
+- `📥 CSV Subscriptions` — Downloads subscribers and active plans as CSV.
+- `📥 CSV Orders` — Downloads all payment orders and UTR logs as CSV.
 
 ---
 
