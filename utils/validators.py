@@ -39,12 +39,21 @@ TWITTER_DOMAINS = {
 }
 TWITTER_STATUS_PATTERN = re.compile(r"^/([a-zA-Z0-9_]+)/status/([0-9]+)")
 
+# Instagram Hostnames & Pattern
+INSTAGRAM_DOMAINS = {
+    "instagram.com",
+    "www.instagram.com",
+    "ddinstagram.com",
+    "instagr.am"
+}
+INSTAGRAM_PATTERN = re.compile(r"^/(p|reel|reels|tv)/([a-zA-Z0-9_-]+)")
+
 # Dangerous characters in filenames
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\?%*:|"<>^\x00-\x1f]')
 
 
 def is_safe_url(url: str) -> bool:
-    """SSRF Prevention: Ensure URL is public, uses HTTP/HTTPS, and not pointing to private networks."""
+    """SSRF Prevention: Ensure URL is public, uses HTTP/HTTPS, and not pointing to private or AWS internal networks."""
     try:
         parsed = urlparse(url.strip())
         if parsed.scheme.lower() not in ("http", "https"):
@@ -54,11 +63,11 @@ def is_safe_url(url: str) -> bool:
         if not hostname:
             return False
 
-        # Reject localhost and local names
-        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        # Reject localhost, local names, and AWS IMDS metadata service
+        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"):
             return False
 
-        # Check if IP address is private/reserved
+        # Check if IP address is private/reserved/link-local
         try:
             ip = ipaddress.ip_address(hostname)
             if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
@@ -150,6 +159,29 @@ def extract_twitter_info(url: str) -> Optional[Tuple[str, str]]:
 def is_valid_twitter_url(url: str) -> bool:
     """Return True if the URL is a valid Twitter / X status URL."""
     return extract_twitter_info(url) is not None
+
+
+def extract_instagram_info(url: str) -> Optional[Tuple[str, str]]:
+    """Extract (media_type, shortcode) from Instagram reel/post/tv URLs."""
+    if not url or not is_safe_url(url):
+        return None
+    try:
+        parsed = urlparse(url.strip())
+        domain = (parsed.netloc or "").lower().split(":")[0]
+        if domain not in INSTAGRAM_DOMAINS:
+            return None
+        match = INSTAGRAM_PATTERN.match(parsed.path)
+        if match:
+            media_type = match.group(1).rstrip("s")  # 'reel', 'p', 'tv'
+            return media_type, match.group(2)
+        return None
+    except Exception:
+        return None
+
+
+def is_valid_instagram_url(url: str) -> bool:
+    """Return True if the URL is a valid Instagram post, reel, or TV URL."""
+    return extract_instagram_info(url) is not None
 
 
 def sanitize_filename(name: str, max_length: int = 100) -> str:

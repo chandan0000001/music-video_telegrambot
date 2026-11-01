@@ -19,6 +19,8 @@ from database import db
 from services.twitter_service import twitter_service
 from keyboards.main_menu import get_twitter_menu_keyboard, get_back_to_main_keyboard
 from utils.validators import is_valid_twitter_url
+from utils.rate_limiter import link_spam_guard
+from utils.queue_manager import queue_manager
 from utils.progress import (
     DownloadProgressTracker,
     UploadProgressTracker,
@@ -86,6 +88,18 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
     user = message.from_user
     user_id = user.id if user else 0
 
+    # 1. Anti-Spam Link Cooldown Check
+    is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
+    if is_spam:
+        await message.answer(spam_msg, parse_mode="Markdown")
+        return
+
+    # 2. Per-User Concurrent Download Limit Check (Max 3)
+    can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
+    if not can_start:
+        await message.answer(limit_msg, parse_mode="Markdown")
+        return
+
     status_msg = await message.answer("🔍 *Inspecting X (Twitter) media...*", parse_mode="Markdown")
 
     success, media_items, err_msg = await twitter_service.get_tweet_media(url)
@@ -96,11 +110,21 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
         )
         return
 
-    job_dir = twitter_service._get_job_dir()
-
-    # 1. LIVE DOWNLOAD PROGRESS METER
     media_label = "Photo" if media_items[0]["type"] == "photo" else "Video"
     title = f"X / Twitter {media_label}" if len(media_items) == 1 else f"X Album ({len(media_items)} items)"
+
+    # 3. Acquire Global Download Slot from 8/8 Queue
+    acquired = await queue_manager.acquire_download_slot(
+        user_id=user_id,
+        media_title=title,
+        status_msg=status_msg
+    )
+    if not acquired:
+        return
+
+    job_dir = twitter_service._get_job_dir()
+
+    # 4. LIVE DOWNLOAD PROGRESS METER
     dl_tracker = DownloadProgressTracker(
         media_title=title,
         quality_label="Original HD",
@@ -116,13 +140,17 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
         downloaded = []
     finally:
         await dl_reporter.stop()
+        queue_manager.release_download_slot(user_id)
 
     if not downloaded:
         await status_msg.edit_text("❌ *Failed to download media files. Please try again.*", parse_mode="Markdown")
         twitter_service.cleanup_job_dir(job_dir)
         return
 
-    # 2. LIVE UPLOAD PROGRESS METER
+    # 5. Acquire Global Upload Slot from 8/8 Queue
+    await queue_manager.acquire_upload_slot(user_id)
+
+    # 6. LIVE UPLOAD PROGRESS METER
     total_upload_bytes = sum(item["file_path"].stat().st_size for item in downloaded if item.get("file_path"))
     up_tracker = UploadProgressTracker(
         media_title=title,
@@ -217,6 +245,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
             pass
     finally:
         await up_reporter.stop()
+        queue_manager.release_upload_slot(user_id)
         twitter_service.cleanup_job_dir(job_dir)
 
 

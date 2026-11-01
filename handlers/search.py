@@ -13,7 +13,14 @@ from services.media_service import media_service
 from keyboards.search_keyboard import get_search_results_keyboard, get_media_type_keyboard
 from keyboards.quality_keyboard import get_youtube_music_keyboard
 from keyboards.main_menu import get_back_to_main_keyboard
-from utils.validators import is_valid_youtube_url, is_safe_url, is_youtube_music_url, is_valid_twitter_url
+from utils.validators import (
+    is_valid_youtube_url,
+    is_safe_url,
+    is_youtube_music_url,
+    is_valid_twitter_url,
+    is_valid_instagram_url
+)
+from utils.rate_limiter import link_spam_guard
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -174,18 +181,30 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
     # Check if input looks like a URL
     if text.startswith("http://") or text.startswith("https://"):
+        # Anti-Spam Link Cooldown Check
+        is_spam, spam_msg = await link_spam_guard.check_link_spam(user.id if user else 0)
+        if is_spam:
+            await message.answer(spam_msg, parse_mode="Markdown")
+            return
+
         if is_valid_twitter_url(text):
             await state.clear()
             from handlers.twitter import _execute_twitter_download
             await _execute_twitter_download(message, text)
             return
 
+        if is_valid_instagram_url(text):
+            await state.clear()
+            from handlers.instagram import _execute_instagram_download
+            await _execute_instagram_download(message, text)
+            return
+
         # Strict YouTube & YouTube Music security validation
         if not is_valid_youtube_url(text):
             await message.answer(
                 "⚠️ **Unsupported Link**\n\n"
-                "Please send a valid **YouTube**, **YouTube Music**, or **X (Twitter)** link.\n\n"
-                "💡 *Example:* `https://youtu.be/ID` or `https://x.com/user/status/ID`",
+                "Please send a valid **YouTube**, **YouTube Music**, **X (Twitter)**, or **Instagram** link.\n\n"
+                "💡 *Example:* `https://youtu.be/ID`, `https://x.com/user/status/ID` or `https://instagram.com/reel/ID`",
                 parse_mode="Markdown"
             )
             return

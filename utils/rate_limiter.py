@@ -78,9 +78,75 @@ class ConcurrencyManager:
         return self._current_jobs
 
 
+class LinkSpamGuard:
+    """
+    Enforces a strict 6-second cooldown between links and download triggers.
+    Warns users on fast repeat links, and temporarily bans if violated repeatedly.
+    """
+
+    def __init__(self, cooldown_seconds: float = 6.0):
+        self.cooldown_seconds = cooldown_seconds
+        self._last_link_time: Dict[int, float] = {}
+        self._spam_violations: Dict[int, list[float]] = defaultdict(list)
+        self._temp_bans: Dict[int, float] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_link_spam(self, user_id: int) -> tuple[bool, str]:
+        """
+        Check if user is spamming links.
+        Returns (is_blocked, message_to_user).
+        """
+        if user_id in ADMIN_IDS:
+            return False, ""
+
+        now = time.time()
+        async with self._lock:
+            # Check if user is currently under a temporary spam ban
+            ban_until = self._temp_bans.get(user_id, 0.0)
+            if now < ban_until:
+                mins_left = int((ban_until - now) // 60) + 1
+                return True, (
+                    f"🚫 **Access Temporarily Restricted**\n\n"
+                    f"You were restricted for repeated link spamming.\n"
+                    f"Please try again in **{mins_left} minute(s)**."
+                )
+
+            # Check cooldown against last link
+            last_time = self._last_link_time.get(user_id, 0.0)
+            elapsed = now - last_time
+
+            if elapsed < self.cooldown_seconds:
+                remaining = int(self.cooldown_seconds - elapsed) + 1
+                violations = self._spam_violations[user_id]
+                # Keep violations from the last 30 seconds
+                violations = [v for v in violations if (now - v) < 30.0]
+                violations.append(now)
+                self._spam_violations[user_id] = violations
+
+                # If 3 or more violations within 30 seconds, trigger 10-minute temp ban
+                if len(violations) >= 3:
+                    self._temp_bans[user_id] = now + 600.0  # 10 minutes
+                    self._spam_violations[user_id] = []
+                    return True, (
+                        "🚫 **Temporary Ban Activated (10 Minutes)**\n\n"
+                        "You sent too many links too quickly despite warnings.\n"
+                        "Your access has been temporarily paused for 10 minutes."
+                    )
+
+                return True, (
+                    f"⚠️ **Ladle, don't spam here! Otherwise you will be banned.**\n\n"
+                    f"Please wait **{remaining} second(s)** before sending another link."
+                )
+
+            # Update last link time
+            self._last_link_time[user_id] = now
+            return False, ""
+
+
 # Global singletons
 rate_limiter = UserRateLimiter()
 concurrency_manager = ConcurrencyManager()
+link_spam_guard = LinkSpamGuard()
 
 
 class ThrottlingMiddleware(BaseMiddleware):

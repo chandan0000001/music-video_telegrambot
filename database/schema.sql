@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS downloads (
     telegram_id INTEGER NOT NULL,
     media_title TEXT NOT NULL,
     source TEXT NOT NULL,
-    media_type TEXT NOT NULL CHECK (media_type IN ('audio', 'video')),
+    media_type TEXT NOT NULL,
     selected_quality TEXT NOT NULL,
     selected_format TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed', 'cancelled')),

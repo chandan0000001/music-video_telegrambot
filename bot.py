@@ -47,20 +47,29 @@ async def on_startup(bot: Bot) -> None:
     else:
         logger.warning("⚠️ YouTube Cookies: No valid cookies.txt found! Put cookies.txt in ~/music_bot/ or ~/")
 
+    # 4. Storage Cleaner & Queue Manager Startup
+    from utils.disk_cleaner import purge_stale_temp_files, periodic_disk_cleaner_task
+    from utils.queue_manager import queue_manager
+    purge_stale_temp_files()
+    asyncio.create_task(periodic_disk_cleaner_task())
+    queue_manager.start_worker()
+    logger.info("Storage Cleaner and Concurrency Queue Manager started.")
+
     bot_info = await bot.get_me()
     logger.info(f"Bot connected: @{bot_info.username} (ID: {bot_info.id})")
     logger.info(f"Loaded {len(ADMIN_IDS)} administrator ID(s).")
 
-    # 3. Start MTProto Direct Uploader (for up to 2000 MB single-file transfers)
+    # 5. Start MTProto Direct Uploader (for up to 2000 MB single-file transfers)
     if mtproto_service.is_configured:
         ok = await mtproto_service.start()
         logger.info(f"MTProto 2GB High-Speed Engine started: {ok}")
 
-    # 4. Register Telegram Command Menu
+    # 6. Register Telegram Command Menu
     from aiogram.types import BotCommand
     commands = [
         BotCommand(command="start", description="🚀 Launch Main Menu & Dashboard"),
         BotCommand(command="ytmusic", description="🔴 YouTube Music Studio Downloader"),
+        BotCommand(command="instagram", description="📸 Instagram Reels & Media Downloader"),
         BotCommand(command="twitter", description="🐦 X (Twitter) Media Downloader"),
         BotCommand(command="search", description="🔍 Search songs by title or artist"),
         BotCommand(command="history", description="📜 View recent searches & downloads"),

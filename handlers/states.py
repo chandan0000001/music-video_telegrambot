@@ -10,6 +10,7 @@ class UserStates(StatesGroup):
     waiting_for_video_link = State()
     waiting_for_ytmusic = State()
     waiting_for_twitter = State()
+    waiting_for_instagram = State()
     waiting_for_utr = State()
 
 

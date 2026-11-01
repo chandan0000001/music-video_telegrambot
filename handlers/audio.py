@@ -16,6 +16,7 @@ from keyboards.quality_keyboard import (
     get_cancel_download_keyboard
 )
 from utils.rate_limiter import concurrency_manager
+from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter
 from utils.task_registry import task_registry
 
@@ -122,6 +123,19 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         status="pending"
     )
 
+    media_title = f"YouTube Audio ({video_id})"
+    if status_msg.text and "Title:" in status_msg.text:
+        try:
+            media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
+        except Exception:
+            pass
+
+    # Check per-user limit
+    can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
+    if not can_start:
+        await status_msg.edit_text(limit_msg, parse_mode="Markdown")
+        return
+
     cancel_kb = get_cancel_download_keyboard(user_id)
     current_task = asyncio.current_task()
     if current_task:
@@ -132,21 +146,15 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     reporter = None
 
     try:
-        # Acquire concurrency slot
-        await telegram_service.update_status_with_keyboard(
-            status_msg,
-            f"⏳ *Job queued:* Waiting for an available worker slot...",
-            reply_markup=cancel_kb
+        # Acquire slot via dynamic 8/8 Queue
+        acquired = await queue_manager.acquire_download_slot(
+            user_id=user_id,
+            media_title=media_title,
+            status_msg=status_msg
         )
-        await concurrency_manager.acquire()
+        if not acquired:
+            return
         acquired_slot = True
-
-        media_title = f"YouTube Audio ({video_id})"
-        if status_msg.text and "Title:" in status_msg.text:
-            try:
-                media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
-            except Exception:
-                pass
 
         retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
         back_cb = f"opt_audio:{video_id}"
@@ -237,6 +245,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
             await reporter.stop()
         task_registry.unregister(user_id)
         if acquired_slot:
+            queue_manager.release_download_slot(user_id)
             concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

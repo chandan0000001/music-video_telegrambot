@@ -17,6 +17,7 @@ from keyboards.quality_keyboard import (
     get_paywall_keyboard
 )
 from utils.rate_limiter import concurrency_manager
+from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter
 from utils.task_registry import task_registry
 
@@ -201,21 +202,28 @@ async def execute_video_download_pipeline(
     reporter = None
 
     try:
-        # Acquire concurrency slot
-        await telegram_service.update_status_with_keyboard(
-            status_msg,
-            f"⏳ *Job queued:* Waiting for an available worker slot...",
-            reply_markup=cancel_kb
-        )
-        await concurrency_manager.acquire()
-        acquired_slot = True
-
         media_title = f"YouTube Video ({video_id})"
         if status_msg.text and "Title:" in status_msg.text:
             try:
                 media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
             except Exception:
                 pass
+
+        # Check per-user limit
+        can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
+        if not can_start:
+            await status_msg.edit_text(limit_msg, parse_mode="Markdown")
+            return
+
+        # Acquire slot via dynamic 8/8 Queue
+        acquired = await queue_manager.acquire_download_slot(
+            user_id=user_id,
+            media_title=media_title,
+            status_msg=status_msg
+        )
+        if not acquired:
+            return
+        acquired_slot = True
 
         retry_cb = f"vdl:{video_id}:{resolution}"
         back_cb = f"opt_video:{video_id}"
@@ -306,6 +314,7 @@ async def execute_video_download_pipeline(
             await reporter.stop()
         task_registry.unregister(user_id)
         if acquired_slot:
+            queue_manager.release_download_slot(user_id)
             concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

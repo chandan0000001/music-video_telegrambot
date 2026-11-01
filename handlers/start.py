@@ -19,11 +19,12 @@ def get_welcome_text(user_name: str = "Music Lover") -> str:
     """Generate modern, clean welcome text."""
     return (
         f"👋 *Hey {user_name}!* Welcome to **Music & Video Bot**\n\n"
-        "⚡ *High-speed media downloader for YouTube, YT Music & X (Twitter)*\n\n"
+        "⚡ *High-speed downloader for YouTube, Instagram & X (Twitter)*\n\n"
         "🎵 **Music:** MP3 (320k Studio), M4A & Lossless WAV\n"
         "🎬 **Video:** 144p to 1080p Full HD MP4\n"
+        "📸 **Instagram:** Reels, Carousels, Photos & Videos\n"
         "🐦 **X (Twitter):** Original raw photos, videos & GIFs\n\n"
-        "💡 *How to use:* Send any **song title**, **YouTube link**, or **X post link** directly below, or use the buttons:"
+        "💡 *How to use:* Send any **song title**, **YouTube**, **Instagram**, or **X link** directly below, or use the menu:"
     )
 
 
@@ -34,12 +35,13 @@ HELP_TEXT = (
     "🎯 **Quick Ways to Download:**\n"
     "• **Song Search:** Send any title or artist (e.g. `Blinding Lights`)\n"
     "• **YouTube:** Send any YouTube or YouTube Music link\n"
+    "• **Instagram:** Send any Reel, Post, or Carousel link\n"
     "• **X / Twitter:** Send any tweet link for original HD media\n\n"
     "⚡ **Formats & Quality:**\n"
     "• **Audio:** MP3 (128k, 192k, 320k), M4A (AAC), Lossless WAV\n"
     "• **Video:** MP4 from 144p up to 1080p Full HD\n"
-    "• **X (Twitter):** Uncompressed photos, HD MP4 & looping GIFs\n\n"
-    "💡 *Core Commands:* `/start` • `/ytmusic` • `/twitter` • `/history`"
+    "• **Social Media:** Original HD Reels, Carousels, Photos & GIFs\n\n"
+    "💡 *Core Commands:* `/start` • `/ytmusic` • `/instagram` • `/twitter` • `/history`"
 )
 
 ABOUT_TEXT = (
@@ -211,6 +213,7 @@ async def cb_cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_cancel_active_download(callback: CallbackQuery) -> None:
     """Abort an active in-flight download immediately."""
     from utils.task_registry import task_registry
+    from utils.queue_manager import queue_manager
     parts = callback.data.split(":")
     target_user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
     user_id = callback.from_user.id if callback.from_user else 0
@@ -220,7 +223,8 @@ async def cb_cancel_active_download(callback: CallbackQuery) -> None:
         return
 
     uid_to_cancel = target_user_id or user_id
-    cancelled = task_registry.cancel(uid_to_cancel)
+    queue_cancelled = queue_manager.cancel_queue_item(uid_to_cancel)
+    cancelled = task_registry.cancel(uid_to_cancel) or queue_cancelled
     if cancelled:
         await callback.answer("🛑 Download cancelled.")
         if callback.message:
