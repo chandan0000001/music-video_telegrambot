@@ -29,6 +29,16 @@ YOUTUBE_MUSIC_DOMAINS = {
     "m.music.youtube.com"
 }
 
+# Twitter / X Hostnames & Pattern
+TWITTER_DOMAINS = {
+    "twitter.com",
+    "www.twitter.com",
+    "mobile.twitter.com",
+    "x.com",
+    "www.x.com"
+}
+TWITTER_STATUS_PATTERN = re.compile(r"^/([a-zA-Z0-9_]+)/status/([0-9]+)")
+
 # Dangerous characters in filenames
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\?%*:|"<>^\x00-\x1f]')
 
@@ -118,6 +128,28 @@ def is_youtube_music_url(url: str) -> bool:
         return domain in YOUTUBE_MUSIC_DOMAINS and extract_youtube_id(url) is not None
     except Exception:
         return False
+
+
+def extract_twitter_info(url: str) -> Optional[Tuple[str, str]]:
+    """Extract (username, tweet_id) from Twitter / X status URLs."""
+    if not url or not is_safe_url(url):
+        return None
+    try:
+        parsed = urlparse(url.strip())
+        domain = (parsed.netloc or "").lower().split(":")[0]
+        if domain not in TWITTER_DOMAINS:
+            return None
+        match = TWITTER_STATUS_PATTERN.match(parsed.path)
+        if match:
+            return match.group(1), match.group(2)
+        return None
+    except Exception:
+        return None
+
+
+def is_valid_twitter_url(url: str) -> bool:
+    """Return True if the URL is a valid Twitter / X status URL."""
+    return extract_twitter_info(url) is not None
 
 
 def sanitize_filename(name: str, max_length: int = 100) -> str:

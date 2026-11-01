@@ -361,6 +361,15 @@ Upon launching, the bot output will confirm:
 - **Search Music:** You can also type any track title inside the YouTube Music Studio to search and download high-fidelity audio streams.
 - **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.
 
+### Dedicated X (Twitter) Media Downloader
+- **Hub & Commands:** Use `/twitter`, `/x`, or click **🐦 X (Twitter) Downloader** from the main navigation menu.
+- **Original Uncompressed Photos:** Automatically queries `?name=orig` for maximum raw image fidelity (`pbs.twimg.com`).
+- **Original HD Videos & GIFs:** Direct MP4 video extraction (720p / 1080p) delivered as native video (`sendVideo`) or looping animation (`sendAnimation`).
+- **Multi-Media Album Support:** Supports multi-image and multi-video tweets (up to **15 media items**) dispatched as clean Telegram Media Albums (`sendMediaGroup`).
+- **Clean Caption Delivery:** Delivers media cleanly without distracting blocks of tweet text cluttering the conversation.
+- **Sensitive Content Shield:** Automatically respects privacy by detecting and gracefully declining 18+/sensitive-flagged posts.
+- **Zero API Key Requirement:** Operates autonomously with zero third-party API keys or paid Twitter Developer accounts.
+
 ### Direct YouTube & YouTube Music Link Processing
 1. Paste any valid YouTube or YouTube Music link (e.g. `https://music.youtube.com/watch?v=...`, `https://www.youtube.com/watch?v=...`, `https://youtu.be/...`, or YouTube Shorts).
 2. **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.

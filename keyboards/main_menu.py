@@ -16,6 +16,9 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔴 YouTube Music Downloader", callback_data="menu:ytmusic"),
         ],
         [
+            InlineKeyboardButton(text="🐦 X (Twitter) Downloader", callback_data="menu:twitter"),
+        ],
+        [
             InlineKeyboardButton(text="🎬 Video Downloader", callback_data="menu:video"),
             InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
         ],
@@ -40,6 +43,21 @@ def get_ytmusic_menu_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="🔍 Search Music Instead", callback_data="menu:search"),
                 InlineKeyboardButton(text="🎬 Video Downloader", callback_data="menu:video"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")
+            ]
+        ]
+    )
+
+
+def get_twitter_menu_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for dedicated X (Twitter) Downloader hub."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎵 Search Music", callback_data="menu:search"),
+                InlineKeyboardButton(text="🔴 YouTube Music", callback_data="menu:ytmusic"),
             ],
             [
                 InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")

@@ -61,6 +61,7 @@ async def on_startup(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="🚀 Launch Main Menu & Dashboard"),
         BotCommand(command="ytmusic", description="🔴 YouTube Music Studio Downloader"),
+        BotCommand(command="twitter", description="🐦 X (Twitter) Media Downloader"),
         BotCommand(command="search", description="🔍 Search songs by title or artist"),
         BotCommand(command="history", description="📜 View recent searches & downloads"),
         BotCommand(command="help", description="📖 Features guide & specs"),
