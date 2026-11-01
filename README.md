@@ -395,6 +395,12 @@ The bot includes a **100% automated, zero-fee payment pipeline** using Google Pa
 
 Only IDs configured in `ADMIN_IDS` can access admin tools. Unauthorized users receive an **"Access Denied"** notice.
 
+### Admin VIP Access & Clean UI
+- **Unlimited Free HD Access:** Administrators bypass all payment paywalls, subscription requirements, and rate limits.
+- **Admin-Tailored Quality UI:** Administrators never see monetary amounts (`₹19`, `₹27`) or lock icons on quality selection buttons. Instead, HD streams are displayed as `👑 720p (Admin VIP)` and `👑 1080p (Admin VIP)`.
+- **Regular Users:** Regular free users see transparent price tags (`🔒 720p (₹19)`, `🔒 1080p (₹27)`).
+- **Subscribed Users:** Users with active Go/Pro/Ultra/Max passes see `⚡ 720p (VIP Pass)`.
+
 ### Admin Commands
 | Command | Action |
 |---|---|

@@ -53,17 +53,33 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
+    user = callback.from_user
+    user_id = user.id if user else 0
+    is_admin = user_id in ADMIN_IDS
+    sub = await db.get_user_subscription(user_id)
+    has_active_sub = bool(sub and sub.get("is_active") and sub.get("today_remaining", 0) > 0)
+
+    admin_banner = "👑 **Admin Access:** All resolutions unlocked (Free & Unlimited)\n" if is_admin else (
+        f"⚡ **VIP Pass Active ({sub['plan_tier'].capitalize()}):** {sub['today_remaining']}/{sub['daily_limit']} HD videos remaining today\n" if has_active_sub else ""
+    )
+
     text = (
         f"🎬 **Video Resolution Selection**\n\n"
         f"**Title:** {info['title']}\n"
         f"**Duration:** `{info['duration_str']}`\n\n"
+        f"{admin_banner}"
         f"Select a genuinely available resolution below (low to high):"
     )
 
     if callback.message:
         await callback.message.edit_text(
             text=text,
-            reply_markup=get_video_quality_keyboard(video_id, resolutions),
+            reply_markup=get_video_quality_keyboard(
+                video_id=video_id,
+                available_resolutions=resolutions,
+                is_admin=is_admin,
+                has_active_sub=has_active_sub
+            ),
             parse_mode="Markdown"
         )
     await callback.answer()

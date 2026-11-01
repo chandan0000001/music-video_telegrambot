@@ -54,12 +54,15 @@ def get_audio_quality_keyboard(
 
 def get_video_quality_keyboard(
     video_id: str,
-    available_resolutions: List[str]
+    available_resolutions: List[str],
+    is_admin: bool = False,
+    has_active_sub: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Generate video quality buttons sorted strictly from low to high.
-    144p - 480p marked Free.
-    720p and higher marked with premium price badges.
+    - If is_admin: All HD resolutions unlocked without price (VIP badge).
+    - If has_active_sub: 720p+ marked as VIP Pass included.
+    - Otherwise: 144p-480p marked Free, 720p+ marked with premium price.
     """
     buttons = []
     # Two buttons per row for neat presentation
@@ -67,6 +70,10 @@ def get_video_quality_keyboard(
     for res in available_resolutions:
         if res in ("144p", "240p", "360p", "480p"):
             btn_text = f"🎬 {res} (Free)"
+        elif is_admin:
+            btn_text = f"👑 {res} (Admin VIP)"
+        elif has_active_sub:
+            btn_text = f"⚡ {res} (VIP Pass)"
         elif res == "720p":
             btn_text = f"🔒 720p (₹{PRICE_SINGLE_720P})"
         else:

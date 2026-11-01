@@ -45,6 +45,20 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
     user = callback.from_user
     user_id = user.id if user else 0
 
+    # Admin bypass: Never charge or show paywall to admin
+    if user_id in ADMIN_IDS:
+        await callback.answer("👑 Admin free bypass active! Downloading video...", show_alert=False)
+        from handlers.video import execute_video_download_pipeline
+        if callback.message:
+            await execute_video_download_pipeline(
+                status_msg=callback.message,
+                video_id=video_id,
+                resolution=quality,
+                user_id=user_id,
+                bot=callback.bot
+            )
+        return
+
     # Determine order_type and amount
     if plan_type in ("go", "pro", "ultra", "max", "weekly", "monthly"):
         plan_key = "go" if plan_type == "weekly" else ("pro" if plan_type == "monthly" else plan_type)

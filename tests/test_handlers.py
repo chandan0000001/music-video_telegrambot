@@ -155,6 +155,18 @@ def test_video_quality_keyboard_badges():
     assert any("720p (₹19)" in t for t in button_texts)
     assert any("1080p (₹27)" in t for t in button_texts)
 
+    # Admin view: NO money amounts or prices shown!
+    admin_kb = get_video_quality_keyboard("test_vid", ["144p", "360p", "480p", "720p", "1080p"], is_admin=True)
+    admin_btn_texts = [btn.text for row in admin_kb.inline_keyboard for btn in row]
+    assert not any("₹" in t for t in admin_btn_texts), "Admin buttons must never show monetary amounts!"
+    assert any("Admin VIP" in t for t in admin_btn_texts), "Admin buttons must show VIP badge!"
+
+    # Active subscriber view: VIP Pass shown, no lock price
+    sub_kb = get_video_quality_keyboard("test_vid", ["144p", "360p", "480p", "720p", "1080p"], has_active_sub=True)
+    sub_btn_texts = [btn.text for row in sub_kb.inline_keyboard for btn in row]
+    assert not any("₹" in t for t in sub_btn_texts), "Subscriber buttons must not show price tags!"
+    assert any("VIP Pass" in t for t in sub_btn_texts)
+
     pay_kb = get_paywall_keyboard("test_vid", "720p")
     pay_callbacks = [btn.callback_data for row in pay_kb.inline_keyboard for btn in row if btn.callback_data]
     assert any("pay:single:test_vid:720p" in c for c in pay_callbacks)
