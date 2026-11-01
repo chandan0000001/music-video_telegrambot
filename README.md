@@ -2,41 +2,21 @@
 
 > **Bot Name:** Music & Video Downloader ([@songsuperzxbot](https://t.me/songsuperzxbot))  
 > **Developer:** Chandan ([@coder_chandan](https://t.me/coder_chandan))  
-> **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)
+> **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)  
+> **Demo Video:** [Watch Live Bot Walkthrough on Google Drive](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
 
 A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
 
 ---
 
-## 📑 Table of Contents
+## 🎬 Live Demo & Video Walkthrough
 
-1. [Architecture & Workflow](#-architecture--workflow)
-   - [User Interaction Flowchart](#1-user-interaction-flowchart)
-   - [Media Processing & Auto-Compression Pipeline](#2-media-processing--auto-compression-pipeline)
-   - [Database Structure](#3-database-structure)
-2. [Cross-Platform Installation Guide](#-cross-platform-installation-guide)
-   - [Arch Linux](#a-arch-linux)
-   - [Ubuntu / Debian](#b-ubuntu--debian)
-   - [macOS](#c-macos-apple-silicon--intel)
-   - [Windows 10 / 11](#d-windows-10--11)
-   - [Android (Termux)](#e-android-via-termux)
-3. [Bot Configuration Setup](#-bot-configuration-setup)
-   - [1. Create Bot & Get Token via @BotFather](#1-create-bot--get-token-via-botfather)
-   - [2. Find Your Telegram User ID](#2-find-your-telegram-user-id)
-   - [3. Configure config.py](#3-configure-configpy)
-4. [Running the Bot](#-running-the-bot)
-5. [Bot Features & Usage Manual](#-bot-features--usage-manual)
-   - [Searching Music](#searching-music)
-   - [Direct YouTube Link Processing](#direct-youtube-link-processing)
-   - [Supported Formats & Quality](#supported-formats--quality)
-   - [User History](#user-history)
-6. [Administrator System](#-administrator-system)
-7. [Running 24/7 in the Background](#-running-247-in-the-background)
-   - [Linux (systemd)](#linux-systemd-service)
-   - [Termux (Android Background)](#termux-android-background-runner)
-   - [Windows (Background Service)](#windows-background-execution)
-8. [Automated Testing](#-automated-testing)
-9. [Troubleshooting & FAQs](#-troubleshooting--faqs)
+Watch the bot in action performing music searches, format selection, live progress updates, and instant media delivery:
+
+[![Watch Demo Video on Google Drive](https://img.shields.io/badge/Google_Drive-Watch_Live_Demo_Video-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
+
+> 📹 **Video Link:** [Google Drive Demo Folder](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)  
+> *Walkthrough highlights: Instant song search, quality selection (128k–320k / 144p–1080p), real-time animated download cards, and fast delivery.*
 
 ---
 
