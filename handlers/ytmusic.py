@@ -21,20 +21,10 @@ logger = logging.getLogger(__name__)
 router = Router(name="ytmusic_router")
 
 YTMUSIC_HUB_TEXT = (
-    "🔴 ━━━━━━━━━━━━━━━━━━━ 🔴\n"
-    "   🎧 **YOUTUBE MUSIC DOWNLOADER** 🎧\n"
-    "   *Studio-Grade 320kbps Audio Extractor*\n"
-    "🔴 ━━━━━━━━━━━━━━━━━━━ 🔴\n\n"
-    "Welcome to the dedicated **YouTube Music Studio**!\n\n"
-    "✨ **How to Download:**\n"
-    "1️⃣ **Instant 1-Tap:** Paste any `music.youtube.com` link\n"
-    "2️⃣ **Smart Search:** Type any song title or artist name\n\n"
-    "💎 **Studio Audio Quality:**\n"
-    "• ⚡ **MP3 Studio:** `320 kbps (High Fidelity)`\n"
-    "• 🎶 **AAC Format:** `Original M4A stream`\n"
-    "• 🎼 **Lossless:** `Uncompressed WAV`\n"
-    "• 🏷️ **ID3 Metadata:** HD thumbnail & track tags automatically embedded\n\n"
-    "👉 *Paste your YouTube Music link or send a song name below:*"
+    "🔴 **YouTube Music Studio**\n"
+    "*1-Tap Studio Audio (320 kbps MP3 & M4A)*\n\n"
+    "Send any `music.youtube.com` track link or song name to download.\n\n"
+    "👉 *Paste link or send song name below:*"
 )
 
 
@@ -137,13 +127,9 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
 
         video_id = info["id"]
         desc = (
-            f"🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n"
-            f"   🎵 **YOUTUBE MUSIC TRACK** 🎵\n"
-            f"🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n\n"
-            f"🎶 **Title:** `{info['title']}`\n"
-            f"👤 **Artist:** {info['artist']}\n"
-            f"⏱ **Duration:** `{info['duration_str']}`\n\n"
-            f"⚡ **Tap a studio quality below to download instantly:**"
+            f"🎧 **{info['title']}**\n"
+            f"👤 *Artist:* {info['artist']} | ⏱ `{info['duration_str']}`\n\n"
+            f"⚡ *Select studio quality to download instantly:*"
         )
         await inspect_msg.edit_text(
             text=desc,
@@ -170,10 +156,7 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
         return
 
     result_lines = [
-        "🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n"
-        f"   🎵 **YOUTUBE MUSIC RESULTS** 🎵\n"
-        "🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n\n"
-        f"Search query: `{text}`\n"
+        f"🎧 **YouTube Music Results:** `{text}`\n"
     ]
     for idx, item in enumerate(results, start=1):
         result_lines.append(

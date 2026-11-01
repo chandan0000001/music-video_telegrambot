@@ -13,7 +13,7 @@ from services.media_service import media_service
 from keyboards.search_keyboard import get_search_results_keyboard, get_media_type_keyboard
 from keyboards.quality_keyboard import get_youtube_music_keyboard
 from keyboards.main_menu import get_back_to_main_keyboard
-from utils.validators import is_valid_youtube_url, is_safe_url, is_youtube_music_url
+from utils.validators import is_valid_youtube_url, is_safe_url, is_youtube_music_url, is_valid_twitter_url
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,12 @@ router = Router(name="search_router")
 @router.callback_query(F.data == "menu:search")
 async def cb_menu_search(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to enter music search query."""
+    await callback.answer()
     await state.set_state(UserStates.waiting_for_search_query)
     text = (
-        "🔍 ━━━━━━━━━━━━━━━━━━━ 🔍\n"
-        "       🎵 **SEARCH MUSIC** 🎵\n"
-        "🔍 ━━━━━━━━━━━━━━━━━━━ 🔍\n\n"
-        "Type any song title, artist, or album name to search.\n\n"
-        "💡 *Examples:*\n"
-        "• `Blinding Lights The Weeknd`\n"
-        "• `Kesariya Arijit Singh`\n"
-        "• `Faded Alan Walker`\n\n"
+        "🔍 **Search Music**\n\n"
+        "Send any song title, artist, or album name to search.\n\n"
+        "💡 *Example:* `Blinding Lights The Weeknd`\n\n"
         "👉 *Send your song name below:*"
     )
     if callback.message:
@@ -40,22 +36,17 @@ async def cb_menu_search(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
             await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
-    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:audio")
 async def cb_menu_audio(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to submit YouTube link for audio extraction."""
+    await callback.answer()
     await state.set_state(UserStates.waiting_for_audio_link)
     text = (
-        "🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n"
-        "     🎶 **DOWNLOAD AUDIO** 🎶\n"
-        "🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n\n"
-        "Paste any official YouTube or YouTube Music link to extract audio.\n\n"
-        "⚡ **Supported Formats:**\n"
-        "• `MP3` (128 kbps, 192 kbps, 320 kbps Studio)\n"
-        "• `M4A (AAC)` & `WAV (Lossless)`\n\n"
-        "💡 *Example:* `https://www.youtube.com/watch?v=VIDEO_ID`\n\n"
+        "🎧 **Download Audio**\n\n"
+        "Paste any YouTube or YouTube Music link to extract audio.\n\n"
+        "⚡ **Supported:** MP3 (128k-320k), M4A (AAC), Lossless WAV\n\n"
         "👉 *Paste your link below:*"
     )
     if callback.message:
@@ -63,21 +54,17 @@ async def cb_menu_audio(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
             await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
-    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:video")
 async def cb_menu_video(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to submit YouTube link for video download."""
+    await callback.answer()
     await state.set_state(UserStates.waiting_for_video_link)
     text = (
-        "🎬 ━━━━━━━━━━━━━━━━━━━ 🎬\n"
-        "     🎥 **DOWNLOAD VIDEO** 🎥\n"
-        "🎬 ━━━━━━━━━━━━━━━━━━━ 🎬\n\n"
-        "Paste any YouTube video or Shorts link to download in genuine resolutions.\n\n"
-        "⚡ **Supported Qualities:**\n"
-        "• `144p`, `240p`, `360p`, `480p`, `720p HD`, `1080p Full HD`\n\n"
-        "💡 *Example:* `https://www.youtube.com/watch?v=VIDEO_ID`\n\n"
+        "🎬 **Download Video**\n\n"
+        "Paste any YouTube video or Shorts link to download.\n\n"
+        "⚡ **Resolutions:** 144p, 240p, 360p, 480p, 720p HD, 1080p Full HD\n\n"
         "👉 *Paste your link below:*"
     )
     if callback.message:
@@ -85,7 +72,6 @@ async def cb_menu_video(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
             await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
-    await callback.answer()
 
 
 @router.message(Command("search"))
@@ -188,17 +174,18 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
     # Check if input looks like a URL
     if text.startswith("http://") or text.startswith("https://"):
+        if is_valid_twitter_url(text):
+            await state.clear()
+            from handlers.twitter import _execute_twitter_download
+            await _execute_twitter_download(message, text)
+            return
+
         # Strict YouTube & YouTube Music security validation
         if not is_valid_youtube_url(text):
             await message.answer(
-                "🔒 **Security Alert: Unsupported or Restricted URL!**\n\n"
-                "This bot exclusively processes authorized **YouTube** & **YouTube Music** links.\n"
-                "All external, unknown, or untrusted websites (e.g. Spotify, Instagram, phishing links) are strictly blocked for security.\n\n"
-                "✅ **Accepted Link Formats:**\n"
-                "• `https://music.youtube.com/watch?v=VIDEO_ID` (YouTube Music)\n"
-                "• `https://www.youtube.com/watch?v=VIDEO_ID` (Standard YouTube)\n"
-                "• `https://youtu.be/VIDEO_ID` (Short links)\n"
-                "• `https://www.youtube.com/shorts/VIDEO_ID` (YouTube Shorts)",
+                "⚠️ **Unsupported Link**\n\n"
+                "Please send a valid **YouTube**, **YouTube Music**, or **X (Twitter)** link.\n\n"
+                "💡 *Example:* `https://youtu.be/ID` or `https://x.com/user/status/ID`",
                 parse_mode="Markdown"
             )
             return

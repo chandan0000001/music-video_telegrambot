@@ -53,12 +53,16 @@ async def cb_choose_audio_format(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("afmt:"))
 async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
     """Prompt user to select audio bitrate quality (128, 192, 320 kbps)."""
+    await callback.answer()
     parts = callback.data.split(":")
     video_id = parts[1]
     selected_format = parts[2].lower()
 
     if callback.message:
-        await callback.message.edit_text("🔍 *Estimating audio sizes...*", parse_mode="Markdown")
+        try:
+            await callback.message.edit_text("🔍 *Estimating audio sizes...*", parse_mode="Markdown")
+        except Exception:
+            pass
 
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
     success, info, _ = await media_service.get_media_info(canonical_url)
@@ -67,20 +71,22 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
 
     text = (
         f"🎧 **Audio Quality Selection ({selected_format.upper()})**\n\n"
-        f"Select the desired bitrate for FFmpeg conversion:\n"
-        f"• **128 kbps:** Lightweight, fast download, standard sound.\n"
-        f"• **192 kbps:** Balanced, crisp fidelity.\n"
-        f"• **320 kbps:** Maximum bitrate for pristine audio enjoyment.\n\n"
+        f"Select the desired bitrate for conversion:\n"
+        f"• **128 kbps:** Fast download, standard sound\n"
+        f"• **192 kbps:** Balanced, crisp fidelity\n"
+        f"• **320 kbps:** Maximum studio bitrate\n\n"
         f"*Note: Bitrate conversions reflect genuine source parameters.*"
     )
 
     if callback.message:
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=get_audio_quality_keyboard(video_id, selected_format, approx_sizes),
-            parse_mode="Markdown"
-        )
-    await callback.answer()
+        try:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=get_audio_quality_keyboard(video_id, selected_format, approx_sizes),
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("adl:"))

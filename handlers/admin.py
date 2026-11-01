@@ -190,9 +190,12 @@ async def cmd_or_cb_users(event: Message | CallbackQuery) -> None:
     )
 
     if isinstance(event, CallbackQuery):
-        if event.message:
-            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await event.answer()
+        if event.message:
+            try:
+                await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception:
+                pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -208,6 +211,9 @@ async def cmd_or_cb_searchlogs(event: Message | CallbackQuery) -> None:
         else:
             await event.answer("⛔ Access Denied.")
         return
+
+    if isinstance(event, CallbackQuery):
+        await event.answer()
 
     logs = await db.get_recent_searches(limit=20)
     lines = ["🔍 <b>Recent Search Logs (Last 20):</b>\n"]
@@ -227,8 +233,10 @@ async def cmd_or_cb_searchlogs(event: Message | CallbackQuery) -> None:
 
     if isinstance(event, CallbackQuery):
         if event.message:
-            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        await event.answer()
+            try:
+                await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception:
+                pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -244,6 +252,9 @@ async def cmd_or_cb_downloadlogs(event: Message | CallbackQuery) -> None:
         else:
             await event.answer("⛔ Access Denied.")
         return
+
+    if isinstance(event, CallbackQuery):
+        await event.answer()
 
     logs = await db.get_recent_downloads(limit=20)
     lines = ["📦 <b>Recent Download Logs (Last 20):</b>\n"]
@@ -267,8 +278,10 @@ async def cmd_or_cb_downloadlogs(event: Message | CallbackQuery) -> None:
 
     if isinstance(event, CallbackQuery):
         if event.message:
-            await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        await event.answer()
+            try:
+                await event.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception:
+                pass
     else:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 

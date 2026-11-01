@@ -27,30 +27,38 @@ router = Router(name="video_router")
 @router.callback_query(F.data.startswith("opt_video:"))
 async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     """Inspect and present available video resolutions from low to high."""
+    await callback.answer()
     video_id = callback.data.split(":")[1]
     if callback.message:
-        await callback.message.edit_text("🔍 *Probing available video streams...*", parse_mode="Markdown")
+        try:
+            await callback.message.edit_text("🔍 *Probing available video streams...*", parse_mode="Markdown")
+        except Exception:
+            pass
 
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
     success, info, err = await media_service.get_media_info(canonical_url)
 
     if not success or not info:
         if callback.message:
-            await callback.message.edit_text(
-                f"❌ *Could not load video streams:*\n{err or 'Unknown error.'}",
-                parse_mode="Markdown"
-            )
-        await callback.answer()
+            try:
+                await callback.message.edit_text(
+                    f"❌ *Could not load video streams:*\n{err or 'Unknown error.'}",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
         return
 
     resolutions = info.get("available_resolutions", [])
     if not resolutions:
         if callback.message:
-            await callback.message.edit_text(
-                "❌ *No standard video resolutions found for this item.*",
-                parse_mode="Markdown"
-            )
-        await callback.answer()
+            try:
+                await callback.message.edit_text(
+                    "❌ *No standard video resolutions found for this item.*",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
         return
 
     user = callback.from_user

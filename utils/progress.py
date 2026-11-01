@@ -72,7 +72,7 @@ class DownloadProgressTracker:
         # Rendering & throttling control
         self.last_update_time: float = 0.0
         self.last_rendered_text: str = ""
-        self.min_update_interval: float = 2.5  # seconds between Telegram message edits
+        self.min_update_interval: float = 1.2  # responsive live Telegram message edits
         self._is_cancelled: bool = False
 
     def cancel(self) -> None:
@@ -100,22 +100,29 @@ class DownloadProgressTracker:
             self.percentage = 100.0
 
     def render_download_card(self) -> str:
-        """Generate GitHub/Telegram-style Markdown status card."""
-        icon = "🎬" if self.media_type == "video" else "🎵"
-        label = f"{self.media_type.capitalize()} ({self.quality_label})"
+        """Generate GitHub/Telegram-style Markdown status card with 0-100% meter."""
+        if self.media_type == "video":
+            icon = "🎬"
+        elif self.media_type == "photo":
+            icon = "📸"
+        elif self.media_type == "gif":
+            icon = "🌀"
+        else:
+            icon = "🎵"
 
+        label = f"{self.media_type.capitalize()} ({self.quality_label})"
         bar = make_progress_bar(self.percentage)
         speed_str = f"{format_bytes(self.speed)}/s" if self.speed > 0 else "Calculating..."
         downloaded_str = format_bytes(self.downloaded_bytes)
         total_str = format_bytes(self.total_bytes) if self.total_bytes > 0 else "Unknown"
         eta_str = format_seconds(self.eta) if self.eta is not None else "--:--"
 
-        title_display = self.media_title[:42] + "..." if len(self.media_title) > 42 else self.media_title
+        title_display = self.media_title[:40] + "..." if len(self.media_title) > 40 else self.media_title
 
         text = (
             f"⬇️ *Downloading {label}*\n"
             f"{icon} *Title:* `{title_display}`\n\n"
-            f"📊 *Progress:* `{bar}` *{self.percentage:.1f}%*\n"
+            f"📊 *Progress:* `[{bar}]` *{self.percentage:.1f}%*\n"
             f"⚡ *Speed:* `{speed_str}`\n"
             f"💾 *Size:* `{downloaded_str} / {total_str}`\n"
             f"⏳ *ETA:* `{eta_str}`"
@@ -139,20 +146,28 @@ class AsyncProgressReporter:
         self._task: Optional[asyncio.Task] = None
 
     async def _run(self) -> None:
+        # Initial render immediately so user sees 0% meter without delay
+        try:
+            text = self.tracker.render_download_card()
+            await self.message.edit_text(text, parse_mode="Markdown", reply_markup=self.reply_markup)
+            self.tracker.last_rendered_text = text
+            self.tracker.last_update_time = time.time()
+        except Exception:
+            pass
+
         while not self._stop_event.is_set():
             try:
                 now = time.time()
                 if (now - self.tracker.last_update_time) >= self.tracker.min_update_interval:
-                    if self.tracker.status == "downloading" and self.tracker.downloaded_bytes > 0:
-                        text = self.tracker.render_download_card()
-                        if text != self.tracker.last_rendered_text:
-                            await self.message.edit_text(
-                                text,
-                                parse_mode="Markdown",
-                                reply_markup=self.reply_markup
-                            )
-                            self.tracker.last_rendered_text = text
-                            self.tracker.last_update_time = now
+                    text = self.tracker.render_download_card()
+                    if text != self.tracker.last_rendered_text:
+                        await self.message.edit_text(
+                            text,
+                            parse_mode="Markdown",
+                            reply_markup=self.reply_markup
+                        )
+                        self.tracker.last_rendered_text = text
+                        self.tracker.last_update_time = now
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after + 1)
             except TelegramAPIError:
@@ -161,7 +176,7 @@ class AsyncProgressReporter:
                 logger.debug(f"Progress update suppressed: {e}")
 
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=0.8)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=0.4)
             except asyncio.TimeoutError:
                 pass
 
@@ -175,6 +190,16 @@ class AsyncProgressReporter:
                 await self._task
             except Exception:
                 pass
+        # Final render: ensure 100% is displayed
+        try:
+            self.tracker.percentage = 100.0
+            if self.tracker.total_bytes > 0:
+                self.tracker.downloaded_bytes = self.tracker.total_bytes
+            card = self.tracker.render_download_card()
+            if card != self.tracker.last_rendered_text:
+                await self.message.edit_text(card, parse_mode="Markdown", reply_markup=self.reply_markup)
+        except Exception:
+            pass
 
 
 class UploadProgressTracker:
@@ -203,7 +228,7 @@ class UploadProgressTracker:
         self.start_time: float = time.time()
         self.last_update_time: float = 0.0
         self.last_rendered_text: str = ""
-        self.min_update_interval: float = 2.5
+        self.min_update_interval: float = 1.2
 
         self._last_calc_time: float = self.start_time
         self._last_calc_bytes: int = 0
@@ -252,7 +277,15 @@ class UploadProgressTracker:
                 self.eta = int(remaining_bytes / self.speed)
 
     def render_upload_card(self) -> str:
-        icon = "🎬" if self.media_type == "video" else "🎵"
+        if self.media_type == "video":
+            icon = "🎬"
+        elif self.media_type == "photo":
+            icon = "📸"
+        elif self.media_type == "gif":
+            icon = "🌀"
+        else:
+            icon = "🎵"
+
         part_prefix = f" • {self.part_info}" if self.part_info else ""
         bar = make_progress_bar(self.percentage)
         speed_str = f"{format_bytes(self.speed)}/s" if self.speed > 0 else "Uploading..."
@@ -265,7 +298,7 @@ class UploadProgressTracker:
         text = (
             f"⬆️ *Uploading {self.media_type.capitalize()}{part_prefix}*\n"
             f"{icon} *Title:* `{title_display}`\n\n"
-            f"📊 *Progress:* `{bar}` *{self.percentage:.1f}%*\n"
+            f"📊 *Progress:* `[{bar}]` *{self.percentage:.1f}%*\n"
             f"⚡ *Upload Speed:* `{speed_str}`\n"
             f"💾 *Sent:* `{uploaded_str} / {total_str}`\n"
             f"⏳ *ETA:* `{eta_str}`"
@@ -298,7 +331,7 @@ class TrackedFSInputFile(FSInputFile):
 
 
 class AsyncUploadProgressReporter:
-    """Periodically renders the live upload screen to Telegram."""
+    """Periodically renders the live upload screen to Telegram with real-time 0-100% meter."""
 
     def __init__(self, message: Message, tracker: UploadProgressTracker):
         self.message = message
@@ -307,16 +340,24 @@ class AsyncUploadProgressReporter:
         self._task: Optional[asyncio.Task] = None
 
     async def _run(self) -> None:
+        # Initial render immediately so user sees 0% upload meter right away
+        try:
+            text = self.tracker.render_upload_card()
+            await self.message.edit_text(text, parse_mode="Markdown")
+            self.tracker.last_rendered_text = text
+            self.tracker.last_update_time = time.time()
+        except Exception:
+            pass
+
         while not self._stop_event.is_set():
             try:
                 now = time.time()
                 if (now - self.tracker.last_update_time) >= self.tracker.min_update_interval:
-                    if self.tracker.uploaded_bytes > 0:
-                        text = self.tracker.render_upload_card()
-                        if text != self.tracker.last_rendered_text:
-                            await self.message.edit_text(text, parse_mode="Markdown")
-                            self.tracker.last_rendered_text = text
-                            self.tracker.last_update_time = now
+                    text = self.tracker.render_upload_card()
+                    if text != self.tracker.last_rendered_text:
+                        await self.message.edit_text(text, parse_mode="Markdown")
+                        self.tracker.last_rendered_text = text
+                        self.tracker.last_update_time = now
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after + 1)
             except TelegramAPIError:
@@ -325,7 +366,7 @@ class AsyncUploadProgressReporter:
                 logger.debug(f"Upload progress update suppressed: {e}")
 
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=0.8)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=0.4)
             except asyncio.TimeoutError:
                 pass
 
@@ -339,3 +380,13 @@ class AsyncUploadProgressReporter:
                 await self._task
             except Exception:
                 pass
+        # Final render: ensure 100% upload is displayed
+        try:
+            self.tracker.percentage = 100.0
+            if self.tracker.total_bytes > 0:
+                self.tracker.uploaded_bytes = self.tracker.total_bytes
+            card = self.tracker.render_upload_card()
+            if card != self.tracker.last_rendered_text:
+                await self.message.edit_text(card, parse_mode="Markdown")
+        except Exception:
+            pass

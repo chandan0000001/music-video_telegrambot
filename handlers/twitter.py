@@ -19,26 +19,23 @@ from database import db
 from services.twitter_service import twitter_service
 from keyboards.main_menu import get_twitter_menu_keyboard, get_back_to_main_keyboard
 from utils.validators import is_valid_twitter_url
+from utils.progress import (
+    DownloadProgressTracker,
+    UploadProgressTracker,
+    AsyncProgressReporter,
+    AsyncUploadProgressReporter,
+    TrackedFSInputFile
+)
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
 router = Router(name="twitter_router")
 
 TWITTER_HUB_TEXT = (
-    "🐦 ━━━━━━━━━━━━━━━━━━━ 🐦\n"
-    "    ✨ **X (TWITTER) DOWNLOADER** ✨\n"
-    "    *Original HD Media Extractor*\n"
-    "🐦 ━━━━━━━━━━━━━━━━━━━ 🐦\n\n"
-    "Welcome to the dedicated **X / Twitter Downloader**!\n\n"
-    "🚀 **Supported Media:**\n"
-    "• 📸 **High-Res Photos:** Original uncompressed raw quality\n"
-    "• 🎬 **HD Videos:** Full 720p / 1080p MP4\n"
-    "• 🌀 **GIF Animations:** Native looping animations\n"
-    "• 📦 **Multi-Media Albums:** Up to 15 photos/videos per post\n\n"
-    "💡 *Example Links:*\n"
-    "• `https://x.com/username/status/1234567890`\n"
-    "• `https://twitter.com/username/status/1234567890`\n\n"
-    "👉 *Paste your X / Twitter link below:*"
+    "🐦 **X (Twitter) Downloader**\n"
+    "*Original HD Videos, Photos & GIFs*\n\n"
+    "Paste any public X or Twitter post link below to download original uncompressed media.\n\n"
+    "👉 *Paste your X link below:*"
 )
 
 
@@ -85,7 +82,7 @@ async def cmd_twitter(message: Message, state: FSMContext) -> None:
 
 
 async def _execute_twitter_download(message: Message, url: str) -> None:
-    """Core download and dispatch pipeline for X/Twitter media."""
+    """Core download and dispatch pipeline for X/Twitter media with live download and upload meters."""
     user = message.from_user
     user_id = user.id if user else 0
 
@@ -99,43 +96,66 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
         )
         return
 
-    total_count = len(media_items)
-    await status_msg.edit_text(
-        f"⬇️ *Downloading {total_count} media file(s) in original quality...*",
-        parse_mode="Markdown"
-    )
-
     job_dir = twitter_service._get_job_dir()
 
+    # 1. LIVE DOWNLOAD PROGRESS METER
+    media_label = "Photo" if media_items[0]["type"] == "photo" else "Video"
+    title = f"X / Twitter {media_label}" if len(media_items) == 1 else f"X Album ({len(media_items)} items)"
+    dl_tracker = DownloadProgressTracker(
+        media_title=title,
+        quality_label="Original HD",
+        media_type=media_items[0]["type"] if len(media_items) == 1 else "video"
+    )
+    dl_reporter = AsyncProgressReporter(message=status_msg, tracker=dl_tracker)
+    dl_reporter.start()
+
     try:
-        downloaded = await twitter_service.download_all_media(media_items, job_dir)
-        if not downloaded:
-            await status_msg.edit_text("❌ *Failed to download media files. Please try again.*", parse_mode="Markdown")
-            return
+        downloaded = await twitter_service.download_all_media(media_items, job_dir, tracker=dl_tracker)
+    except Exception as e:
+        logger.error(f"Error during Twitter media download: {e}")
+        downloaded = []
+    finally:
+        await dl_reporter.stop()
 
-        await status_msg.edit_text("🚀 *Uploading to Telegram...*", parse_mode="Markdown")
+    if not downloaded:
+        await status_msg.edit_text("❌ *Failed to download media files. Please try again.*", parse_mode="Markdown")
+        twitter_service.cleanup_job_dir(job_dir)
+        return
 
+    # 2. LIVE UPLOAD PROGRESS METER
+    total_upload_bytes = sum(item["file_path"].stat().st_size for item in downloaded if item.get("file_path"))
+    up_tracker = UploadProgressTracker(
+        media_title=title,
+        total_bytes=max(1, total_upload_bytes),
+        media_type=downloaded[0]["type"] if len(downloaded) == 1 else "video"
+    )
+    up_reporter = AsyncUploadProgressReporter(message=status_msg, tracker=up_tracker)
+    up_reporter.start()
+
+    try:
         # Delivery logic
         if len(downloaded) == 1:
             item = downloaded[0]
             item_type = item["type"]
             f_path = item["file_path"]
 
+            tracked_file = TrackedFSInputFile(str(f_path), tracker=up_tracker)
+
             if item_type == "photo":
                 await message.answer_photo(
-                    photo=FSInputFile(str(f_path)),
+                    photo=tracked_file,
                     caption="📸 *X (Twitter) Photo (Original HD)*",
                     parse_mode="Markdown"
                 )
             elif item_type == "gif":
                 await message.answer_animation(
-                    animation=FSInputFile(str(f_path)),
+                    animation=tracked_file,
                     caption="🌀 *X (Twitter) GIF*",
                     parse_mode="Markdown"
                 )
             else:  # video
                 await message.answer_video(
-                    video=FSInputFile(str(f_path)),
+                    video=tracked_file,
                     caption="🎬 *X (Twitter) Video (Original HD)*",
                     parse_mode="Markdown"
                 )
@@ -147,6 +167,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
                 for idx, item in enumerate(chunk):
                     f_path = item["file_path"]
                     item_type = item["type"]
+                    tracked_file = TrackedFSInputFile(str(f_path), tracker=up_tracker)
                     # Add caption only on the first item of each album
                     caption = (
                         f"📸 *X (Twitter) Album ({len(chunk)} item{'s' if len(chunk) > 1 else ''})*"
@@ -156,7 +177,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
                     if item_type == "photo":
                         media_group.append(
                             InputMediaPhoto(
-                                media=FSInputFile(str(f_path)),
+                                media=tracked_file,
                                 caption=caption,
                                 parse_mode="Markdown"
                             )
@@ -164,7 +185,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
                     else:  # video or gif in media group
                         media_group.append(
                             InputMediaVideo(
-                                media=FSInputFile(str(f_path)),
+                                media=tracked_file,
                                 caption=caption,
                                 parse_mode="Markdown"
                             )
@@ -183,6 +204,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
 
         # Delete the progress status message cleanly
         try:
+            await asyncio.sleep(0.6)
             await status_msg.delete()
         except Exception:
             pass
@@ -194,6 +216,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
         except Exception:
             pass
     finally:
+        await up_reporter.stop()
         twitter_service.cleanup_job_dir(job_dir)
 
 
@@ -217,13 +240,12 @@ async def handle_twitter_waiting_input(message: Message, state: FSMContext) -> N
         )
 
 
-@router.message(F.text)
+@router.message(F.text.func(lambda text: bool(text and is_valid_twitter_url(text))))
 async def handle_direct_twitter_url(message: Message, state: FSMContext) -> None:
     """Catch any direct Twitter/X URL pasted anywhere without prior state."""
     text = (message.text or "").strip()
     if not text:
         return
 
-    if is_valid_twitter_url(text):
-        await state.clear()
-        await _execute_twitter_download(message, text)
+    await state.clear()
+    await _execute_twitter_download(message, text)

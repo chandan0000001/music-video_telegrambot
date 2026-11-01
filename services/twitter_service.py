@@ -194,44 +194,131 @@ class TwitterService:
             logger.error(f"yt-dlp fallback error for {url}: {e}")
             return False, [], f"⚠️ Failed to process X post: {str(e)[:80]}"
 
-    async def download_file(self, url: str, dest_path: Path) -> bool:
-        """Download remote media file to local destination path."""
+    async def download_file(self, url: str, dest_path: Path, tracker: Optional[Any] = None) -> bool:
+        """Download remote media file to local destination path with live progress tracking."""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as resp:
-                    if resp.status == 200:
-                        with open(dest_path, "wb") as f:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Download failed with status {resp.status} for {url}")
+                        return False
+                    total_len = int(resp.headers.get("Content-Length", 0))
+                    if tracker:
+                        tracker.status = "downloading"
+                        if total_len > 0:
+                            tracker.total_bytes = total_len
+
+                    start_time = asyncio.get_event_loop().time()
+                    downloaded = 0
+
+                    with open(dest_path, "wb") as f:
+                        while True:
+                            chunk = await resp.content.read(64 * 1024)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+
+                            if tracker:
+                                tracker.downloaded_bytes = downloaded
+                                if tracker.total_bytes > 0:
+                                    tracker.percentage = min(100.0, (downloaded / tracker.total_bytes) * 100.0)
+                                elapsed = asyncio.get_event_loop().time() - start_time
+                                if elapsed > 0:
+                                    tracker.speed = downloaded / elapsed
+                                    if tracker.speed > 0 and tracker.total_bytes > downloaded:
+                                        tracker.eta = int((tracker.total_bytes - downloaded) / tracker.speed)
+
+                    if tracker:
+                        tracker.percentage = 100.0
+                        tracker.status = "processing"
+                    return True
+        except Exception as e:
+            logger.error(f"Error downloading {url} to {dest_path}: {e}")
+            return False
+
+    async def download_all_media(
+        self,
+        media_items: List[Dict[str, Any]],
+        job_dir: Path,
+        tracker: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Download all media items into job_dir concurrently with progress tracking.
+        Returns list of downloaded media item dicts with 'file_path' added.
+        """
+        downloaded: List[Dict[str, Any]] = []
+
+        if tracker and len(media_items) == 1:
+            # Single item: tracker directly tracks the file
+            item = media_items[0]
+            item_type = item["type"]
+            ext = "jpg" if item_type == "photo" else "mp4"
+            dest_file = job_dir / f"media_1.{ext}"
+            ok = await self.download_file(item["url"], dest_file, tracker=tracker)
+            if ok and dest_file.exists() and dest_file.stat().st_size > 0:
+                return [{**item, "file_path": dest_file, "index": 0}]
+            return []
+
+        # Multi-item download
+        total_items = len(media_items)
+        lock = asyncio.Lock()
+        total_downloaded = 0
+        start_time = asyncio.get_event_loop().time()
+
+        # Probe content lengths quickly to estimate total size accurately
+        async def _probe_size(it: Dict[str, Any]) -> int:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.head(it["url"], timeout=aiohttp.ClientTimeout(total=5)) as r:
+                        return int(r.headers.get("Content-Length", 0))
+            except Exception:
+                return 0
+
+        sizes = await asyncio.gather(*[_probe_size(it) for it in media_items])
+        sum_sizes = sum(s for s in sizes if s > 0)
+
+        if tracker:
+            tracker.status = "downloading"
+            tracker.total_bytes = sum_sizes if sum_sizes > 0 else (total_items * 1024 * 1024)
+
+        async def _download_one(index: int, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            nonlocal total_downloaded
+            item_type = item["type"]
+            ext = "jpg" if item_type == "photo" else "mp4"
+            dest_file = job_dir / f"media_{index + 1}.{ext}"
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(item["url"], timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                        if resp.status != 200:
+                            return None
+                        with open(dest_file, "wb") as f:
                             while True:
                                 chunk = await resp.content.read(64 * 1024)
                                 if not chunk:
                                     break
                                 f.write(chunk)
-                        return True
-                    logger.warning(f"Download failed with status {resp.status} for {url}")
-                    return False
-        except Exception as e:
-            logger.error(f"Error downloading {url} to {dest_path}: {e}")
-            return False
+                                if tracker:
+                                    async with lock:
+                                        total_downloaded += len(chunk)
+                                        tracker.downloaded_bytes = total_downloaded
+                                        if tracker.total_bytes > 0:
+                                            tracker.percentage = min(100.0, (total_downloaded / tracker.total_bytes) * 100.0)
+                                        elapsed = asyncio.get_event_loop().time() - start_time
+                                        if elapsed > 0:
+                                            tracker.speed = total_downloaded / elapsed
+                                            if tracker.speed > 0 and tracker.total_bytes > total_downloaded:
+                                                tracker.eta = int((tracker.total_bytes - total_downloaded) / tracker.speed)
 
-    async def download_all_media(self, media_items: List[Dict[str, Any]], job_dir: Path) -> List[Dict[str, Any]]:
-        """
-        Download all media items into job_dir concurrently.
-        Returns list of downloaded media item dicts with 'file_path' added.
-        """
-        downloaded: List[Dict[str, Any]] = []
-
-        async def _download_one(index: int, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            item_type = item["type"]
-            ext = "jpg" if item_type == "photo" else "mp4"
-            dest_file = job_dir / f"media_{index + 1}.{ext}"
-
-            ok = await self.download_file(item["url"], dest_file)
-            if ok and dest_file.exists() and dest_file.stat().st_size > 0:
-                return {
-                    **item,
-                    "file_path": dest_file,
-                    "index": index
-                }
+                if dest_file.exists() and dest_file.stat().st_size > 0:
+                    return {
+                        **item,
+                        "file_path": dest_file,
+                        "index": index
+                    }
+            except Exception as e:
+                logger.error(f"Error downloading album item {index}: {e}")
             return None
 
         tasks = [_download_one(i, item) for i, item in enumerate(media_items)]
@@ -241,7 +328,6 @@ class TwitterService:
             if isinstance(res, dict) and res.get("file_path"):
                 downloaded.append(res)
 
-        # Sort back to original order
         downloaded.sort(key=lambda x: x.get("index", 0))
         return downloaded
 
