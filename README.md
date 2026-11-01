@@ -339,10 +339,11 @@ Upon launching, the bot output will confirm:
 3. The **top 5 matching results** are displayed with title, artist, duration, and numbered inline buttons.
 4. Click any track to choose **🎧 Audio** or **🎬 Video**.
 
-### Direct YouTube Link Processing
-1. Paste any valid YouTube link (e.g. `https://www.youtube.com/watch?v=...`, `https://youtu.be/...`, or YouTube Shorts).
-2. Untrusted or malicious URLs (SSRF attempts, private IPs, non-YouTube domains) are strictly rejected.
-3. The bot inspects available streams and lets you choose Audio or Video.
+### Direct YouTube & YouTube Music Link Processing
+1. Paste any valid YouTube or YouTube Music link (e.g. `https://music.youtube.com/watch?v=...`, `https://www.youtube.com/watch?v=...`, `https://youtu.be/...`, or YouTube Shorts).
+2. **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.
+3. **1-Tap YouTube Music Fast Download:** When a YouTube Music track is pasted, the bot automatically presents instant 1-tap bitrate buttons (`320 kbps MP3`, `192 kbps`, `128 kbps`, `M4A`, `WAV`) so downloading starts without navigation friction.
+4. For standard YouTube links, the bot inspects available streams and lets you choose between Audio or Video.
 
 ### Supported Formats & Quality
 - **Audio:**
@@ -546,9 +547,11 @@ tests/test_services.py::test_ffmpeg_split_video_into_chunks PASSED       [ 83%]
 tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 86%]
 tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 90%]
 tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 93%]
-tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 96%]
-tests/test_validators.py::test_validate_media_limits PASSED              [100%]
-============================== 30 passed in 4.01s ==============================
+tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 90%]
+tests/test_validators.py::test_validate_media_limits PASSED              [ 93%]
+tests/test_validators.py::test_youtube_music_urls PASSED                 [ 96%]
+tests/test_validators.py::test_youtube_music_fast_keyboard PASSED        [100%]
+============================== 32 passed in 4.17s ==============================
 ```
 
 ---

@@ -18,8 +18,15 @@ ALLOWED_YOUTUBE_DOMAINS = {
     "www.youtube.com",
     "m.youtube.com",
     "music.youtube.com",
+    "m.music.youtube.com",
     "youtu.be",
     "www.youtu.be"
+}
+
+# YouTube Music Specific Hostnames
+YOUTUBE_MUSIC_DOMAINS = {
+    "music.youtube.com",
+    "m.music.youtube.com"
 }
 
 # Dangerous characters in filenames
@@ -78,16 +85,16 @@ def extract_youtube_id(url: str) -> Optional[str]:
             return None
 
         # youtube.com/watch?v=<video_id>
-        if parsed.path == "/watch":
+        if parsed.path in ("/watch", "/watch/"):
             query_params = parse_qs(parsed.query)
             v_param = query_params.get("v")
             if v_param and YOUTUBE_ID_PATTERN.match(v_param[0]):
                 return v_param[0]
             return None
 
-        # youtube.com/shorts/<video_id> or /v/<video_id> or /embed/<video_id>
+        # youtube.com/shorts/<video_id> or /v/<video_id> or /embed/<video_id> or /track/<video_id>
         path_parts = parsed.path.strip("/").split("/")
-        if len(path_parts) >= 2 and path_parts[0] in ("shorts", "v", "embed"):
+        if len(path_parts) >= 2 and path_parts[0] in ("shorts", "v", "embed", "track"):
             if YOUTUBE_ID_PATTERN.match(path_parts[1]):
                 return path_parts[1]
 
@@ -97,8 +104,20 @@ def extract_youtube_id(url: str) -> Optional[str]:
 
 
 def is_valid_youtube_url(url: str) -> bool:
-    """Return True only if URL is a strictly valid YouTube video or short URL."""
+    """Return True only if URL is a strictly valid YouTube or YouTube Music video URL."""
     return extract_youtube_id(url) is not None
+
+
+def is_youtube_music_url(url: str) -> bool:
+    """Return True if the URL points specifically to YouTube Music with a valid video ID."""
+    if not url or not is_safe_url(url):
+        return False
+    try:
+        parsed = urlparse(url.strip())
+        domain = (parsed.netloc or "").lower().split(":")[0]
+        return domain in YOUTUBE_MUSIC_DOMAINS and extract_youtube_id(url) is not None
+    except Exception:
+        return False
 
 
 def sanitize_filename(name: str, max_length: int = 100) -> str:

@@ -11,8 +11,9 @@ from database import db
 from services.music_service import music_service
 from services.media_service import media_service
 from keyboards.search_keyboard import get_search_results_keyboard, get_media_type_keyboard
+from keyboards.quality_keyboard import get_youtube_music_keyboard
 from keyboards.main_menu import get_back_to_main_keyboard
-from utils.validators import is_valid_youtube_url, is_safe_url
+from utils.validators import is_valid_youtube_url, is_safe_url, is_youtube_music_url
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -170,40 +171,63 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
     # Check if input looks like a URL
     if text.startswith("http://") or text.startswith("https://"):
-        # Strict YouTube validation
+        # Strict YouTube & YouTube Music security validation
         if not is_valid_youtube_url(text):
             await message.answer(
-                "⚠️ **Unsupported or Invalid URL!**\n\n"
-                "This bot exclusively supports authorized **YouTube** links.\n"
-                "External or unknown websites are restricted for security reasons.\n\n"
-                "Please provide a link in one of these formats:\n"
-                "• `https://www.youtube.com/watch?v=VIDEO_ID`\n"
-                "• `https://youtu.be/VIDEO_ID`\n"
-                "• `https://www.youtube.com/shorts/VIDEO_ID`",
+                "🔒 **Security Alert: Unsupported or Restricted URL!**\n\n"
+                "This bot exclusively processes authorized **YouTube** & **YouTube Music** links.\n"
+                "All external, unknown, or untrusted websites (e.g. Spotify, Instagram, phishing links) are strictly blocked for security.\n\n"
+                "✅ **Accepted Link Formats:**\n"
+                "• `https://music.youtube.com/watch?v=VIDEO_ID` (YouTube Music)\n"
+                "• `https://www.youtube.com/watch?v=VIDEO_ID` (Standard YouTube)\n"
+                "• `https://youtu.be/VIDEO_ID` (Short links)\n"
+                "• `https://www.youtube.com/shorts/VIDEO_ID` (YouTube Shorts)",
                 parse_mode="Markdown"
             )
             return
 
-        # It is a valid YouTube URL
+        # It is a valid YouTube or YouTube Music URL
         await state.clear()
-        inspect_msg = await message.answer("🔍 *Inspecting media availability...*", parse_mode="Markdown")
+        
+        is_yt_music = is_youtube_music_url(text)
+        status_label = "🎧 *Inspecting YouTube Music track...*" if is_yt_music else "🔍 *Inspecting media availability...*"
+        inspect_msg = await message.answer(status_label, parse_mode="Markdown")
+
         success, info, err = await media_service.get_media_info(text)
 
         if not success or not info:
             await inspect_msg.edit_text(f"❌ **Error:** {err or 'Could not process URL.'}", parse_mode="Markdown")
             return
 
-        desc = (
-            f"🎬 **{info['title']}**\n"
-            f"👤 *Channel:* {info['artist']}\n"
-            f"⏱ *Duration:* `{info['duration_str']}`\n\n"
-            f"Select your desired download type below:"
-        )
-        await inspect_msg.edit_text(
-            text=desc,
-            reply_markup=get_media_type_keyboard(info["id"]),
-            parse_mode="Markdown"
-        )
+        video_id = info["id"]
+
+        if is_yt_music:
+            # Dedicated YouTube Music Fast-Download Interface
+            desc = (
+                f"🎧 **YouTube Music Track**\n\n"
+                f"🎵 **Title:** `{info['title']}`\n"
+                f"👤 **Artist:** {info['artist']}\n"
+                f"⏱ **Duration:** `{info['duration_str']}`\n\n"
+                f"⚡ **Tap a quality below to start downloading instantly:**"
+            )
+            await inspect_msg.edit_text(
+                text=desc,
+                reply_markup=get_youtube_music_keyboard(video_id),
+                parse_mode="Markdown"
+            )
+        else:
+            # Standard YouTube Interface
+            desc = (
+                f"🎬 **{info['title']}**\n"
+                f"👤 *Channel:* {info['artist']}\n"
+                f"⏱ *Duration:* `{info['duration_str']}`\n\n"
+                f"Select your desired download type below:"
+            )
+            await inspect_msg.edit_text(
+                text=desc,
+                reply_markup=get_media_type_keyboard(video_id),
+                parse_mode="Markdown"
+            )
         return
 
     # Current FSM state check

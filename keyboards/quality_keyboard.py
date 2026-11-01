@@ -101,3 +101,27 @@ def get_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🛑 Cancel Download", callback_data=f"cancel_dl:{user_id}")
         ]
     ])
+
+
+def get_youtube_music_keyboard(video_id: str) -> InlineKeyboardMarkup:
+    """
+    Generate optimized YouTube Music fast-download keyboard.
+    Allows 1-tap instant download for top audio bitrates, plus format/video options.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚡ MP3 320 kbps (High)", callback_data=f"adl:{video_id}:mp3:320"),
+            InlineKeyboardButton(text="⚡ MP3 192 kbps (Standard)", callback_data=f"adl:{video_id}:mp3:192"),
+        ],
+        [
+            InlineKeyboardButton(text="⚡ MP3 128 kbps (Fast)", callback_data=f"adl:{video_id}:mp3:128"),
+            InlineKeyboardButton(text="🎶 M4A (AAC)", callback_data=f"adl:{video_id}:m4a:192"),
+        ],
+        [
+            InlineKeyboardButton(text="🎼 Lossless WAV", callback_data=f"adl:{video_id}:wav:320"),
+            InlineKeyboardButton(text="🎬 Video (MP4)", callback_data=f"opt_video:{video_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_action")
+        ]
+    ])
