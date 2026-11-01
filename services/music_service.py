@@ -32,8 +32,8 @@ class MusicService:
 
     def _sync_search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Synchronous search executed in thread pool."""
-        from config import BASE_DIR
-        cookie_file = BASE_DIR / "cookies.txt"
+        from config import get_cookie_file
+        cookie_file = get_cookie_file()
 
         ydl_opts: dict[str, Any] = {
             "extract_flat": True,
@@ -43,7 +43,7 @@ class MusicService:
             "socket_timeout": 15,
             "remote_components": ["ejs:github"],
         }
-        if cookie_file.exists():
+        if cookie_file:
             ydl_opts["cookiefile"] = str(cookie_file)
 
         search_query = f"ytsearch{limit}:{query}"

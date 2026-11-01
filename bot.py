@@ -39,6 +39,14 @@ async def on_startup(bot: Bot) -> None:
     else:
         logger.info("FFmpeg engine verified successfully.")
 
+    # 3. Check YouTube Cookies
+    from config import get_cookie_file
+    c_file = get_cookie_file()
+    if c_file:
+        logger.info(f"🍪 YouTube Cookies: LOADED from {c_file} ({c_file.stat().st_size} bytes)")
+    else:
+        logger.warning("⚠️ YouTube Cookies: No valid cookies.txt found! Put cookies.txt in ~/music_bot/ or ~/")
+
     bot_info = await bot.get_me()
     logger.info(f"Bot connected: @{bot_info.username} (ID: {bot_info.id})")
     logger.info(f"Loaded {len(ADMIN_IDS)} administrator ID(s).")

@@ -20,13 +20,39 @@ if _env_file.exists():
             key, val = line.split("=", 1)
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-# Auto-generate cookies.txt from environment variable (for Cloud / PaaS deployments)
+# Auto-generate or locate cookies.txt across common server paths
+def get_cookie_file() -> Optional[Path]:
+    """Search for cookies.txt across common deployment paths."""
+    candidates = [
+        BASE_DIR / "cookies.txt",
+        Path.home() / "music_bot" / "cookies.txt",
+        Path.home() / "cookies.txt",
+        BASE_DIR.parent / "cookies.txt",
+        Path("/home/ubuntu/music_bot/cookies.txt"),
+        Path("/home/ubuntu/cookies.txt"),
+    ]
+    for c in candidates:
+        try:
+            if c.exists() and c.is_file() and c.stat().st_size > 50:
+                return c
+        except Exception:
+            pass
+    return None
+
+
 COOKIE_FILE: Path = BASE_DIR / "cookies.txt"
 _cookies_b64 = os.getenv("YOUTUBE_COOKIES_BASE64")
 _cookies_raw = os.getenv("YOUTUBE_COOKIES")
 
 if not COOKIE_FILE.exists():
-    if _cookies_b64:
+    _detected = get_cookie_file()
+    if _detected and _detected != COOKIE_FILE:
+        try:
+            import shutil
+            shutil.copy2(_detected, COOKIE_FILE)
+        except Exception:
+            pass
+    elif _cookies_b64:
         try:
             COOKIE_FILE.write_bytes(base64.b64decode(_cookies_b64.strip()))
         except Exception:
