@@ -94,3 +94,51 @@ async def test_scenario_12_and_13_admin_command():
     await cmd_admin(admin_msg, mock_state)
     admin_msg.answer.assert_awaited_once()
     assert "Administrator Control Dashboard" in admin_msg.answer.call_args[1]["text"]
+
+
+def test_main_menu_keyboard_has_ytmusic():
+    """Verify main menu includes YouTube Music Downloader and dedicated hub keyboard."""
+    from keyboards.main_menu import get_main_menu_keyboard, get_ytmusic_menu_keyboard
+    menu_kb = get_main_menu_keyboard(is_admin=False)
+    
+    # Check that YouTube Music button exists with callback menu:ytmusic
+    all_callbacks = [btn.callback_data for row in menu_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "menu:ytmusic" in all_callbacks
+    assert "menu:search" in all_callbacks
+    assert "menu:audio" in all_callbacks
+    assert "menu:video" in all_callbacks
+
+    yt_kb = get_ytmusic_menu_keyboard()
+    yt_callbacks = [btn.callback_data for row in yt_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "menu:main" in yt_callbacks
+
+
+def test_welcome_text_personalization():
+    """Verify welcome message is visually engaging and personalized."""
+    from handlers.start import get_welcome_text
+    text = get_welcome_text("Chandan")
+    assert "Chandan" in text
+    assert "ULTRA MUSIC & VIDEO BOT" in text
+    assert "YouTube Music" in text
+    assert "2000 MB" in text
+
+
+@pytest.mark.asyncio
+async def test_ytmusic_command_prompts_hub():
+    """Verify /ytmusic command displays YouTube Music hub and sets state."""
+    from handlers.ytmusic import cmd_ytmusic
+    from handlers.states import UserStates
+
+    mock_state = MagicMock()
+    mock_state.set_state = AsyncMock()
+
+    msg = MagicMock(spec=Message)
+    msg.from_user = User(id=1234567, is_bot=False, first_name="Tester")
+    msg.text = "/ytmusic"
+    msg.answer = AsyncMock()
+
+    await cmd_ytmusic(msg, mock_state)
+    mock_state.set_state.assert_awaited_once_with(UserStates.waiting_for_ytmusic)
+    msg.answer.assert_awaited_once()
+    assert "YOUTUBE MUSIC DOWNLOADER" in msg.answer.call_args[1]["text"]
+

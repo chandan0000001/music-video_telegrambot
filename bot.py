@@ -48,6 +48,22 @@ async def on_startup(bot: Bot) -> None:
         ok = await mtproto_service.start()
         logger.info(f"MTProto 2GB High-Speed Engine started: {ok}")
 
+    # 4. Register Telegram Command Menu
+    from aiogram.types import BotCommand
+    commands = [
+        BotCommand(command="start", description="🚀 Launch Main Menu & Dashboard"),
+        BotCommand(command="ytmusic", description="🔴 YouTube Music Studio Downloader"),
+        BotCommand(command="search", description="🔍 Search songs by title or artist"),
+        BotCommand(command="history", description="📜 View recent searches & downloads"),
+        BotCommand(command="help", description="📖 Features guide & specs"),
+        BotCommand(command="about", description="ℹ️ Engine specs & developer info"),
+    ]
+    try:
+        await bot.set_my_commands(commands)
+        logger.info("Bot command menu registered with Telegram.")
+    except Exception as e:
+        logger.warning(f"Failed to register command menu: {e}")
+
 
 async def on_shutdown(bot: Bot) -> None:
     """Graceful shutdown: close bot session and cleanup."""

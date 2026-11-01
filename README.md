@@ -339,6 +339,13 @@ Upon launching, the bot output will confirm:
 3. The **top 5 matching results** are displayed with title, artist, duration, and numbered inline buttons.
 4. Click any track to choose **🎧 Audio** or **🎬 Video**.
 
+### Dedicated YouTube Music Studio Downloader
+- **Hub & Commands:** Use `/ytmusic`, `/music`, or click **🔴 YouTube Music Downloader** from the main menu.
+- **Dedicated Hub Interface:** Provides a streamlined environment tailored for music audiophiles.
+- **Instant 1-Tap Fast Download:** Paste any YouTube Music track (`music.youtube.com`), and download directly in `320 kbps MP3`, `192 kbps MP3`, `128 kbps MP3`, `M4A (AAC)`, or `Lossless WAV`.
+- **Search Music:** You can also type any track title inside the YouTube Music Studio to search and download high-fidelity audio streams.
+- **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.
+
 ### Direct YouTube & YouTube Music Link Processing
 1. Paste any valid YouTube or YouTube Music link (e.g. `https://music.youtube.com/watch?v=...`, `https://www.youtube.com/watch?v=...`, `https://youtu.be/...`, or YouTube Shorts).
 2. **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.
@@ -544,14 +551,17 @@ tests/test_services.py::test_scenario_8_ffmpeg_video_processing PASSED   [ 73%]
 tests/test_services.py::test_scenario_11_telegram_upload_failure_handling PASSED [ 76%]
 tests/test_services.py::test_mtproto_service_properties PASSED           [ 80%]
 tests/test_services.py::test_ffmpeg_split_video_into_chunks PASSED       [ 83%]
-tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 86%]
-tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 90%]
-tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 93%]
-tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 90%]
-tests/test_validators.py::test_validate_media_limits PASSED              [ 93%]
-tests/test_validators.py::test_youtube_music_urls PASSED                 [ 96%]
+tests/test_handlers.py::test_main_menu_keyboard_has_ytmusic PASSED       [ 22%]
+tests/test_handlers.py::test_welcome_text_personalization PASSED         [ 25%]
+tests/test_handlers.py::test_ytmusic_command_prompts_hub PASSED          [ 28%]
+tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 82%]
+tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 85%]
+tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 88%]
+tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 91%]
+tests/test_validators.py::test_validate_media_limits PASSED              [ 94%]
+tests/test_validators.py::test_youtube_music_urls PASSED                 [ 97%]
 tests/test_validators.py::test_youtube_music_fast_keyboard PASSED        [100%]
-============================== 32 passed in 4.17s ==============================
+============================== 35 passed in 4.07s ==============================
 ```
 
 ---

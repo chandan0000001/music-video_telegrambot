@@ -25,15 +25,21 @@ async def cb_menu_search(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to enter music search query."""
     await state.set_state(UserStates.waiting_for_search_query)
     text = (
-        "🔍 **Search Music**\n\n"
-        "Please type the name of the song or artist you want to search for.\n\n"
-        "💡 *Example:* `Tum Hi Ho Arijit Singh`"
+        "🔍 ━━━━━━━━━━━━━━━━━━━ 🔍\n"
+        "       🎵 **SEARCH MUSIC** 🎵\n"
+        "🔍 ━━━━━━━━━━━━━━━━━━━ 🔍\n\n"
+        "Type any song title, artist, or album name to search.\n\n"
+        "💡 *Examples:*\n"
+        "• `Blinding Lights The Weeknd`\n"
+        "• `Kesariya Arijit Singh`\n"
+        "• `Faded Alan Walker`\n\n"
+        "👉 *Send your song name below:*"
     )
     if callback.message:
         try:
-            await callback.message.edit_text(text, parse_mode="Markdown")
+            await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
-            await callback.message.answer(text, parse_mode="Markdown")
+            await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
     await callback.answer()
 
 
@@ -42,15 +48,21 @@ async def cb_menu_audio(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to submit YouTube link for audio extraction."""
     await state.set_state(UserStates.waiting_for_audio_link)
     text = (
-        "🎧 **Download Audio**\n\n"
-        "Please send a valid YouTube link (video or Shorts) to extract and convert audio.\n\n"
-        "💡 *Example:* `https://www.youtube.com/watch?v=VIDEO_ID`"
+        "🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n"
+        "     🎶 **DOWNLOAD AUDIO** 🎶\n"
+        "🎧 ━━━━━━━━━━━━━━━━━━━ 🎧\n\n"
+        "Paste any official YouTube or YouTube Music link to extract audio.\n\n"
+        "⚡ **Supported Formats:**\n"
+        "• `MP3` (128 kbps, 192 kbps, 320 kbps Studio)\n"
+        "• `M4A (AAC)` & `WAV (Lossless)`\n\n"
+        "💡 *Example:* `https://www.youtube.com/watch?v=VIDEO_ID`\n\n"
+        "👉 *Paste your link below:*"
     )
     if callback.message:
         try:
-            await callback.message.edit_text(text, parse_mode="Markdown")
+            await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
-            await callback.message.answer(text, parse_mode="Markdown")
+            await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
     await callback.answer()
 
 
@@ -59,15 +71,20 @@ async def cb_menu_video(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to submit YouTube link for video download."""
     await state.set_state(UserStates.waiting_for_video_link)
     text = (
-        "🎬 **Download Video**\n\n"
-        "Please send a valid YouTube link to download video in your desired quality.\n\n"
-        "💡 *Example:* `https://www.youtube.com/watch?v=VIDEO_ID`"
+        "🎬 ━━━━━━━━━━━━━━━━━━━ 🎬\n"
+        "     🎥 **DOWNLOAD VIDEO** 🎥\n"
+        "🎬 ━━━━━━━━━━━━━━━━━━━ 🎬\n\n"
+        "Paste any YouTube video or Shorts link to download in genuine resolutions.\n\n"
+        "⚡ **Supported Qualities:**\n"
+        "• `144p`, `240p`, `360p`, `480p`, `720p HD`, `1080p Full HD`\n\n"
+        "💡 *Example:* `https://www.youtube.com/watch?v=VIDEO_ID`\n\n"
+        "👉 *Paste your link below:*"
     )
     if callback.message:
         try:
-            await callback.message.edit_text(text, parse_mode="Markdown")
+            await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
-            await callback.message.answer(text, parse_mode="Markdown")
+            await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
     await callback.answer()
 
 
