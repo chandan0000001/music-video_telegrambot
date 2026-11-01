@@ -52,7 +52,7 @@ INSTAGRAM_HUB_TEXT = (
     "*HD Reels, Posts, Carousels, Stories, Highlights & Profile DP*\n\n"
     "Supported options:\n"
     "• **Reels & Posts:** Send any Reel, Video, or Photo link\n"
-    "• **Carousels:** Albums with multiple photos/videos (up to 15 items)\n"
+    "• **Carousels:** Full albums with all original photos & videos (no item limits)\n"
     "• **Stories & Highlights:** Send any active story or highlight link\n"
     "• **Profile DP & Bio:** Send profile link or `@username` (both public & private accounts supported)\n\n"
     "👉 *Paste your Instagram link or @username below:*"
@@ -226,7 +226,7 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
 
     success, media_items, err_msg = await instagram_service.get_instagram_media(url)
     if not success or not media_items:
-        if "private" in (err_msg or "").lower():
+        if err_msg and "private account" in err_msg.lower() and "login" not in err_msg.lower() and "session" not in err_msg.lower():
             notice = (
                 "🔒 <b>Private Account Notice:</b>\n"
                 "This media belongs to a private Instagram account and cannot be downloaded.\n\n"

@@ -14,7 +14,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import aiohttp
 import yt_dlp
 
-from config import TEMP_DIR
+from config import TEMP_DIR, get_instagram_cookie_file, INSTAGRAM_SESSION_ID, YTDLP_PROXY
 from utils.validators import extract_instagram_info, is_valid_instagram_url
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class InstagramService:
     def __init__(self, temp_base: Optional[Path] = None):
         self.temp_base = temp_base or (TEMP_DIR / "instagram")
         self.temp_base.mkdir(parents=True, exist_ok=True)
-        self.max_items_limit = 15
+        # No artificial carousel item limit: download all existing media items
 
     def _get_job_dir(self) -> Path:
         """Create a dedicated temporary directory for a download job."""
@@ -97,6 +97,8 @@ class InstagramService:
             "Accept-Language": "en-US,en;q=0.9",
             "Sec-Fetch-Site": "same-origin",
         }
+        if INSTAGRAM_SESSION_ID:
+            headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
         url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector) as session:
@@ -173,6 +175,11 @@ class InstagramService:
 
         def _sync():
             opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
+            cookie_file = get_instagram_cookie_file()
+            if cookie_file:
+                opts["cookiefile"] = str(cookie_file)
+            if YTDLP_PROXY:
+                opts["proxy"] = YTDLP_PROXY
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(f"https://www.instagram.com/{username}/", download=False)
 
@@ -214,12 +221,13 @@ class InstagramService:
             return False, [], "ℹ️ This is a profile URL. Use the Profile Downloader feature to view details and HD DP."
 
         canonical_url = f"https://www.instagram.com/{category}/{identifier}/"
+        last_error = None
 
         # Strategy 1: Direct Embed / Web HTML / GraphQL extraction (best for photos & mixed carousels)
         try:
             items = await self._extract_via_embed_and_html(identifier, category)
             if items:
-                return True, items[:self.max_items_limit], None
+                return True, items, None
         except Exception as e:
             logger.debug(f"Direct embed/HTML extraction failed for {identifier}: {e}")
 
@@ -227,17 +235,17 @@ class InstagramService:
         try:
             items = await self._extract_via_cobalt(canonical_url)
             if items:
-                return True, items[:self.max_items_limit], None
+                return True, items, None
         except Exception as e:
             logger.debug(f"Cobalt extraction failed for {canonical_url}: {e}")
 
-        # Strategy 3: Direct yt-dlp extraction
+        # Strategy 3: Direct yt-dlp extraction with cookie support
         try:
             items, err = await self._extract_via_ytdlp(canonical_url)
             if items:
-                return True, items[:self.max_items_limit], None
-            if err and ("private" in err.lower() or "login" in err.lower()):
-                return False, [], "🔒 This content belongs to a Private Account and cannot be downloaded directly."
+                return True, items, None
+            if err:
+                last_error = err
         except Exception as e:
             logger.debug(f"yt-dlp extraction error for {canonical_url}: {e}")
 
@@ -245,14 +253,20 @@ class InstagramService:
         try:
             items = await self._extract_via_ddinstagram(identifier)
             if items:
-                return True, items[:self.max_items_limit], None
+                return True, items, None
         except Exception as e:
             logger.debug(f"ddinstagram extraction failed for {identifier}: {e}")
 
         if category in ("story", "highlight"):
-            return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or from a private account."
+            return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or requires login session."
 
-        return False, [], "⚠️ Could not retrieve media from this Instagram post. It may be private or restricted."
+        if last_error:
+            if "this account is private" in last_error.lower() or "account is private" in last_error.lower():
+                return False, [], "🔒 This content belongs to a Private Account and cannot be downloaded directly."
+            if "login" in last_error.lower() or "sign in" in last_error.lower() or "checkpoint" in last_error.lower():
+                return False, [], "⚠️ Instagram login session required for this post. Add your sessionid or cookies.txt in .env to bypass."
+
+        return False, [], "⚠️ Could not retrieve media from this Instagram post. The post may be restricted or requires Instagram cookies."
 
     async def _extract_via_embed_and_html(self, shortcode: str, category: str = "p") -> Optional[List[Dict[str, Any]]]:
         """
@@ -264,6 +278,8 @@ class InstagramService:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
+        if INSTAGRAM_SESSION_ID:
+            headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
 
         urls_to_try = [
             f"https://www.instagram.com/p/{shortcode}/embed/captioned/",
@@ -509,6 +525,11 @@ class InstagramService:
                 "noplaylist": True,
                 "socket_timeout": 20,
             }
+            cookie_file = get_instagram_cookie_file()
+            if cookie_file:
+                ydl_opts["cookiefile"] = str(cookie_file)
+            if YTDLP_PROXY:
+                ydl_opts["proxy"] = YTDLP_PROXY
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
 

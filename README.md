@@ -163,9 +163,11 @@ flowchart TD
    - Background worker executes every 15 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
 6. **📸 Instagram & 🐦 X (Twitter) Multi-Media Downloaders:**
    - **Instagram Suite:**
-     - **Reels & Posts:** High-definition single MP4 videos, full-resolution photos, and carousels (albums up to 15 items).
+     - **Reels & Posts:** High-definition single MP4 videos, full-resolution untouched photos, and complete carousels (all items in the album, no artificial limit).
+     - **Quality & 1080p Cap:** Original upload quality matched; videos exceeding 1080p (2K/4K) are scaled cleanly to 1080p via FFmpeg, while images remain 100% untouched.
      - **Stories & Highlights:** Download active public stories and highlight collections directly.
      - **Profile DP & Bio Downloader:** Send profile links or `@username` to fetch original HD profile avatars and full account bios with follower/following stats.
+     - **Instagram Cookie & Session Support:** Set `INSTAGRAM_SESSION_ID` in `.env` or place `cookies.txt` / `instagram_cookies.txt` in the root folder to completely bypass Instagram datacenter login walls and rate limits.
      - **Private Account Graceful Handling:** For private profiles, fetches full HD profile pictures and public bio data while cleanly notifying users that posts/stories remain private.
    - **X (Twitter):** Original raw photos (`?name=orig`), HD MP4 videos, looping GIFs, and multi-media albums.
    - **Clean Sub-Menu Navigation:** Every sub-section (Instagram, X, YouTube Music, Search, Audio, Video, Help) displays a dedicated, uncluttered `[ 🔙 Back to Main Menu ]` button.

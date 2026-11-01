@@ -60,6 +60,43 @@ if not COOKIE_FILE.exists():
     elif _cookies_raw:
         COOKIE_FILE.write_text(_cookies_raw.strip(), encoding="utf-8")
 
+# Instagram Cookies & Session ID (bypasses Instagram login walls and rate limits)
+INSTAGRAM_SESSION_ID: Optional[str] = os.getenv("INSTAGRAM_SESSION_ID")
+INSTAGRAM_COOKIES: Optional[str] = os.getenv("INSTAGRAM_COOKIES")
+
+
+def get_instagram_cookie_file() -> Optional[Path]:
+    """Search for dedicated instagram_cookies.txt or standard cookies.txt."""
+    candidates = [
+        BASE_DIR / "instagram_cookies.txt",
+        BASE_DIR / "cookies.txt",
+        Path.home() / "music_bot" / "instagram_cookies.txt",
+        Path.home() / "music_bot" / "cookies.txt",
+        Path.home() / "cookies.txt",
+        Path("/home/ubuntu/music_bot/cookies.txt"),
+    ]
+    for c in candidates:
+        try:
+            if c.exists() and c.is_file() and c.stat().st_size > 20:
+                return c
+        except Exception:
+            pass
+    return None
+
+
+INSTAGRAM_COOKIE_FILE: Optional[Path] = get_instagram_cookie_file()
+if not INSTAGRAM_COOKIE_FILE and INSTAGRAM_SESSION_ID:
+    _ig_file = BASE_DIR / "instagram_cookies.txt"
+    try:
+        _content = (
+            "# Netscape HTTP Cookie File\n"
+            f".instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t{INSTAGRAM_SESSION_ID.strip()}\n"
+        )
+        _ig_file.write_text(_content, encoding="utf-8")
+        INSTAGRAM_COOKIE_FILE = _ig_file
+    except Exception:
+        pass
+
 # Telegram Bot Credentials
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 TELEGRAM_API_SERVER: Optional[str] = os.getenv("TELEGRAM_API_SERVER")
