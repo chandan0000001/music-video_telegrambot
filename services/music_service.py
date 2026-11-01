@@ -41,6 +41,7 @@ class MusicService:
             "no_warnings": True,
             "skip_download": True,
             "socket_timeout": 15,
+            "remote_components": ["ejs:github"],
         }
         if cookie_file.exists():
             ydl_opts["cookiefile"] = str(cookie_file)

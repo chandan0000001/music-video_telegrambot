@@ -52,7 +52,9 @@ class MediaService:
 
     def _get_common_ydl_opts(self) -> Dict[str, Any]:
         """Base options for yt-dlp metadata and downloads."""
-        opts: Dict[str, Any] = {}
+        opts: Dict[str, Any] = {
+            "remote_components": ["ejs:github"],
+        }
         cookie_file = self.temp_base.parent / "cookies.txt"
         if cookie_file.exists():
             opts["cookiefile"] = str(cookie_file)
