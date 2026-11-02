@@ -149,6 +149,19 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     anim_msg = None
 
     try:
+        # Check server storage health before accepting jobs
+        from utils.disk_cleaner import check_disk_space_available
+        has_disk, _ = check_disk_space_available(min_free_mb=600)
+        if not has_disk:
+            await status_msg.edit_text(
+                "⚠️ **Server Storage Busy**\n\n"
+                "The server's media buffer is currently handling multiple large downloads. "
+                "Please retry in 1–2 minutes once active downloads complete!",
+                reply_markup=get_retry_keyboard(f"adl:{video_id}:{selected_format}:{bitrate}", f"opt_audio:{video_id}"),
+                parse_mode="Markdown"
+            )
+            return
+
         # Acquire slot via dynamic 8/8 Queue
         acquired = await queue_manager.acquire_download_slot(
             user_id=user_id,

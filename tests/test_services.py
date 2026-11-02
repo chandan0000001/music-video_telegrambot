@@ -342,3 +342,69 @@ async def test_widescreen_and_aspect_ratio_resolution_detection():
         assert "1080p" in info["available_resolutions"]
 
 
+def test_disk_space_guard_and_usage_stats(tmp_path: Path):
+    """Verify check_disk_space_available and get_disk_usage_stats function accurately."""
+    from utils.disk_cleaner import get_disk_usage_stats, check_disk_space_available
+
+    stats = get_disk_usage_stats(tmp_path)
+    assert "total_gb" in stats and stats["total_gb"] > 0
+    assert "free_gb" in stats and stats["free_gb"] > 0
+    assert "free_mb" in stats and stats["free_mb"] > 0
+    assert "free_percent" in stats and 0 <= stats["free_percent"] <= 100
+
+    # Minimum 1MB free must return True on active disk
+    has_space, free_mb = check_disk_space_available(min_free_mb=1, target_dir=tmp_path)
+    assert has_space is True
+    assert free_mb > 1
+
+    # Asking for 100 million MB should return False
+    has_space_huge, _ = check_disk_space_available(min_free_mb=100_000_000, target_dir=tmp_path)
+    assert has_space_huge is False
+
+
+@pytest.mark.asyncio
+async def test_telegram_chunk_floodwait_retry(tmp_path: Path, monkeypatch):
+    """Verify that multi-chunk deliveries handle TelegramRetryAfter gracefully."""
+    from aiogram.exceptions import TelegramRetryAfter
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setattr(type(mtproto_service), "is_configured", property(lambda self: False))
+
+    # Generate 2 dummy parts
+    chunks_dir = tmp_path / "video_chunks"
+    chunks_dir.mkdir()
+    p1 = chunks_dir / "part_001.mp4"
+    p2 = chunks_dir / "part_002.mp4"
+    p1.write_bytes(b"A" * 1024)
+    p2.write_bytes(b"B" * 1024)
+
+    # Generate dummy source file > 48MB (or mock stat)
+    large_file = tmp_path / "dummy_large.mp4"
+    large_file.write_bytes(b"0" * 1024)
+
+    mock_bot = MagicMock()
+    # First call raises TelegramRetryAfter with 0.1s, second succeeds
+    mock_bot.send_video = AsyncMock(
+        side_effect=[
+            TelegramRetryAfter(method="sendVideo", message="Flood control", retry_after=0.1),
+            MagicMock(),
+            MagicMock()
+        ]
+    )
+
+    with patch.object(Path, "stat", return_value=MagicMock(st_size=50 * 1024 * 1024)):
+        with patch.object(ffmpeg_service, "split_video_into_chunks", return_value=[p1, p2]):
+            sent = await telegram_service.send_video_file(
+                bot=mock_bot,
+                chat_id=12345,
+                file_path=large_file,
+                title="Large Video",
+                duration=120,
+                width=1280,
+                height=720
+            )
+            assert sent is True
+            assert mock_bot.send_video.await_count >= 2
+
+
+

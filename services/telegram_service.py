@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional, List
 from aiogram import Bot
 from aiogram.types import FSInputFile, Message, InlineKeyboardMarkup
-from aiogram.exceptions import TelegramAPIError, TelegramEntityTooLarge, TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramEntityTooLarge, TelegramBadRequest, TelegramRetryAfter
 
 from config import TELEGRAM_API_SERVER
 from services.ffmpeg_service import ffmpeg_service
@@ -145,18 +145,35 @@ class TelegramService:
                     part_audio = TrackedFSInputFile(str(part_file), tracker=upload_tracker, chunk_size=512 * 1024)
                     thumb_file = FSInputFile(str(thumbnail_path), chunk_size=256 * 1024) if (thumbnail_path and thumbnail_path.exists()) else None
                     caption = f"🎵 *{title}* (Part {idx}/{total_parts})\n👤 *Artist:* {artist} | 💾 *Size:* {part_size_mb:.1f} MB"
+                    if idx > 1:
+                        await asyncio.sleep(1.5)  # Telegram FloodWait cooldown between consecutive parts
                     try:
-                        await bot.send_audio(
-                            chat_id=chat_id,
-                            audio=part_audio,
-                            title=f"{title[:50]} (Part {idx}/{total_parts})",
-                            performer=artist[:64],
-                            duration=max(1, duration // total_parts),
-                            thumbnail=thumb_file,
-                            caption=caption,
-                            parse_mode="Markdown",
-                            request_timeout=600
-                        )
+                        try:
+                            await bot.send_audio(
+                                chat_id=chat_id,
+                                audio=part_audio,
+                                title=f"{title[:50]} (Part {idx}/{total_parts})",
+                                performer=artist[:64],
+                                duration=max(1, duration // total_parts),
+                                thumbnail=thumb_file,
+                                caption=caption,
+                                parse_mode="Markdown",
+                                request_timeout=600
+                            )
+                        except TelegramRetryAfter as e:
+                            logger.warning(f"Telegram FloodWait hit during audio chunk send. Waiting {e.retry_after}s...")
+                            await asyncio.sleep(e.retry_after + 1)
+                            await bot.send_audio(
+                                chat_id=chat_id,
+                                audio=part_audio,
+                                title=f"{title[:50]} (Part {idx}/{total_parts})",
+                                performer=artist[:64],
+                                duration=max(1, duration // total_parts),
+                                thumbnail=thumb_file,
+                                caption=caption,
+                                parse_mode="Markdown",
+                                request_timeout=600
+                            )
                     finally:
                         if upload_reporter:
                             await upload_reporter.stop(render_final=False)
@@ -309,19 +326,37 @@ class TelegramService:
                         f"📺 *Resolution:* {height}p | 💾 *Size:* {part_size_mb:.1f} MB"
                     )
 
+                    if idx > 1:
+                        await asyncio.sleep(1.5)  # Telegram FloodWait cooldown between consecutive parts
                     try:
-                        await bot.send_video(
-                            chat_id=chat_id,
-                            video=part_video,
-                            caption=caption,
-                            duration=part_dur,
-                            width=width,
-                            height=height,
-                            thumbnail=thumb_file,
-                            supports_streaming=True,
-                            parse_mode="Markdown",
-                            request_timeout=600
-                        )
+                        try:
+                            await bot.send_video(
+                                chat_id=chat_id,
+                                video=part_video,
+                                caption=caption,
+                                duration=part_dur,
+                                width=width,
+                                height=height,
+                                thumbnail=thumb_file,
+                                supports_streaming=True,
+                                parse_mode="Markdown",
+                                request_timeout=600
+                            )
+                        except TelegramRetryAfter as e:
+                            logger.warning(f"Telegram FloodWait hit during video chunk send. Waiting {e.retry_after}s...")
+                            await asyncio.sleep(e.retry_after + 1)
+                            await bot.send_video(
+                                chat_id=chat_id,
+                                video=part_video,
+                                caption=caption,
+                                duration=part_dur,
+                                width=width,
+                                height=height,
+                                thumbnail=thumb_file,
+                                supports_streaming=True,
+                                parse_mode="Markdown",
+                                request_timeout=600
+                            )
                     finally:
                         if upload_reporter:
                             await upload_reporter.stop(render_final=False)

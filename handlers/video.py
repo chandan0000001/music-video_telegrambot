@@ -218,6 +218,19 @@ async def execute_video_download_pipeline(
             await status_msg.edit_text(limit_msg, parse_mode="Markdown")
             return
 
+        # Check server storage health before accepting large jobs
+        from utils.disk_cleaner import check_disk_space_available
+        has_disk, _ = check_disk_space_available(min_free_mb=1000)
+        if not has_disk:
+            await status_msg.edit_text(
+                "⚠️ **Server Storage Busy**\n\n"
+                "The server's media buffer is currently handling multiple large downloads. "
+                "Please retry in 1–2 minutes once active downloads complete!",
+                reply_markup=get_retry_keyboard(f"vdl:{video_id}:{resolution}", f"opt_video:{video_id}"),
+                parse_mode="Markdown"
+            )
+            return
+
         # Acquire slot via dynamic 8/8 Queue
         acquired = await queue_manager.acquire_download_slot(
             user_id=user_id,

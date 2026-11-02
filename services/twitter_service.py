@@ -109,7 +109,7 @@ class TwitterService:
         if not tweet:
             return False, [], "⚠️ Could not retrieve tweet information."
 
-        # Filter out sensitive/18+ media as per user preference
+        # Filter out sensitive/18+ media per policy
         if tweet.get("possibly_sensitive") is True:
             return False, [], "⚠️ This X/Twitter post contains sensitive or age-restricted media and cannot be downloaded."
 

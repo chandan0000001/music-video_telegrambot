@@ -456,8 +456,14 @@ class MediaService:
         width_val = STANDARD_TIER_WIDTHS.get(height_val, int(height_val * 16 / 9))
 
         download_template = str(job_dir / "input_media.%(ext)s")
-        # Select best video matching either height or width constraint (supporting widescreen cinema), and best audio
+        # Select best video matching either height or width constraint (supporting widescreen cinema).
+        # Prioritize standard H.264 (avc1) for 100% universal compatibility across all Telegram iOS/Android clients,
+        # falling back to AV1/VP9 when H.264 is not supplied by YouTube.
         format_selector = (
+            f"bestvideo[height<={height_val}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[width<={width_val}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={height_val}][vcodec^=avc1]+bestaudio/"
+            f"bestvideo[width<={width_val}][vcodec^=avc1]+bestaudio/"
             f"bestvideo[height<={height_val}][ext=mp4]+bestaudio[ext=m4a]/"
             f"bestvideo[width<={width_val}][ext=mp4]+bestaudio[ext=m4a]/"
             f"bestvideo[height<={height_val}]+bestaudio/"
