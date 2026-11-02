@@ -224,6 +224,13 @@ class InstagramService:
         if category == "profile":
             return False, [], "ℹ️ This is a profile URL. Use the Profile Downloader feature to view details and HD DP."
 
+        if category == "live":
+            return False, [], (
+                "🔴 <b>Access Restricted: Active Live Broadcast</b>\n\n"
+                "⚠️ This is an active <b>Instagram Live</b> broadcast and cannot be downloaded while in progress.\n\n"
+                "<i>Once the live stream finishes and the creator saves it to their profile as a Reel or Video, send that link to download the complete replay!</i>"
+            )
+
         canonical_url = f"https://www.instagram.com/{category}/{identifier}/"
         last_error = None
 
@@ -832,6 +839,254 @@ class InstagramService:
                     capped_file.rename(v_file)
 
         return downloaded
+
+    async def get_instagram_audio(self, audio_id_or_url: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+        """
+        Fetch Instagram audio track metadata and direct stream URL.
+        Supports both audio IDs (e.g. '879646403986034') and full URLs.
+        Returns: (success, audio_info_dict, error_message)
+        """
+        clean_id = audio_id_or_url.strip()
+        if "instagram.com" in clean_id:
+            info_tuple = extract_instagram_info(clean_id)
+            if info_tuple and info_tuple[0] == "audio":
+                clean_id = info_tuple[1]
+            else:
+                m = re.search(r"/(?:reels?/audio|audio|music)/([0-9a-zA-Z_-]+)", clean_id)
+                if m:
+                    clean_id = m.group(1)
+
+        clean_id = clean_id.strip("/").strip()
+        if not clean_id:
+            return False, None, "⚠️ Invalid Instagram audio link or ID provided."
+
+        # Strategy 1: Official Instagram Web API (clips/music)
+        try:
+            info = await self._fetch_audio_via_api(clean_id)
+            if info and info.get("audio_url"):
+                return True, info, None
+        except Exception as e:
+            logger.debug(f"Instagram clips/music API failed for audio {clean_id}: {e}")
+
+        # Strategy 2: Web HTML / JSON Scraping
+        try:
+            info = await self._fetch_audio_via_web(clean_id)
+            if info and info.get("audio_url"):
+                return True, info, None
+        except Exception as e:
+            logger.debug(f"Instagram audio web scraping failed for {clean_id}: {e}")
+
+        # Strategy 3: Cobalt API Fallback
+        try:
+            info = await self._fetch_audio_via_cobalt(clean_id)
+            if info and info.get("audio_url"):
+                return True, info, None
+        except Exception as e:
+            logger.debug(f"Cobalt audio extraction failed for {clean_id}: {e}")
+
+        return False, None, "⚠️ Could not retrieve audio stream from this Instagram link. The audio might be restricted or region-locked."
+
+    async def _fetch_audio_via_api(self, audio_id: str) -> Optional[Dict[str, Any]]:
+        """Extract Instagram audio track metadata via official web client API."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "X-IG-App-ID": "936619743392459",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Fetch-Site": "same-origin",
+        }
+        if INSTAGRAM_SESSION_ID:
+            headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
+
+        url = f"https://www.instagram.com/api/v1/clips/music/{audio_id}/"
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    raw_track = (
+                        data.get("audio_info")
+                        or data.get("music_info", {}).get("music_asset_info")
+                        or data.get("music_asset_info")
+                        or data.get("track")
+                        or data
+                    )
+                    audio_url = (
+                        raw_track.get("progressive_download_url")
+                        or raw_track.get("audio_src")
+                        or raw_track.get("audio_url")
+                    )
+                    if audio_url:
+                        title = raw_track.get("title") or raw_track.get("audio_asset_title") or f"Instagram Audio {audio_id}"
+                        artist = raw_track.get("display_artist") or raw_track.get("artist_name") or "Instagram Artist"
+                        thumbnail = raw_track.get("cover_artwork_uri") or raw_track.get("cover_artwork_thumbnail_uri")
+                        duration_ms = raw_track.get("duration_in_ms") or 0
+                        duration = int(duration_ms // 1000) if duration_ms else None
+
+                        return {
+                            "id": audio_id,
+                            "title": title,
+                            "artist": artist,
+                            "audio_url": audio_url,
+                            "thumbnail_url": thumbnail,
+                            "duration": duration
+                        }
+        return None
+
+    async def _fetch_audio_via_web(self, audio_id: str) -> Optional[Dict[str, Any]]:
+        """Extract Instagram audio track metadata via web HTML scraping."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        if INSTAGRAM_SESSION_ID:
+            headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
+
+        url = f"https://www.instagram.com/reels/audio/{audio_id}/"
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status == 200:
+                    html_text = await resp.text()
+
+                    # Extract audio stream URL
+                    audio_url_match = re.search(r'["\']progressive_download_url["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                    if not audio_url_match:
+                        audio_url_match = re.search(r'["\']audio_src["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                    if not audio_url_match:
+                        audio_url_match = re.search(r'<meta\s+property=["\']og:audio["\']\s+content=["\']([^"\']+)["\']', html_text)
+
+                    if audio_url_match:
+                        audio_url = audio_url_match.group(1).replace("\\u0026", "&").replace("\\/", "/")
+
+                        title_match = re.search(r'["\']audio_asset_title["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                        if not title_match:
+                            title_match = re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', html_text)
+                        title = title_match.group(1) if title_match else f"Instagram Audio {audio_id}"
+
+                        artist_match = re.search(r'["\']display_artist["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                        if not artist_match:
+                            artist_match = re.search(r'["\']artist_name["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                        artist = artist_match.group(1) if artist_match else "Instagram Artist"
+
+                        thumb_match = re.search(r'["\']cover_artwork_uri["\']\s*:\s*["\']([^"\']+)["\']', html_text)
+                        if not thumb_match:
+                            thumb_match = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', html_text)
+                        thumb_url = thumb_match.group(1).replace("\\u0026", "&").replace("\\/", "/") if thumb_match else None
+
+                        duration = None
+                        dur_match = re.search(r'["\']duration_in_ms["\']\s*:\s*([0-9]+)', html_text)
+                        if dur_match:
+                            duration = int(int(dur_match.group(1)) // 1000)
+
+                        return {
+                            "id": audio_id,
+                            "title": title,
+                            "artist": artist,
+                            "audio_url": audio_url,
+                            "thumbnail_url": thumb_url,
+                            "duration": duration
+                        }
+        return None
+
+    async def _fetch_audio_via_cobalt(self, audio_id: str) -> Optional[Dict[str, Any]]:
+        """Extract audio via public Cobalt API instance."""
+        target_url = f"https://www.instagram.com/reels/audio/{audio_id}/"
+        payload = {
+            "url": target_url,
+            "downloadMode": "audio"
+        }
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        instances = [
+            "https://api.cobalt.tools"
+        ]
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            for base_api in instances:
+                try:
+                    async with session.post(
+                        f"{base_api}/",
+                        json=payload,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=8)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            status = data.get("status")
+                            if status in ("stream", "redirect") and data.get("url"):
+                                return {
+                                    "id": audio_id,
+                                    "title": f"Instagram Audio {audio_id}",
+                                    "artist": "Instagram Artist",
+                                    "audio_url": data["url"],
+                                    "thumbnail_url": None,
+                                    "duration": None
+                                }
+                except Exception:
+                    continue
+        return None
+
+    async def download_instagram_audio(
+        self,
+        audio_info: Dict[str, Any],
+        job_dir: Path,
+        tracker: Optional[Any] = None
+    ) -> Tuple[bool, Optional[Path], Optional[Path], Optional[str]]:
+        """
+        Download Instagram audio track, convert/tag with ID3 metadata if needed, and download album art thumbnail.
+        Returns: (success, audio_file_path, thumbnail_path, error_message)
+        """
+        audio_url = audio_info.get("audio_url")
+        if not audio_url:
+            return False, None, None, "No audio download URL found."
+
+        audio_id = audio_info.get("id", "track")
+        temp_dest = job_dir / f"ig_audio_raw_{audio_id}.mp3"
+
+        ok = await self.download_file(audio_url, temp_dest, tracker=tracker)
+        if not ok or not temp_dest.exists() or temp_dest.stat().st_size == 0:
+            return False, None, None, "Failed to download audio file from Instagram."
+
+        # Download cover thumbnail if available
+        thumb_path = None
+        thumb_url = audio_info.get("thumbnail_url")
+        if thumb_url:
+            local_thumb = job_dir / f"ig_thumb_{audio_id}.jpg"
+            try:
+                thumb_ok = await self.download_file(thumb_url, local_thumb)
+                if thumb_ok and local_thumb.exists() and local_thumb.stat().st_size > 0:
+                    thumb_path = local_thumb
+            except Exception as e:
+                logger.debug(f"Failed to download Instagram audio thumbnail: {e}")
+
+        clean_title = audio_info.get("title", f"Instagram Audio {audio_id}")
+        from utils.validators import sanitize_filename
+        final_filename = f"{sanitize_filename(clean_title)}.mp3"
+        final_dest = job_dir / final_filename
+
+        from services.ffmpeg_service import ffmpeg_service
+        try:
+            tagged_ok = await ffmpeg_service.embed_audio_metadata(
+                input_path=temp_dest,
+                output_path=final_dest,
+                title=audio_info.get("title", f"Instagram Audio {audio_id}"),
+                artist=audio_info.get("artist", "Instagram"),
+                cover_image_path=thumb_path
+            )
+            if tagged_ok and final_dest.exists() and final_dest.stat().st_size > 0:
+                temp_dest.unlink(missing_ok=True)
+                return True, final_dest, thumb_path, None
+        except Exception as e:
+            logger.debug(f"Failed to embed metadata in Instagram audio via ffmpeg: {e}")
+
+        # Fallback: rename raw downloaded file
+        temp_dest.rename(final_dest)
+        return True, final_dest, thumb_path, None
 
 
 # Global singleton instagram service

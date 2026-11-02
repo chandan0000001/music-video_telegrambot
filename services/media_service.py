@@ -138,34 +138,44 @@ class MediaService:
         if not raw_info:
             return False, None, "No metadata returned by the source."
 
-        # Check if the video is an active live stream, upcoming premiere, or post-live processing
+        # Check if the video is an active live stream or upcoming premiere
         is_live = raw_info.get("is_live") is True
         live_status = (raw_info.get("live_status") or "").lower()
 
-        if is_live or live_status in ("is_live", "is_upcoming", "post_live"):
+        # 1. Block active live broadcasts in progress
+        if is_live or live_status == "is_live":
             import html
             title_escaped = html.escape(raw_info.get("title", "Live Event"))
-            if live_status == "is_upcoming" or "premiere" in str(raw_info.get("title", "")).lower():
-                return False, None, (
-                    "⏳ <b>Access Notice: Upcoming Premiere / Live Event</b>\n\n"
-                    f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
-                    "⚠️ This event has not premiered or started broadcasting yet.\n\n"
-                    "<i>Please check back and download after the premiere has concluded!</i>"
-                )
-            elif live_status == "post_live":
-                return False, None, (
-                    "⏳ <b>Access Notice: Live Stream Processing</b>\n\n"
-                    f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
-                    "⚠️ This live broadcast recently finished and is currently being processed by YouTube servers into a regular video.\n\n"
-                    "<i>Please try again in a few minutes once processing completes!</i>"
-                )
-            else:
-                return False, None, (
-                    "🔴 <b>Access Restricted: Active Live Stream</b>\n\n"
-                    f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
-                    "⚠️ This video is currently <b>Broadcasting Live</b> and cannot be downloaded while in progress.\n\n"
-                    "<i>Please wait until the live stream finishes and saves as a complete video archive!</i>"
-                )
+            return False, None, (
+                "🔴 <b>Access Restricted: Active Live Stream</b>\n\n"
+                f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
+                "⚠️ This video is currently <b>Broadcasting Live</b> and cannot be downloaded while in progress.\n\n"
+                "<i>Please wait until the live stream finishes and archives as a complete video before downloading!</i>"
+            )
+
+        # 2. Block upcoming premieres or scheduled live streams not yet aired
+        if live_status == "is_upcoming":
+            import html
+            title_escaped = html.escape(raw_info.get("title", "Upcoming Event"))
+            return False, None, (
+                "⏳ <b>Access Notice: Upcoming Premiere / Live Event</b>\n\n"
+                f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
+                "⚠️ This event has not premiered or started broadcasting yet.\n\n"
+                "<i>Please check back and download after the premiere has concluded!</i>"
+            )
+
+        # 3. Post-live processing check: if stream just concluded and formats are not yet ready
+        formats = raw_info.get("formats", [])
+        has_video_formats = any(f.get("height") and f.get("vcodec") and f.get("vcodec") != "none" for f in formats)
+        if live_status == "post_live" and not has_video_formats:
+            import html
+            title_escaped = html.escape(raw_info.get("title", "Live Event"))
+            return False, None, (
+                "⏳ <b>Access Notice: Live Stream Processing</b>\n\n"
+                f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
+                "⚠️ This live broadcast recently concluded and YouTube is currently processing the recorded archive.\n\n"
+                "<i>Please try again in a few minutes once processing completes!</i>"
+            )
 
         duration = raw_info.get("duration")
         is_valid, err_msg = validate_media_limits(duration, None)

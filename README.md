@@ -168,33 +168,41 @@ flowchart TD
 6. **📸 Instagram & 🐦 X (Twitter) Multi-Media Downloaders:**
    - **Instagram Suite:**
      - **Reels & Posts:** High-definition single MP4 videos, full-resolution untouched photos, and complete carousels (all items in the album, no artificial limit).
+     - **Music & Audio Links:** Paste any Instagram audio link (`instagram.com/reels/audio/<id>`, `/audio/<id>`, or `/music/<id>`) to extract and receive native high-fidelity Telegram audio with full ID3 tags (artist, title, and cover artwork).
      - **Quality & 1080p Cap:** Original upload quality matched; videos exceeding 1080p (2K/4K) are scaled cleanly to 1080p via FFmpeg, while images remain 100% untouched.
      - **Stories & Highlights:** Download active public stories and highlight collections directly.
+     - **Live Broadcast Handling:** Active live streams are blocked with clear notices, while ended live broadcasts saved by creators as Reels or Videos are fully supported for download.
      - **Profile DP & Bio Downloader:** Send profile links or `@username` to fetch original HD profile avatars and full account bios with follower/following stats.
      - **Instagram Cookie & Session Support:** Set `INSTAGRAM_SESSION_ID` in `.env` or place `cookies.txt` / `instagram_cookies.txt` in the root folder to completely bypass Instagram datacenter login walls and rate limits.
      - **Private Account Graceful Handling:** For private profiles, fetches full HD profile pictures and public bio data while cleanly notifying users that posts/stories remain private.
    - **X (Twitter):** Original raw photos (`?name=orig`), HD MP4 videos, looping GIFs, and multi-media albums.
    - **Clean Sub-Menu Navigation:** Every sub-section (Instagram, X, YouTube Music, Search, Audio, Video, Help) displays a dedicated, uncluttered `[ 🔙 Back to Main Menu ]` button.
    - Both feature live 0% to 100% download and upload progress meters with speed, ETA, and size metrics.
-7. **🔍 Telegram Inline Search Mode (`@songsuperzxbot`):**
+7. **🎬 YouTube Live & Premiere Ended VODs vs Active Broadcasts:**
+   - **Completed Broadcasts Allowed:** Live streams that have ended (`was_live`) and concluded premiere videos are fully unlocked for standard audio and video downloading.
+   - **Active Broadcast Blocking:** In-progress live streams and upcoming premieres that haven't aired yet display polite, informative warnings asking users to download the saved recording once completed.
+8. **⚠️ YouTube Playlist Fair-Usage Warning:**
+   - Pure YouTube playlist links (`youtube.com/playlist?list=...`) immediately return a friendly warning advising users that batch playlist downloading is disabled to ensure lightning-fast speeds and equal server bandwidth for everyone.
+   - Video links containing playlist sharing parameters (`watch?v=...&list=...`) seamlessly download the individual selected video without blocking.
+9. **🔍 Telegram Inline Search Mode (`@songsuperzxbot`):**
    - Type `@songsuperzxbot <song name>` inside any group chat, channel, or direct message to instantly search YouTube Music.
    - Generates interactive track cards with cover art, artist, and duration, plus a 1-tap `🎧 Download MP3 / 🎬 Video` button.
    - Deep-linked button (`/start dl_<video_id>`) opens the bot and immediately displays the audio/video quality selector.
    - Utilizes Telegram edge-caching (`cache_time=300`) to debounce keystrokes and prevent rate-limit penalties.
-8. **🎁 Referral System (Invite Friends & Earn Free VIP):**
-   - Every user gets a unique personal referral link: `https://t.me/songsuperzxbot?start=ref_<user_id>`.
-   - **Milestone Rewards:** For **every 3 friends** invited who start the bot, the inviter automatically receives **+7 Days of VIP Access** (Go Pass) free.
-   - Real-time stats dashboard displaying friends joined, total VIP days earned, and visual progress bars (`[ 🟩 🟩 ⬜ ] 2/3`).
-   - Anti-fraud protections: Self-referrals are blocked (`inviter_id != new_user_id`) and duplicate joins are prevented by unique database constraints.
-   - 1-tap Telegram sharing button (`https://t.me/share/url?url=...`).
-9. **🎟️ Coupon & Promotional Code System:**
-   - **User Redemption:** Users can redeem voucher codes via `/coupon <CODE>`, `/redeem <CODE>`, or interactive menu buttons.
-   - **Subscription Stacking:** If a user already has an active VIP subscription, redeeming a coupon extends their expiration date (`current_exp + days`) rather than overwriting remaining days.
-   - **Admin Management:** Administrators can generate, list, and revoke promo codes with customizable plans, validity days, maximum uses, and optional hour-based expiration:
-     - `/coupon create <CODE> [days] [max_uses] [expires_hours] [plan]`
-     - `/coupon revoke <CODE>`
-     - `/coupon list`
-   - Complete edge-case handling for expired codes, max usage caps, duplicate redemptions, and admin revocation.
+10. **🎁 Referral System (Invite Friends & Earn Free VIP):**
+    - Every user gets a unique personal referral link: `https://t.me/songsuperzxbot?start=ref_<user_id>`.
+    - **Milestone Rewards:** For **every 3 friends** invited who start the bot, the inviter automatically receives **+7 Days of VIP Access** (Go Pass) free.
+    - Real-time stats dashboard displaying friends joined, total VIP days earned, and visual progress bars (`[ 🟩 🟩 ⬜ ] 2/3`).
+    - Anti-fraud protections: Self-referrals are blocked (`inviter_id != new_user_id`) and duplicate joins are prevented by unique database constraints.
+    - 1-tap Telegram sharing button (`https://t.me/share/url?url=...`).
+11. **🎟️ Coupon & Promotional Code System:**
+    - **User Redemption:** Users can redeem voucher codes via `/coupon <CODE>`, `/redeem <CODE>`, or interactive menu buttons.
+    - **Subscription Stacking:** If a user already has an active VIP subscription, redeeming a coupon extends their expiration date (`current_exp + days`) rather than overwriting remaining days.
+    - **Admin Management:** Administrators can generate, list, and revoke promo codes with customizable plans, validity days, maximum uses, and optional hour-based expiration:
+      - `/coupon create <CODE> [days] [max_uses] [expires_hours] [plan]`
+      - `/coupon revoke <CODE>`
+      - `/coupon list`
+    - Complete edge-case handling for expired codes, max usage caps, duplicate redemptions, and admin revocation.
 
 ---
 
@@ -714,20 +722,21 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 90 automated test cases will execute:
+All 99 automated test cases will execute:
 ```text
-tests/test_coupons_and_referrals.py ..........                           [ 11%]
-tests/test_database.py ....                                              [ 15%]
-tests/test_handlers.py .................                                 [ 34%]
-tests/test_instagram.py ...........                                      [ 46%]
-tests/test_progress.py ..............                                    [ 62%]
+tests/test_all_buttons.py ...                                            [  3%]
+tests/test_coupons_and_referrals.py ..........                           [ 13%]
+tests/test_database.py ....                                              [ 17%]
+tests/test_handlers.py ..................                                [ 35%]
+tests/test_instagram.py .............                                    [ 48%]
+tests/test_progress.py ...............                                   [ 63%]
 tests/test_queue_and_spam.py .......                                     [ 70%]
 tests/test_rate_limiter.py ...                                           [ 73%]
-tests/test_services.py ........                                          [ 82%]
-tests/test_twitter.py ........                                           [ 91%]
-tests/test_validators.py ........                                        [100%]
+tests/test_services.py ........                                          [ 81%]
+tests/test_twitter.py ........                                           [ 89%]
+tests/test_validators.py ..........                                      [100%]
 
-============================== 90 passed in 5.47s ==============================
+============================== 99 passed in 5.23s ==============================
 ```
 
 ---

@@ -46,7 +46,9 @@ INSTAGRAM_DOMAINS = {
     "ddinstagram.com",
     "instagr.am"
 }
-INSTAGRAM_POST_PATTERN = re.compile(r"^/(p|reel|reels|tv)/([a-zA-Z0-9_-]+)")
+INSTAGRAM_POST_PATTERN = re.compile(r"^/(p|reel|reels|tv)/(?!audio(?:/|$))([a-zA-Z0-9_-]+)")
+INSTAGRAM_AUDIO_PATTERN = re.compile(r"^/(?:reels?/audio|audio|music)/([0-9a-zA-Z_-]+)")
+INSTAGRAM_LIVE_PATTERN = re.compile(r"^/(?:([a-zA-Z0-9_.-]{1,30})/live|live/([0-9a-zA-Z_-]+))")
 INSTAGRAM_HIGHLIGHT_PATTERN = re.compile(r"^/(?:stories/highlights/([0-9]+)|s/([a-zA-Z0-9_-]+))")
 INSTAGRAM_STORY_PATTERN = re.compile(r"^/stories/([a-zA-Z0-9_.-]+)(?:/([0-9]+))?")
 INSTAGRAM_PROFILE_PATTERN = re.compile(r"^/([a-zA-Z0-9_.-]{1,30})/?$")
@@ -54,7 +56,7 @@ INSTAGRAM_PROFILE_PATTERN = re.compile(r"^/([a-zA-Z0-9_.-]{1,30})/?$")
 INSTAGRAM_RESERVED_ROUTES = {
     "", "p", "reel", "reels", "tv", "stories", "explore", "accounts",
     "direct", "developer", "about", "legal", "terms", "privacy", "help",
-    "api", "static", "directory", "settings"
+    "api", "static", "directory", "settings", "audio", "music", "live"
 }
 
 # Dangerous characters in filenames
@@ -148,6 +150,36 @@ def is_youtube_music_url(url: str) -> bool:
         return False
 
 
+def is_youtube_playlist_url(url: str) -> bool:
+    """
+    Return True if the URL is a pure YouTube or YouTube Music playlist link without a single video ID.
+    If the link contains both an individual video ID and a playlist ID (e.g. watch?v=...&list=...),
+    it returns False so the single video can be extracted and downloaded seamlessly.
+    """
+    if not url or not is_safe_url(url):
+        return False
+    try:
+        parsed = urlparse(url.strip())
+        domain = (parsed.netloc or "").lower().split(":")[0]
+        if domain not in ALLOWED_YOUTUBE_DOMAINS:
+            return False
+
+        # If it has a valid individual video ID, treat as single video download
+        if extract_youtube_id(url) is not None:
+            return False
+
+        path = parsed.path.rstrip("/")
+        query_params = parse_qs(parsed.query)
+
+        # /playlist?list=... or /playlist
+        if path == "/playlist" or "list" in query_params:
+            return True
+
+        return False
+    except Exception:
+        return False
+
+
 def extract_twitter_info(url: str) -> Optional[Tuple[str, str]]:
     """Extract (username, tweet_id) from Twitter / X status URLs."""
     if not url or not is_safe_url(url):
@@ -191,26 +223,37 @@ def extract_instagram_info(url: str) -> Optional[Tuple[str, str]]:
         if not path:
             return None
 
-        # 1. Check Posts / Reels / TV
+        # 1. Check Instagram Audio / Music
+        audio_match = INSTAGRAM_AUDIO_PATTERN.match(parsed.path)
+        if audio_match:
+            return "audio", audio_match.group(1)
+
+        # 2. Check Active Instagram Live Stream
+        live_match = INSTAGRAM_LIVE_PATTERN.match(parsed.path)
+        if live_match:
+            live_id = live_match.group(1) or live_match.group(2)
+            return "live", live_id
+
+        # 3. Check Posts / Reels / TV
         post_match = INSTAGRAM_POST_PATTERN.match(parsed.path)
         if post_match:
             media_type = post_match.group(1).rstrip("s")
             return media_type, post_match.group(2)
 
-        # 2. Check Highlights
+        # 4. Check Highlights
         hl_match = INSTAGRAM_HIGHLIGHT_PATTERN.match(parsed.path)
         if hl_match:
             hl_id = hl_match.group(1) or hl_match.group(2)
             return "highlight", hl_id
 
-        # 3. Check Stories
+        # 5. Check Stories
         story_match = INSTAGRAM_STORY_PATTERN.match(parsed.path)
         if story_match:
             user = story_match.group(1)
             story_id = story_match.group(2) or user
             return "story", story_id
 
-        # 4. Check Profile
+        # 6. Check Profile
         prof_match = INSTAGRAM_PROFILE_PATTERN.match(parsed.path)
         if prof_match:
             username = prof_match.group(1)
@@ -359,17 +402,9 @@ def classify_media_restriction(error_text: Optional[str]) -> Optional[Tuple[str,
         "is currently live",
         "currently live",
         "video is live",
-        "live stream",
-        "livestream",
-        "live_stream",
+        "this video is currently live",
         "waiting for live",
-        "live_stream_offline",
-        "live stream is offline",
-        "live event has ended",
-        "live stream recording is not available",
-        "live stream recording is not allowed",
         "download of a live stream will not stop",
-        "post_live",
         "upcoming premiere",
         "this video is a live stream"
     ]

@@ -407,5 +407,42 @@ class FFmpegService:
         success, _ = await self._run_command(cmd, timeout=15)
         return success and output_image.exists()
 
+    async def embed_audio_metadata(
+        self,
+        input_path: Path,
+        output_path: Path,
+        title: str,
+        artist: str,
+        cover_image_path: Optional[Path] = None
+    ) -> bool:
+        """Embed title, artist and optional cover artwork thumbnail into MP3 audio file."""
+        cmd = [self.ffmpeg_path, "-y", "-i", str(input_path)]
+        if cover_image_path and cover_image_path.exists():
+            cmd.extend([
+                "-i", str(cover_image_path),
+                "-map", "0:a",
+                "-map", "1:0",
+                "-c:a", "libmp3lame",
+                "-b:a", "320k",
+                "-c:v", "mjpeg",
+                "-id3v2_version", "3",
+                "-metadata:s:v", 'title="Album cover"',
+                "-metadata:s:v", 'comment="Cover (front)"'
+            ])
+        else:
+            cmd.extend([
+                "-c:a", "libmp3lame",
+                "-b:a", "320k"
+            ])
+
+        cmd.extend([
+            "-metadata", f"title={title}",
+            "-metadata", f"artist={artist}",
+            str(output_path)
+        ])
+
+        success, _ = await self._run_command(cmd)
+        return success and output_path.exists() and output_path.stat().st_size > 0
+
 
 ffmpeg_service = FFmpegService()

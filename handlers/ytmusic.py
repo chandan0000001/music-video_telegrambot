@@ -14,7 +14,7 @@ from services.media_service import media_service
 from keyboards.quality_keyboard import get_youtube_music_keyboard
 from keyboards.main_menu import get_ytmusic_menu_keyboard, get_back_to_main_keyboard
 from keyboards.search_keyboard import get_search_results_keyboard
-from utils.validators import is_valid_youtube_url, is_youtube_music_url
+from utils.validators import is_valid_youtube_url, is_youtube_music_url, is_youtube_playlist_url
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,17 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
 
     # Case 1: Input is a URL
     if text.startswith("http://") or text.startswith("https://"):
+        if is_youtube_playlist_url(text):
+            await state.clear()
+            await message.answer(
+                "⚠️ <b>Playlists Are Currently Not Supported</b>\n\n"
+                "To ensure lightning-fast downloads, fair server bandwidth, and high-speed delivery for everyone, full playlist downloading is currently disabled.\n\n"
+                "💡 <i>Please send the link of an individual video or song instead!</i>",
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+            return
+
         if not is_valid_youtube_url(text):
             await message.answer(
                 "🔒 **Security Alert: Unsupported or Restricted URL!**\n\n"

@@ -17,6 +17,7 @@ from utils.validators import (
     is_valid_youtube_url,
     is_safe_url,
     is_youtube_music_url,
+    is_youtube_playlist_url,
     is_valid_twitter_url,
     is_valid_instagram_url
 )
@@ -197,6 +198,18 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
             await state.clear()
             from handlers.instagram import _execute_instagram_download
             await _execute_instagram_download(message, text)
+            return
+
+        # Check if URL is a YouTube Playlist link
+        if is_youtube_playlist_url(text):
+            await state.clear()
+            await message.answer(
+                "⚠️ <b>Playlists Are Currently Not Supported</b>\n\n"
+                "To ensure lightning-fast downloads, fair server bandwidth, and high-speed delivery for everyone, full playlist downloading is currently disabled.\n\n"
+                "💡 <i>Please send the link of an individual video or song instead!</i>",
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
             return
 
         # Strict YouTube & YouTube Music security validation

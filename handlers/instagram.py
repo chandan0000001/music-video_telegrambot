@@ -27,6 +27,7 @@ from aiogram.fsm.context import FSMContext
 
 from database import db
 from services.instagram_service import instagram_service
+from services.telegram_service import telegram_service
 from keyboards.main_menu import get_back_to_main_keyboard, get_instagram_menu_keyboard
 from utils.validators import (
     is_valid_instagram_url,
@@ -51,10 +52,11 @@ router = Router(name="instagram_router")
 
 INSTAGRAM_HUB_TEXT = (
     "📸 **Instagram Downloader**\n"
-    "*HD Reels, Posts, Carousels, Stories, Highlights & Profile DP*\n\n"
+    "*HD Reels, Posts, Carousels, Stories, Highlights, Audio & Profile DP*\n\n"
     "Supported options:\n"
     "• **Reels & Posts:** Send any Reel, Video, or Photo link\n"
     "• **Carousels:** Full albums with all original photos & videos (no item limits)\n"
+    "• **Music & Audio:** Send any Instagram Audio or Reel music link\n"
     "• **Stories & Highlights:** Send any active story or highlight link\n"
     "• **Profile DP & Bio:** Send profile link or `@username` (both public & private accounts supported)\n\n"
     "👉 *Paste your Instagram link or @username below:*"
@@ -201,6 +203,99 @@ async def _execute_instagram_profile(message: Message, username: str) -> None:
     )
 
 
+async def _execute_instagram_audio(
+    message: Message,
+    identifier: str,
+    status_msg: Message,
+    url: str,
+    user_id: int
+) -> None:
+    """Download and deliver Instagram audio track with tags and cover artwork."""
+    await status_msg.edit_text("🔍 <i>Fetching Instagram audio stream...</i>", parse_mode="HTML")
+    success, audio_info, err_msg = await instagram_service.get_instagram_audio(identifier)
+    if not success or not audio_info:
+        await status_msg.edit_text(
+            f"❌ {err_msg or 'Could not retrieve audio from this link.'}",
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    track_title = audio_info.get("title", f"Instagram Audio {identifier}")
+    track_artist = audio_info.get("artist", "Instagram")
+    duration = audio_info.get("duration") or 0
+
+    acquired = await queue_manager.acquire_download_slot(
+        user_id=user_id,
+        media_title=f"🎵 {track_title}",
+        status_msg=status_msg
+    )
+    if not acquired:
+        return
+
+    anim_msg = await send_download_animation(message.bot, user_id)
+    job_dir = instagram_service._get_job_dir()
+
+    dl_tracker = DownloadProgressTracker(
+        media_title=track_title,
+        quality_label="Audio MP3",
+        media_type="audio"
+    )
+    dl_reporter = AsyncProgressReporter(message=status_msg, tracker=dl_tracker)
+    dl_reporter.start()
+
+    try:
+        ok, file_path, thumb_path, dl_err = await instagram_service.download_instagram_audio(
+            audio_info=audio_info,
+            job_dir=job_dir,
+            tracker=dl_tracker
+        )
+    except Exception as e:
+        logger.error(f"Error during Instagram audio download: {e}")
+        ok, file_path, thumb_path, dl_err = False, None, None, str(e)
+    finally:
+        await dl_reporter.stop()
+        queue_manager.release_download_slot(user_id)
+
+    if not ok or not file_path or not file_path.exists():
+        await vanish_download_animation(anim_msg)
+        await status_msg.edit_text(
+            f"❌ *Failed to download audio:* {dl_err or 'Unknown error'}",
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="Markdown"
+        )
+        instagram_service.cleanup_job_dir(job_dir)
+        return
+
+    await queue_manager.acquire_upload_slot(user_id)
+    try:
+        sent = await telegram_service.send_audio_file(
+            bot=message.bot,
+            chat_id=message.chat.id,
+            file_path=file_path,
+            title=track_title,
+            artist=track_artist,
+            duration=duration,
+            thumbnail_path=thumb_path,
+            status_message=status_msg
+        )
+    finally:
+        queue_manager.release_upload_slot(user_id)
+        await vanish_download_animation(anim_msg)
+        await vanish_status_message(status_msg, delay=0.2)
+
+    await db.record_download(
+        telegram_id=user_id,
+        media_title=f"{track_title} - {track_artist}",
+        source=url,
+        media_type="instagram_audio",
+        selected_quality="Original Audio",
+        selected_format="mp3",
+        status="completed" if sent else "failed"
+    )
+    instagram_service.cleanup_job_dir(job_dir)
+
+
 async def _execute_instagram_download(message: Message, url: str) -> None:
     """Core download and dispatch pipeline for Instagram media with queue and live meters."""
     user = message.from_user
@@ -222,6 +317,21 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
 
     info_tuple = extract_instagram_info(url)
     cat = info_tuple[0] if info_tuple else "post"
+    identifier = info_tuple[1] if info_tuple else ""
+
+    if cat == "live":
+        await status_msg.edit_text(
+            "🔴 <b>Access Restricted: Active Live Broadcast</b>\n\n"
+            "⚠️ This is an active <b>Instagram Live</b> broadcast and cannot be downloaded while in progress.\n\n"
+            "<i>Once the live stream finishes and the creator saves it to their profile as a Reel or Video, send that link to download the complete replay!</i>",
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    if cat == "audio":
+        await _execute_instagram_audio(message, identifier, status_msg, url, user_id)
+        return
 
     success, media_items, err_msg = await instagram_service.get_instagram_media(url)
     if not success or not media_items:

@@ -25,10 +25,6 @@ bot_database.sqlite3
 .env
 cookies.txt
 
-# Tests
-tests/
-pytest.ini
-
 # OS specific files
 .DS_Store
 Thumbs.db
