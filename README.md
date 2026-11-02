@@ -101,6 +101,10 @@ The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**
 - **`orders`**: Tracks payment transactions, order IDs, 10-minute expiry timestamps, 12-digit UTR numbers, and fulfillment status (indexed on `(status, id DESC)` and `(utr_number, status)`).
 - **`user_subscriptions`**: Tracks active passes (Go, Pro, Ultra, Max), daily quotas, and reset timestamps.
 - **`bot_statistics`**: Real-time aggregated counters for total users, total searches, successful downloads, and failed downloads.
+- **`coupons`**: Admin-generated voucher codes with plan tier, duration days, maximum redemptions, active status, and expiration timestamps.
+- **`coupon_redemptions`**: Tracks user coupon redemptions to prevent duplicate usage per user.
+- **`referrals`**: Tracks friend invitations via unique deep links (`ref_<user_id>`) with anti-fraud constraints.
+- **`referral_rewards`**: Records milestone VIP access grants (+7 days VIP for every 3 friends invited).
 
 ### 4. Subscription & Pricing Matrix
 
@@ -172,6 +176,25 @@ flowchart TD
    - **X (Twitter):** Original raw photos (`?name=orig`), HD MP4 videos, looping GIFs, and multi-media albums.
    - **Clean Sub-Menu Navigation:** Every sub-section (Instagram, X, YouTube Music, Search, Audio, Video, Help) displays a dedicated, uncluttered `[ 🔙 Back to Main Menu ]` button.
    - Both feature live 0% to 100% download and upload progress meters with speed, ETA, and size metrics.
+7. **🔍 Telegram Inline Search Mode (`@songsuperzxbot`):**
+   - Type `@songsuperzxbot <song name>` inside any group chat, channel, or direct message to instantly search YouTube Music.
+   - Generates interactive track cards with cover art, artist, and duration, plus a 1-tap `🎧 Download MP3 / 🎬 Video` button.
+   - Deep-linked button (`/start dl_<video_id>`) opens the bot and immediately displays the audio/video quality selector.
+   - Utilizes Telegram edge-caching (`cache_time=300`) to debounce keystrokes and prevent rate-limit penalties.
+8. **🎁 Referral System (Invite Friends & Earn Free VIP):**
+   - Every user gets a unique personal referral link: `https://t.me/songsuperzxbot?start=ref_<user_id>`.
+   - **Milestone Rewards:** For **every 3 friends** invited who start the bot, the inviter automatically receives **+7 Days of VIP Access** (Go Pass) free.
+   - Real-time stats dashboard displaying friends joined, total VIP days earned, and visual progress bars (`[ 🟩 🟩 ⬜ ] 2/3`).
+   - Anti-fraud protections: Self-referrals are blocked (`inviter_id != new_user_id`) and duplicate joins are prevented by unique database constraints.
+   - 1-tap Telegram sharing button (`https://t.me/share/url?url=...`).
+9. **🎟️ Coupon & Promotional Code System:**
+   - **User Redemption:** Users can redeem voucher codes via `/coupon <CODE>`, `/redeem <CODE>`, or interactive menu buttons.
+   - **Subscription Stacking:** If a user already has an active VIP subscription, redeeming a coupon extends their expiration date (`current_exp + days`) rather than overwriting remaining days.
+   - **Admin Management:** Administrators can generate, list, and revoke promo codes with customizable plans, validity days, maximum uses, and optional hour-based expiration:
+     - `/coupon create <CODE> [days] [max_uses] [expires_hours] [plan]`
+     - `/coupon revoke <CODE>`
+     - `/coupon list`
+   - Complete edge-case handling for expired codes, max usage caps, duplicate redemptions, and admin revocation.
 
 ---
 
@@ -320,12 +343,18 @@ termux-wake-lock
    - Send `/setcommands` to BotFather, select your bot, and paste:
      ```text
      start - Launch the bot & main menu
-     search - Search for music by song name
+     ytmusic - YouTube Music Studio Downloader
+     instagram - Instagram Reels & Media Downloader
+     twitter - X (Twitter) Media Downloader
+     search - Search songs by title or artist
+     referral - Invite Friends & Earn VIP
+     coupon - Redeem Coupon or Promo Code
      history - View your search & download records
      help - Bot guide & supported media formats
      about - Architecture & bot specifications
      admin - Administrator control panel
      ```
+   - Send `/setinline` to BotFather, select your bot, and provide a placeholder like `Search songs, artists, or paste links...` to enable **Inline Mode**.
    - Send `/setdescription` and paste:
      ```text
      Fast music & video downloader. Search songs, download MP3 (128-320kbps) & MP4 videos (144p-1080p) from authorized sources.
@@ -685,51 +714,20 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 30 test cases will execute:
+All 90 automated test cases will execute:
 ```text
-tests/test_database.py::test_database_init_and_restart PASSED            [  3%]
-tests/test_database.py::test_new_and_existing_user PASSED                [  6%]
-tests/test_database.py::test_search_and_download_history PASSED          [ 10%]
-tests/test_database.py::test_block_unblock_and_csv_export PASSED         [ 13%]
-tests/test_handlers.py::test_scenario_5_and_6_keyboard_generation PASSED [ 16%]
-tests/test_handlers.py::test_admin_authorization_logic PASSED            [ 20%]
-tests/test_handlers.py::test_scenario_12_and_13_admin_command PASSED     [ 23%]
-tests/test_progress.py::test_make_progress_bar PASSED                    [ 26%]
-tests/test_progress.py::test_format_bytes PASSED                         [ 30%]
-tests/test_progress.py::test_format_seconds PASSED                       [ 33%]
-tests/test_progress.py::test_download_progress_tracker PASSED            [ 36%]
-tests/test_progress.py::test_retry_keyboard PASSED                       [ 40%]
-tests/test_progress.py::test_upload_progress_tracker PASSED              [ 43%]
-tests/test_progress.py::test_tracked_fs_input_file PASSED                [ 46%]
-tests/test_progress.py::test_task_registry_cancellation PASSED           [ 50%]
-tests/test_rate_limiter.py::test_user_rate_limiting PASSED               [ 53%]
-tests/test_rate_limiter.py::test_admin_bypasses_rate_limit PASSED        [ 56%]
-tests/test_rate_limiter.py::test_concurrency_manager PASSED              [ 60%]
-tests/test_services.py::test_scenarios_3_and_4_search_music PASSED       [ 63%]
-tests/test_services.py::test_format_duration_helper PASSED               [ 66%]
-tests/test_services.py::test_scenario_7_ffmpeg_audio_processing PASSED   [ 70%]
-tests/test_services.py::test_scenario_8_ffmpeg_video_processing PASSED   [ 73%]
-tests/test_services.py::test_scenario_11_telegram_upload_failure_handling PASSED [ 76%]
-tests/test_services.py::test_mtproto_service_properties PASSED           [ 80%]
-tests/test_services.py::test_ffmpeg_split_video_into_chunks PASSED       [ 83%]
-tests/test_handlers.py::test_main_menu_keyboard_has_ytmusic PASSED       [ 22%]
-tests/test_handlers.py::test_welcome_text_personalization PASSED         [ 25%]
-tests/test_handlers.py::test_ytmusic_command_prompts_hub PASSED          [ 28%]
-tests/test_handlers.py::test_video_quality_keyboard_badges PASSED        [ 28%]
-tests/test_handlers.py::test_payment_pricing_and_qr_generation PASSED    [ 31%]
-tests/test_handlers.py::test_database_orders_and_subscriptions PASSED    [ 31%]
-tests/test_handlers.py::test_subscription_tier_plans_config PASSED       [ 34%]
-tests/test_handlers.py::test_order_10_minute_expiry_logic PASSED         [ 36%]
-tests/test_handlers.py::test_admin_subscription_activate_and_revoke PASSED [ 38%]
-tests/test_handlers.py::test_payment_qr_keyboard_no_unsupported_urls PASSED [ 40%]
-tests/test_validators.py::test_valid_youtube_urls PASSED                 [ 85%]
-tests/test_validators.py::test_scenario_9_invalid_youtube_urls PASSED    [ 87%]
-tests/test_validators.py::test_scenario_10_unsupported_download_sources PASSED [ 90%]
-tests/test_validators.py::test_sanitize_filename_prevents_traversal PASSED [ 92%]
-tests/test_validators.py::test_validate_media_limits PASSED              [ 95%]
-tests/test_validators.py::test_youtube_music_urls PASSED                 [ 97%]
-tests/test_validators.py::test_youtube_music_fast_keyboard PASSED        [100%]
-============================== 42 passed in 3.12s ==============================
+tests/test_coupons_and_referrals.py ..........                           [ 11%]
+tests/test_database.py ....                                              [ 15%]
+tests/test_handlers.py .................                                 [ 34%]
+tests/test_instagram.py ...........                                      [ 46%]
+tests/test_progress.py ..............                                    [ 62%]
+tests/test_queue_and_spam.py .......                                     [ 70%]
+tests/test_rate_limiter.py ...                                           [ 73%]
+tests/test_services.py ........                                          [ 82%]
+tests/test_twitter.py ........                                           [ 91%]
+tests/test_validators.py ........                                        [100%]
+
+============================== 90 passed in 5.47s ==============================
 ```
 
 ---
