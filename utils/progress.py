@@ -3,6 +3,7 @@ Progress Tracker and Visual Loading Screen Generator
 Generates beautiful Telegram progress bars with live speed, ETA, and size metrics.
 """
 import time
+import html
 import asyncio
 import logging
 from pathlib import Path
@@ -144,7 +145,7 @@ class DownloadProgressTracker:
             self.percentage = 100.0
 
     def render_download_card(self) -> str:
-        """Generate GitHub/Telegram-style Markdown status card with 0-100% meter."""
+        """Generate GitHub/Telegram-style HTML status card with 0-100% meter."""
         if self.media_type == "video":
             icon = "🎬"
         elif self.media_type == "photo":
@@ -154,7 +155,7 @@ class DownloadProgressTracker:
         else:
             icon = "🎵"
 
-        label = f"{self.media_type.capitalize()} ({self.quality_label})"
+        label = html.escape(f"{self.media_type.capitalize()} ({self.quality_label})")
         bar = make_progress_bar(self.percentage)
         speed_str = f"{format_bytes(self.speed)}/s" if self.speed > 0 else "Calculating..."
         downloaded_str = format_bytes(self.downloaded_bytes)
@@ -162,14 +163,15 @@ class DownloadProgressTracker:
         eta_str = format_seconds(self.eta) if self.eta is not None else "--:--"
 
         title_display = self.media_title[:40] + "..." if len(self.media_title) > 40 else self.media_title
+        title_clean = html.escape(title_display)
 
         text = (
-            f"⬇️ *Downloading {label}*\n"
-            f"{icon} *Title:* `{title_display}`\n\n"
-            f"📊 *Progress:* `[{bar}]` *{self.percentage:.1f}%*\n"
-            f"⚡ *Speed:* `{speed_str}`\n"
-            f"💾 *Size:* `{downloaded_str} / {total_str}`\n"
-            f"⏳ *ETA:* `{eta_str}`"
+            f"⬇️ <b>Downloading {label}</b>\n"
+            f"{icon} <b>Title:</b> <code>{title_clean}</code>\n\n"
+            f"📊 <b>Progress:</b> <code>[{bar}]</code> <b>{self.percentage:.1f}%</b>\n"
+            f"⚡ <b>Speed:</b> <code>{speed_str}</code>\n"
+            f"💾 <b>Size:</b> <code>{downloaded_str} / {total_str}</code>\n"
+            f"⏳ <b>ETA:</b> <code>{eta_str}</code>"
         )
         return text
 
@@ -194,11 +196,17 @@ class AsyncProgressReporter:
         # Initial render immediately so user sees 0% meter without delay
         try:
             text = self.tracker.render_download_card()
-            await self.message.edit_text(text, parse_mode="Markdown", reply_markup=self.reply_markup)
+            await self.message.edit_text(text, parse_mode="HTML", reply_markup=self.reply_markup)
             self.tracker.last_rendered_text = text
             self.tracker.last_update_time = time.time()
-        except Exception:
-            pass
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e).lower():
+                try:
+                    await self.message.edit_text(text, parse_mode=None, reply_markup=self.reply_markup)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"Initial progress render error: {e}")
 
         while not self._stop_event.is_set():
             try:
@@ -206,11 +214,15 @@ class AsyncProgressReporter:
                 if (now - self.tracker.last_update_time) >= self.tracker.min_update_interval:
                     text = self.tracker.render_download_card()
                     if text != self.tracker.last_rendered_text:
-                        await self.message.edit_text(
-                            text,
-                            parse_mode="Markdown",
-                            reply_markup=self.reply_markup
-                        )
+                        try:
+                            await self.message.edit_text(
+                                text,
+                                parse_mode="HTML",
+                                reply_markup=self.reply_markup
+                            )
+                        except TelegramBadRequest as e:
+                            if "message is not modified" not in str(e).lower():
+                                await self.message.edit_text(text, parse_mode=None, reply_markup=self.reply_markup)
                         self.tracker.last_rendered_text = text
                         self.tracker.last_update_time = now
             except TelegramRetryAfter as e:
@@ -342,7 +354,7 @@ class UploadProgressTracker:
         else:
             icon = "🎵"
 
-        part_prefix = f" • {self.part_info}" if self.part_info else ""
+        part_prefix = f" • {html.escape(self.part_info)}" if self.part_info else ""
         bar = make_progress_bar(self.percentage)
         speed_str = f"{format_bytes(self.speed)}/s" if self.speed > 0 else "Uploading..."
         uploaded_str = format_bytes(self.uploaded_bytes)
@@ -350,14 +362,16 @@ class UploadProgressTracker:
         eta_str = format_seconds(self.eta) if self.eta is not None else "--:--"
 
         title_display = self.media_title[:38] + "..." if len(self.media_title) > 38 else self.media_title
+        title_clean = html.escape(title_display)
+        m_type = html.escape(self.media_type.capitalize())
 
         text = (
-            f"⬆️ *Uploading {self.media_type.capitalize()}{part_prefix}*\n"
-            f"{icon} *Title:* `{title_display}`\n\n"
-            f"📊 *Progress:* `[{bar}]` *{self.percentage:.1f}%*\n"
-            f"⚡ *Upload Speed:* `{speed_str}`\n"
-            f"💾 *Sent:* `{uploaded_str} / {total_str}`\n"
-            f"⏳ *ETA:* `{eta_str}`"
+            f"⬆️ <b>Uploading {m_type}{part_prefix}</b>\n"
+            f"{icon} <b>Title:</b> <code>{title_clean}</code>\n\n"
+            f"📊 <b>Progress:</b> <code>[{bar}]</code> <b>{self.percentage:.1f}%</b>\n"
+            f"⚡ <b>Upload Speed:</b> <code>{speed_str}</code>\n"
+            f"💾 <b>Sent:</b> <code>{uploaded_str} / {total_str}</code>\n"
+            f"⏳ <b>ETA:</b> <code>{eta_str}</code>"
         )
         return text
 
@@ -400,11 +414,17 @@ class AsyncUploadProgressReporter:
         # Initial render immediately so user sees 0% upload meter right away
         try:
             text = self.tracker.render_upload_card()
-            await self.message.edit_text(text, parse_mode="Markdown")
+            await self.message.edit_text(text, parse_mode="HTML")
             self.tracker.last_rendered_text = text
             self.tracker.last_update_time = time.time()
-        except Exception:
-            pass
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e).lower():
+                try:
+                    await self.message.edit_text(text, parse_mode=None)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"Initial upload card render error: {e}")
 
         while not self._stop_event.is_set():
             try:
@@ -412,7 +432,11 @@ class AsyncUploadProgressReporter:
                 if (now - self.tracker.last_update_time) >= self.tracker.min_update_interval:
                     text = self.tracker.render_upload_card()
                     if text != self.tracker.last_rendered_text:
-                        await self.message.edit_text(text, parse_mode="Markdown")
+                        try:
+                            await self.message.edit_text(text, parse_mode="HTML")
+                        except TelegramBadRequest as e:
+                            if "message is not modified" not in str(e).lower():
+                                await self.message.edit_text(text, parse_mode=None)
                         self.tracker.last_rendered_text = text
                         self.tracker.last_update_time = now
             except TelegramRetryAfter as e:

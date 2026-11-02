@@ -422,7 +422,7 @@ class MediaService:
         # Notify remuxing phase
         if status_callback:
             try:
-                await status_callback("⚙️ *Optimizing video container with FFmpeg for Telegram streaming...*")
+                await status_callback("⚙️ <b>Optimizing video container with FFmpeg for Telegram streaming...</b>")
             except Exception:
                 pass
 

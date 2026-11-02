@@ -108,10 +108,10 @@ async def main() -> None:
     from aiogram.client.session.aiohttp import AiohttpSession
     from aiogram.client.telegram import TelegramAPIServer
 
-    session = None
+    session = AiohttpSession(timeout=600.0)
     if TELEGRAM_API_SERVER:
         server = TelegramAPIServer.from_base(TELEGRAM_API_SERVER)
-        session = AiohttpSession(api=server)
+        session = AiohttpSession(api=server, timeout=600.0)
         logger.info(f"Using custom Telegram Bot API Server: {TELEGRAM_API_SERVER} (up to 2000 MB uploads)")
 
     bot = Bot(token=BOT_TOKEN, session=session)

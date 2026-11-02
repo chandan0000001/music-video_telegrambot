@@ -25,13 +25,16 @@ class TelegramService:
     async def update_status(message: Message, text: str) -> None:
         """Safely edit message text to show progress."""
         try:
-            await message.edit_text(text, parse_mode="Markdown")
+            await message.edit_text(text, parse_mode="HTML")
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
                 try:
-                    await message.edit_text(text, parse_mode=None)
-                except Exception:
-                    logger.debug(f"Status update skipped: {e}")
+                    await message.edit_text(text, parse_mode="Markdown")
+                except TelegramBadRequest:
+                    try:
+                        await message.edit_text(text, parse_mode=None)
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug(f"Unexpected error updating status: {e}")
 
@@ -43,13 +46,16 @@ class TelegramService:
     ) -> None:
         """Safely edit message text and attach an inline keyboard (e.g. for retrying)."""
         try:
-            await message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            await message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
                 try:
-                    await message.edit_text(text, reply_markup=reply_markup, parse_mode=None)
-                except Exception:
-                    logger.debug(f"Status update with keyboard skipped: {e}")
+                    await message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+                except TelegramBadRequest:
+                    try:
+                        await message.edit_text(text, reply_markup=reply_markup, parse_mode=None)
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug(f"Unexpected error updating status with keyboard: {e}")
 
@@ -84,9 +90,9 @@ class TelegramService:
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-        # 1. Smart Routing: MTProto Direct Delivery for large files (>48MB up to 2000MB)
-        if file_size_mb > 48 and mtproto_service.is_configured:
-            logger.info(f"Using MTProto 2GB Uploader for large audio: {file_path.name} ({file_size_mb:.1f} MB)")
+        # 1. Smart Routing: Native MTProto Direct Delivery (High-speed 16-worker parallel transfer, no HTTP timeouts)
+        if mtproto_service.is_configured and await mtproto_service.is_ready():
+            logger.info(f"Using High-Speed MTProto Uploader for audio: {file_path.name} ({file_size_mb:.1f} MB)")
             sent = await mtproto_service.send_audio(
                 chat_id=chat_id,
                 file_path=file_path,
@@ -148,7 +154,8 @@ class TelegramService:
                             duration=max(1, duration // total_parts),
                             thumbnail=thumb_file,
                             caption=caption,
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            request_timeout=600
                         )
                     finally:
                         if upload_reporter:
@@ -183,7 +190,8 @@ class TelegramService:
                 duration=duration,
                 thumbnail=thumb_file,
                 caption=f"🎵 *{title}*\n👤 *Artist:* {artist}",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                request_timeout=600
             )
             return True
         except TelegramEntityTooLarge:
@@ -232,9 +240,9 @@ class TelegramService:
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-        # 1. Smart Routing: MTProto Direct Delivery for large files (>48MB up to 2000MB)
-        if file_size_mb > 48 and mtproto_service.is_configured:
-            logger.info(f"Using MTProto 2GB Uploader for large video: {file_path.name} ({file_size_mb:.1f} MB)")
+        # 1. Smart Routing: Native MTProto Direct Delivery (High-speed 16-worker parallel transfer, no HTTP timeouts)
+        if mtproto_service.is_configured and await mtproto_service.is_ready():
+            logger.info(f"Using High-Speed MTProto Uploader for video: {file_path.name} ({file_size_mb:.1f} MB)")
             sent = await mtproto_service.send_video(
                 chat_id=chat_id,
                 file_path=file_path,
@@ -311,7 +319,8 @@ class TelegramService:
                             height=height,
                             thumbnail=thumb_file,
                             supports_streaming=True,
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            request_timeout=600
                         )
                     finally:
                         if upload_reporter:
@@ -348,7 +357,8 @@ class TelegramService:
                 height=height,
                 thumbnail=thumb_file,
                 supports_streaming=True,
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                request_timeout=600
             )
             return True
         except TelegramEntityTooLarge:
@@ -395,7 +405,8 @@ class TelegramService:
                             height=height,
                             thumbnail=thumb_file,
                             supports_streaming=True,
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            request_timeout=600
                         )
                         return True
                     finally:
