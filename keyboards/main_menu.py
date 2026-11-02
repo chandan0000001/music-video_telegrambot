@@ -24,6 +24,10 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
         ],
         [
+            InlineKeyboardButton(text="🎁 Invite & Earn VIP", callback_data="menu:referral"),
+            InlineKeyboardButton(text="🎟️ Redeem Coupon", callback_data="coupon:redeem"),
+        ],
+        [
             InlineKeyboardButton(text="⚡ Features & Help", callback_data="menu:help"),
             InlineKeyboardButton(text="👨‍💻 Developer", url="https://t.me/coder_chandan"),
         ]

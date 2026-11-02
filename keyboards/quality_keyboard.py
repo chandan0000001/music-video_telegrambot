@@ -130,6 +130,12 @@ def get_paywall_keyboard(video_id: str, quality: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text="🎟️ Have a Coupon Code? Redeem Here",
+                    callback_data="coupon:redeem"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🔙 Back to Video Qualities",
                     callback_data=f"opt_video:{video_id}"
                 ),

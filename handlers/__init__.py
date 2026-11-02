@@ -11,13 +11,19 @@ from handlers.video import router as video_router
 from handlers.payment import router as payment_router
 from handlers.history import router as history_router
 from handlers.admin import router as admin_router
+from handlers.coupons import router as coupons_router
+from handlers.referral import router as referral_router
+from handlers.inline import router as inline_router
 
 
 def setup_routers() -> Router:
     """Combine and order all feature routers under main root router."""
     root_router = Router(name="root_router")
     root_router.include_router(admin_router)
+    root_router.include_router(inline_router)
     root_router.include_router(start_router)
+    root_router.include_router(coupons_router)
+    root_router.include_router(referral_router)
     root_router.include_router(ytmusic_router)
     root_router.include_router(twitter_router)
     root_router.include_router(instagram_router)

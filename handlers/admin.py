@@ -46,6 +46,9 @@ def get_admin_dashboard_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💳 Payment Orders", callback_data="admin:payment_orders")
             ],
             [
+                InlineKeyboardButton(text="🎟️ Manage Coupons", callback_data="admin:coupons")
+            ],
+            [
                 InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
             ],
             [

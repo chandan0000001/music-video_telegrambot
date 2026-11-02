@@ -514,9 +514,27 @@ class Database:
         days = custom_days if (custom_days and custom_days > 0) else plan_info["days"]
         daily_limit = plan_info["daily_limit"]
         expiry_date = now + timedelta(days=days)
-        expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
 
         async with self._get_connection() as conn:
+            # Extend existing active subscription if still valid in the future
+            cur = await conn.execute(
+                "SELECT plan_tier, expiry_date FROM user_subscriptions WHERE telegram_id = ?",
+                (telegram_id,)
+            )
+            existing_sub = await cur.fetchone()
+            if existing_sub and existing_sub["expiry_date"]:
+                try:
+                    exp_clean = str(existing_sub["expiry_date"]).replace("Z", "+00:00").replace(" ", "T")
+                    current_exp = datetime.fromisoformat(exp_clean)
+                    if current_exp.tzinfo is None:
+                        current_exp = current_exp.replace(tzinfo=timezone.utc)
+                    if current_exp > now:
+                        expiry_date = current_exp + timedelta(days=days)
+                except Exception:
+                    pass
+
+            expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
+
             await conn.execute(
                 """
                 INSERT INTO user_subscriptions (telegram_id, plan_tier, start_date, expiry_date, daily_video_limit, today_video_used, last_reset_date)
@@ -625,6 +643,269 @@ class Database:
             )
             await conn.commit()
             return True
+
+    # ------------------ Coupons ------------------
+
+    async def create_coupon(
+        self,
+        code: str,
+        days: int = 7,
+        max_uses: int = 1,
+        plan_tier: str = "go",
+        expires_in_hours: Optional[int] = None,
+        created_by: int = 0
+    ) -> tuple[bool, dict[str, Any] | str]:
+        """
+        Create a new coupon code.
+        Returns (success, coupon_dict_or_error_message).
+        """
+        import re
+        from datetime import datetime, timezone, timedelta
+
+        clean_code = (code or "").strip().upper()
+        if not re.match(r"^[A-Z0-9_-]{3,30}$", clean_code):
+            return False, "⚠️ Coupon code must be 3-30 alphanumeric characters (A-Z, 0-9, dashes, underscores)."
+
+        if days <= 0:
+            return False, "⚠️ Subscription days must be at least 1."
+        if max_uses <= 0:
+            return False, "⚠️ Max uses must be at least 1."
+
+        plan_key = plan_tier.lower().replace("sub_", "")
+        from config import SUBSCRIPTION_PLANS
+        if plan_key not in SUBSCRIPTION_PLANS or plan_key == "normal":
+            plan_key = "go"
+
+        now = datetime.now(timezone.utc)
+        expires_at_str = None
+        if expires_in_hours and expires_in_hours > 0:
+            exp_dt = now + timedelta(hours=expires_in_hours)
+            expires_at_str = exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        async with self._get_connection() as conn:
+            cur = await conn.execute("SELECT id FROM coupons WHERE code = ?", (clean_code,))
+            if await cur.fetchone():
+                return False, f"⚠️ Coupon code '{clean_code}' already exists."
+
+            await conn.execute(
+                """
+                INSERT INTO coupons (code, plan_tier, days, max_uses, used_count, is_active, expires_at, created_by, created_at)
+                VALUES (?, ?, ?, ?, 0, 1, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (clean_code, plan_key, days, max_uses, expires_at_str, created_by)
+            )
+            await conn.commit()
+
+            cur = await conn.execute("SELECT * FROM coupons WHERE code = ?", (clean_code,))
+            row = await cur.fetchone()
+            return True, dict(row)
+
+    async def redeem_coupon(
+        self,
+        telegram_id: int,
+        code: str
+    ) -> tuple[bool, Optional[dict[str, Any]], Optional[str]]:
+        """
+        Redeem a coupon code for a user.
+        Validates existence, active status, expiration, max usage, and per-user uniqueness.
+        Returns (success, redemption_info, error_message).
+        """
+        from datetime import datetime, timezone
+
+        clean_code = (code or "").strip().upper()
+        if not clean_code:
+            return False, None, "⚠️ Please provide a coupon code."
+
+        now = datetime.now(timezone.utc)
+
+        async with self._get_connection() as conn:
+            cur = await conn.execute("SELECT * FROM coupons WHERE code = ?", (clean_code,))
+            row = await cur.fetchone()
+            if not row:
+                return False, None, f"❌ Coupon code '<b>{clean_code}</b>' was not found. Please verify spelling."
+
+            coupon = dict(row)
+            coupon_id = coupon["id"]
+
+            if not coupon["is_active"]:
+                return False, None, "❌ This coupon code has been terminated or revoked by the administrator."
+
+            # Check expiration
+            if coupon.get("expires_at"):
+                try:
+                    exp_clean = str(coupon["expires_at"]).replace("Z", "+00:00").replace(" ", "T")
+                    exp_dt = datetime.fromisoformat(exp_clean)
+                    if exp_dt.tzinfo is None:
+                        exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                    if exp_dt < now:
+                        return False, None, "⏳ This coupon code has expired."
+                except Exception:
+                    pass
+
+            # Check max usage limit
+            if coupon["used_count"] >= coupon["max_uses"]:
+                return False, None, "⚠️ This coupon code has reached its maximum usage limit."
+
+            # Check if this user already redeemed this specific coupon
+            cur = await conn.execute(
+                "SELECT id FROM coupon_redemptions WHERE coupon_id = ? AND telegram_id = ?",
+                (coupon_id, telegram_id)
+            )
+            if await cur.fetchone():
+                return False, None, "🚫 You have already redeemed this coupon code previously."
+
+            # Record redemption and increment used_count atomically
+            await conn.execute(
+                "INSERT INTO coupon_redemptions (coupon_id, telegram_id) VALUES (?, ?)",
+                (coupon_id, telegram_id)
+            )
+            await conn.execute(
+                "UPDATE coupons SET used_count = used_count + 1 WHERE id = ?",
+                (coupon_id,)
+            )
+            await conn.commit()
+
+        # Activate or extend subscription!
+        sub_result = await self.activate_subscription(
+            telegram_id=telegram_id,
+            plan_tier=coupon["plan_tier"],
+            custom_days=coupon["days"]
+        )
+
+        return True, {
+            "code": clean_code,
+            "plan_tier": coupon["plan_tier"],
+            "days": coupon["days"],
+            "expiry_date": sub_result["expiry_date"],
+            "daily_video_limit": sub_result["daily_video_limit"]
+        }, None
+
+    async def revoke_coupon(self, code: str) -> tuple[bool, str]:
+        """Revoke / terminate an active coupon code immediately."""
+        clean_code = (code or "").strip().upper()
+        async with self._get_connection() as conn:
+            cur = await conn.execute("SELECT id, is_active FROM coupons WHERE code = ?", (clean_code,))
+            row = await cur.fetchone()
+            if not row:
+                return False, f"Coupon '{clean_code}' not found."
+            if not row["is_active"]:
+                return True, f"Coupon '{clean_code}' is already revoked/inactive."
+
+            await conn.execute("UPDATE coupons SET is_active = 0 WHERE code = ?", (clean_code,))
+            await conn.commit()
+            return True, f"Coupon '{clean_code}' has been terminated successfully."
+
+    async def list_coupons(self, limit: int = 20) -> list[dict[str, Any]]:
+        """List recent coupons with usage stats and active status."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM coupons ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------ Referrals ------------------
+
+    async def record_referral(
+        self,
+        inviter_id: int,
+        new_user_id: int
+    ) -> tuple[bool, int, bool]:
+        """
+        Record a referral when a new user starts the bot via an invite link.
+        Checks:
+        1. Cannot refer self.
+        2. Cannot refer if new_user_id was already referred.
+        3. Milestone check: Every 3 friends grants 1 week (7 days) of VIP!
+        Returns (success, total_friends_invited, milestone_unlocked).
+        """
+        if inviter_id == new_user_id:
+            return False, 0, False
+
+        async with self._get_connection() as conn:
+            # Check if this user was already referred
+            cur = await conn.execute("SELECT id FROM referrals WHERE referred_id = ?", (new_user_id,))
+            if await cur.fetchone():
+                cur = await conn.execute("SELECT COUNT(*) as cnt FROM referrals WHERE inviter_id = ?", (inviter_id,))
+                row = await cur.fetchone()
+                return False, (row["cnt"] if row else 0), False
+
+            # Check if inviter exists in database
+            cur = await conn.execute("SELECT telegram_id FROM users WHERE telegram_id = ?", (inviter_id,))
+            if not await cur.fetchone():
+                return False, 0, False
+
+            try:
+                await conn.execute(
+                    "INSERT INTO referrals (inviter_id, referred_id) VALUES (?, ?)",
+                    (inviter_id, new_user_id)
+                )
+                await conn.commit()
+            except Exception:
+                return False, 0, False
+
+            # Count total referrals
+            cur = await conn.execute(
+                "SELECT COUNT(*) as cnt FROM referrals WHERE inviter_id = ?",
+                (inviter_id,)
+            )
+            row = await cur.fetchone()
+            total_refs = row["cnt"] if row else 1
+
+            # Milestone check: Every 3 referrals (3, 6, 9, 12...)
+            milestone_unlocked = False
+            if total_refs > 0 and total_refs % 3 == 0:
+                milestone_target = total_refs
+                cur = await conn.execute(
+                    "SELECT id FROM referral_rewards WHERE user_id = ? AND milestone_count = ?",
+                    (inviter_id, milestone_target)
+                )
+                if not await cur.fetchone():
+                    await conn.execute(
+                        "INSERT INTO referral_rewards (user_id, milestone_count, reward_days) VALUES (?, ?, 7)",
+                        (inviter_id, milestone_target)
+                    )
+                    await conn.commit()
+                    milestone_unlocked = True
+
+        if milestone_unlocked:
+            # Grant 7 days of VIP to inviter!
+            await self.activate_subscription(
+                telegram_id=inviter_id,
+                plan_tier="go",
+                custom_days=7
+            )
+
+        return True, total_refs, milestone_unlocked
+
+    async def get_referral_stats(self, user_id: int) -> dict[str, Any]:
+        """Get referral statistics, invite count, and rewards earned for a user."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT COUNT(*) as cnt FROM referrals WHERE inviter_id = ?",
+                (user_id,)
+            )
+            row = await cur.fetchone()
+            total_invited = row["cnt"] if row else 0
+
+            cur = await conn.execute(
+                "SELECT SUM(reward_days) as total_days FROM referral_rewards WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await cur.fetchone()
+            total_days_earned = row["total_days"] if (row and row["total_days"]) else 0
+
+        needed_for_next = 3 - (total_invited % 3)
+        if needed_for_next == 0:
+            needed_for_next = 3
+
+        return {
+            "total_invited": total_invited,
+            "total_days_earned": total_days_earned,
+            "needed_for_next": needed_for_next,
+            "current_cycle_progress": total_invited % 3
+        }
 
 
 # Default singleton instance

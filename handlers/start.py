@@ -1,6 +1,7 @@
 """
 Start, Help, and About Command Handlers
 """
+import html
 import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -10,6 +11,8 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database import db
 from keyboards.main_menu import get_main_menu_keyboard, get_back_to_main_keyboard
+from keyboards.search_keyboard import get_media_type_keyboard
+from services.media_service import media_service
 
 logger = logging.getLogger(__name__)
 router = Router(name="start_router")
@@ -56,7 +59,7 @@ ABOUT_TEXT = (
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
-    """Handle /start command."""
+    """Handle /start command with deep-linking support for referrals and inline downloads."""
     await state.clear()
     user = message.from_user
     if not user:
@@ -76,8 +79,81 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     first_name = (user.first_name or "Music Lover")
     is_admin = user.id in ADMIN_IDS
+
+    # Inspect deep link payload if present
+    payload = ""
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            payload = parts[1].strip()
+
+    # Case 1: Download Deep Link from Inline Query (@songsuperzxbot)
+    if payload.startswith("dl_"):
+        video_id = payload[3:].strip()
+        if video_id:
+            try:
+                info_success, info, _ = await media_service.get_media_info(f"https://www.youtube.com/watch?v={video_id}")
+                title = info.get("title", f"Track {video_id}") if (info_success and info) else f"Track {video_id}"
+                duration = info.get("duration_string", "N/A") if (info_success and info) else "N/A"
+            except Exception:
+                title = f"Track {video_id}"
+                duration = "N/A"
+
+            card_text = (
+                f"🎯 **Selected Media:** {title}\n"
+                f"⏱ **Duration:** `{duration}`\n\n"
+                "How would you like to download this media?\n\n"
+                "• 🎧 **Audio:** Convert to MP3 (128-320k), M4A, or WAV\n"
+                "• 🎬 **Video:** Download MP4 from 144p to 1080p HD"
+            )
+            await message.answer(
+                text=card_text,
+                reply_markup=get_media_type_keyboard(video_id),
+                parse_mode="Markdown"
+            )
+            return
+
+    # Case 2: Referral Invite Deep Link (ref_<inviter_id>)
+    welcome_prefix = ""
+    if payload.startswith("ref_"):
+        inviter_str = payload[4:].strip()
+        if inviter_str.isdigit():
+            inviter_id = int(inviter_str)
+            if inviter_id != user.id:
+                success, total_refs, milestone_unlocked = await db.record_referral(inviter_id, user.id)
+                if success:
+                    welcome_prefix = "🎁 *Welcome! You joined using a friend's invite link.*\n\n"
+                    # Notify inviter of friend join / VIP milestone
+                    try:
+                        if milestone_unlocked:
+                            await message.bot.send_message(
+                                chat_id=inviter_id,
+                                text=(
+                                    "🎉 <b>Referral Milestone Unlocked!</b>\n\n"
+                                    f"Your friend <b>{html.escape(first_name)}</b> just joined using your invite link!\n"
+                                    f"🏆 Total friends invited: <b>{total_refs}</b>\n"
+                                    "🎁 <b>+7 Days of VIP Access</b> have been automatically credited to your account!\n\n"
+                                    "Enjoy high-speed Full HD downloads! 🚀"
+                                ),
+                                parse_mode="HTML"
+                            )
+                        else:
+                            needed = 3 - (total_refs % 3)
+                            await message.bot.send_message(
+                                chat_id=inviter_id,
+                                text=(
+                                    "👤 <b>New Friend Joined!</b>\n\n"
+                                    f"<b>{html.escape(first_name)}</b> joined using your invite link.\n"
+                                    f"📊 Total invited: <b>{total_refs}</b>\n"
+                                    f"🎯 Invite <b>{needed} more</b> friend(s) to unlock <b>7 Days VIP free</b>!"
+                                ),
+                                parse_mode="HTML"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to notify inviter {inviter_id}: {e}")
+
     await message.answer(
-        text=get_welcome_text(first_name),
+        text=welcome_prefix + get_welcome_text(first_name),
         reply_markup=get_main_menu_keyboard(is_admin=is_admin),
         parse_mode="Markdown"
     )

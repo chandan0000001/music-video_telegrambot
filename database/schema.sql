@@ -79,6 +79,51 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
     FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
 );
 
+-- 7. Coupons Table (Admin-generated promo/discount/VIP codes)
+CREATE TABLE IF NOT EXISTS coupons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    plan_tier TEXT NOT NULL DEFAULT 'go',
+    days INTEGER NOT NULL DEFAULT 7,
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    expires_at TIMESTAMP,
+    created_by INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 8. Coupon Redemptions Table (Tracks which user redeemed which coupon)
+CREATE TABLE IF NOT EXISTS coupon_redemptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coupon_id INTEGER NOT NULL,
+    telegram_id INTEGER NOT NULL,
+    redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(coupon_id, telegram_id),
+    FOREIGN KEY (coupon_id) REFERENCES coupons(id) ON DELETE CASCADE,
+    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+);
+
+-- 9. Referrals Table (Tracks friends invited via personal deep-links)
+CREATE TABLE IF NOT EXISTS referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inviter_id INTEGER NOT NULL,
+    referred_id INTEGER UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (inviter_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+    FOREIGN KEY (referred_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+);
+
+-- 10. Referral Rewards Table (Tracks milestone rewards granted to inviters)
+CREATE TABLE IF NOT EXISTS referral_rewards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    milestone_count INTEGER NOT NULL,
+    reward_days INTEGER NOT NULL DEFAULT 7,
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+);
+
 -- Initialize singleton statistics row if not exists
 INSERT OR IGNORE INTO bot_statistics (id, total_users, total_searches, total_successful_downloads, total_failed_downloads)
 VALUES (1, 0, 0, 0, 0);
@@ -106,3 +151,11 @@ CREATE INDEX IF NOT EXISTS idx_orders_utr_status ON orders(utr_number, status);
 
 -- Subscriptions (Optimizes active subscriber lookups)
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_expiry ON user_subscriptions(expiry_date);
+
+-- Coupons (Optimizes promo code lookups and admin active listings)
+CREATE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code);
+CREATE INDEX IF NOT EXISTS idx_coupons_active ON coupons(is_active, id DESC);
+
+-- Referrals (Optimizes friend count aggregations and reward checks)
+CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_referrals_referred ON referrals(referred_id);
