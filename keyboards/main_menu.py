@@ -6,29 +6,28 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Generate main navigation inline keyboard with dedicated YouTube Music feature."""
+    """Generate main navigation inline keyboard with user preferred layout."""
     buttons = [
         [
             InlineKeyboardButton(text="🎵 Search Music", callback_data="menu:search"),
-            InlineKeyboardButton(text="🎧 Audio Downloader", callback_data="menu:audio"),
-        ],
-        [
-            InlineKeyboardButton(text="🔴 YouTube Music Downloader", callback_data="menu:ytmusic"),
+            InlineKeyboardButton(text="🔴 YouTube Music", callback_data="menu:ytmusic"),
         ],
         [
             InlineKeyboardButton(text="🐦 X (Twitter) Downloader", callback_data="menu:twitter"),
             InlineKeyboardButton(text="📸 Instagram Downloader", callback_data="menu:instagram"),
         ],
         [
-            InlineKeyboardButton(text="🎬 Video Downloader", callback_data="menu:video"),
-            InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
+            InlineKeyboardButton(text="🎬 YouTube Video Downloader", callback_data="menu:video"),
         ],
         [
             InlineKeyboardButton(text="🎁 Invite & Earn VIP", callback_data="menu:referral"),
             InlineKeyboardButton(text="🎟️ Redeem Coupon", callback_data="coupon:redeem"),
         ],
         [
+            InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
             InlineKeyboardButton(text="⚡ Features & Help", callback_data="menu:help"),
+        ],
+        [
             InlineKeyboardButton(text="👨‍💻 Developer", url="https://t.me/coder_chandan"),
         ]
     ]

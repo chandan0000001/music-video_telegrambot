@@ -20,6 +20,7 @@ from keyboards.main_menu import get_back_to_main_keyboard
 from utils.rate_limiter import concurrency_manager
 from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter, vanish_status_message
+from utils.animation_helper import send_download_animation, vanish_download_animation
 from utils.task_registry import task_registry
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,7 @@ async def execute_video_download_pipeline(
     acquired_slot = False
     job_dir = None
     reporter = None
+    anim_msg = None
 
     try:
         media_title = f"YouTube Video ({video_id})"
@@ -226,6 +228,9 @@ async def execute_video_download_pipeline(
             return
         acquired_slot = True
 
+        # Send companion entertainment animation/sticker
+        anim_msg = await send_download_animation(bot, user_id)
+
         retry_cb = f"vdl:{video_id}:{resolution}"
         back_cb = f"opt_video:{video_id}"
 
@@ -249,6 +254,7 @@ async def execute_video_download_pipeline(
         await reporter.stop()
 
         if not success or not result:
+            await vanish_download_animation(anim_msg)
             await db.update_download_status(download_id, "failed")
             if err and ("access restricted" in err.lower() or "access notice" in err.lower()):
                 await status_msg.edit_text(
@@ -280,7 +286,9 @@ async def execute_video_download_pipeline(
         if sent:
             await db.update_download_status(download_id, "completed")
             await vanish_status_message(status_msg, delay=0.3)
+            await vanish_download_animation(anim_msg, delay=0.3)
         else:
+            await vanish_download_animation(anim_msg)
             await db.update_download_status(download_id, "failed")
             await telegram_service.update_status_with_keyboard(
                 status_msg,
@@ -293,6 +301,7 @@ async def execute_video_download_pipeline(
         logger.info(f"Video job aborted by user {user_id} ({canonical_url})")
         if reporter:
             await reporter.stop()
+        await vanish_download_animation(anim_msg)
         await db.update_download_status(download_id, "cancelled")
         try:
             await telegram_service.update_status(
@@ -306,6 +315,7 @@ async def execute_video_download_pipeline(
     except Exception as e:
         if reporter:
             await reporter.stop()
+        await vanish_download_animation(anim_msg)
         logger.exception(f"Unhandled video processing error for {canonical_url}: {e}")
         await db.update_download_status(download_id, "failed")
         await telegram_service.update_status_with_keyboard(
@@ -317,6 +327,7 @@ async def execute_video_download_pipeline(
     finally:
         if reporter:
             await reporter.stop()
+        await vanish_download_animation(anim_msg)
         task_registry.unregister(user_id)
         if acquired_slot:
             queue_manager.release_download_slot(user_id)

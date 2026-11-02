@@ -19,6 +19,7 @@ from keyboards.main_menu import get_back_to_main_keyboard
 from utils.rate_limiter import concurrency_manager
 from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter, vanish_status_message
+from utils.animation_helper import send_download_animation, vanish_download_animation
 from utils.task_registry import task_registry
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     acquired_slot = False
     job_dir = None
     reporter = None
+    anim_msg = None
 
     try:
         # Acquire slot via dynamic 8/8 Queue
@@ -156,6 +158,9 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         if not acquired:
             return
         acquired_slot = True
+
+        # Send companion entertainment animation/sticker
+        anim_msg = await send_download_animation(callback.bot, user_id)
 
         retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
         back_cb = f"opt_audio:{video_id}"
@@ -181,6 +186,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         await reporter.stop()
 
         if not success or not result:
+            await vanish_download_animation(anim_msg)
             await db.update_download_status(download_id, "failed")
             if err and ("access restricted" in err.lower() or "access notice" in err.lower()):
                 await status_msg.edit_text(
@@ -211,7 +217,9 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         if sent:
             await db.update_download_status(download_id, "completed")
             await vanish_status_message(status_msg, delay=0.3)
+            await vanish_download_animation(anim_msg, delay=0.3)
         else:
+            await vanish_download_animation(anim_msg)
             await db.update_download_status(download_id, "failed")
             await telegram_service.update_status_with_keyboard(
                 status_msg,
@@ -224,6 +232,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         logger.info(f"Audio job aborted by user {user_id} ({canonical_url})")
         if reporter:
             await reporter.stop()
+        await vanish_download_animation(anim_msg)
         await db.update_download_status(download_id, "cancelled")
         try:
             await telegram_service.update_status(
@@ -237,6 +246,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     except Exception as e:
         if reporter:
             await reporter.stop()
+        await vanish_download_animation(anim_msg)
         logger.exception(f"Unhandled audio processing error for {canonical_url}: {e}")
         await db.update_download_status(download_id, "failed")
         await telegram_service.update_status_with_keyboard(
@@ -248,6 +258,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     finally:
         if reporter:
             await reporter.stop()
+        await vanish_download_animation(anim_msg)
         task_registry.unregister(user_id)
         if acquired_slot:
             queue_manager.release_download_slot(user_id)

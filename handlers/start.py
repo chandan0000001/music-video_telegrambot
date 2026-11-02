@@ -19,15 +19,16 @@ router = Router(name="start_router")
 
 
 def get_welcome_text(user_name: str = "Music Lover") -> str:
-    """Generate modern, clean welcome text."""
+    """Generate modern, clean welcome text with direct link guidance."""
     return (
         f"👋 *Hey {user_name}!* Welcome to **Music & Video Bot**\n\n"
-        "⚡ *High-speed downloader for YouTube, Instagram & X (Twitter)*\n\n"
-        "🎵 **Music:** MP3 (320k Studio), M4A & Lossless WAV\n"
-        "🎬 **Video:** 144p to 1080p Full HD MP4\n"
-        "📸 **Instagram:** Reels, Carousels, Photos & Videos\n"
-        "🐦 **X (Twitter):** Original raw photos, videos & GIFs\n\n"
-        "💡 *How to use:* Send any **song title**, **YouTube**, **Instagram**, or **X link** directly below, or use the menu:"
+        "⚡ *Download high quality music and videos instantly with original fidelity!*\n\n"
+        "📥 **Send any kind of link directly below:**\n"
+        "• 📸 **Instagram:** Reels, Posts, Carousels, Stories & Audio\n"
+        "• 🔴 **YouTube:** Videos, Shorts & YouTube Music\n"
+        "• 🐦 **X (Twitter):** Videos, HD Photos & GIFs\n"
+        "• 🎵 **Song Name:** Type any song title or artist to search\n\n"
+        "👇 *Or use the quick menu buttons below to get started:*"
     )
 
 

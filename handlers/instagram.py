@@ -43,6 +43,7 @@ from utils.progress import (
     TrackedFSInputFile,
     vanish_status_message
 )
+from utils.animation_helper import send_download_animation, vanish_download_animation
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -260,6 +261,9 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
     if not acquired:
         return
 
+    # Send companion entertainment animation/sticker
+    anim_msg = await send_download_animation(message.bot, user_id)
+
     job_dir = instagram_service._get_job_dir()
 
     # 4. Live Download Progress Meter
@@ -281,6 +285,7 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
         queue_manager.release_download_slot(user_id)
 
     if not downloaded:
+        await vanish_download_animation(anim_msg)
         await status_msg.edit_text(
             "❌ *Failed to download media files. Please try again.*",
             reply_markup=get_back_to_main_keyboard(),
@@ -368,11 +373,13 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
             status="completed"
         )
 
-        # Vanish the progress status message cleanly
+        # Vanish the progress status message and animation cleanly
         await up_reporter.vanish(delay=0.3)
+        await vanish_download_animation(anim_msg, delay=0.3)
 
     except Exception as e:
         logger.error(f"Error delivering Instagram media to user {user_id}: {e}", exc_info=True)
+        await vanish_download_animation(anim_msg)
         try:
             await status_msg.edit_text(
                 f"❌ *Failed to deliver media:* {str(e)[:100]}",
@@ -382,6 +389,7 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
         except Exception:
             pass
     finally:
+        await vanish_download_animation(anim_msg, delay=0.1)
         await up_reporter.vanish(delay=0.1)
         queue_manager.release_upload_slot(user_id)
         instagram_service.cleanup_job_dir(job_dir)
