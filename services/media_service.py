@@ -100,16 +100,19 @@ class MediaService:
                 return ydl.extract_info(url, download=False)
         except Exception as e:
             err_msg = str(e).lower()
-            if "not a bot" in err_msg or "sign in" in err_msg:
-                logger.warning(f"Bot challenge detected for {url}. Retrying with mobile player client fallback...")
+            if any(k in err_msg for k in ("not a bot", "sign in", "confirm your age", "age-restricted", "inappropriate")):
+                logger.warning(f"Bot challenge or age-restriction detected for {url}. Retrying with Android/TV player client fallback...")
                 fallback_opts = dict(ydl_opts)
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["tv", "web", "ios"]
+                        "player_client": ["android", "tv", "ios", "web"]
                     }
                 }
-                with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
-                    return fallback_ydl.extract_info(url, download=False)
+                try:
+                    with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
+                        return fallback_ydl.extract_info(url, download=False)
+                except Exception:
+                    pass
             raise
 
     async def get_media_info(self, url_or_id: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
