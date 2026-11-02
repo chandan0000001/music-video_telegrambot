@@ -275,3 +275,70 @@ async def test_live_stream_detection_in_media_service():
         assert err is None
         assert "1080p" in info["available_resolutions"]
 
+
+@pytest.mark.asyncio
+async def test_widescreen_and_aspect_ratio_resolution_detection():
+    """Verify get_media_info correctly detects 720p, 480p, etc. on 2.35:1 widescreen, 4:3, and vertical videos."""
+    from services.media_service import media_service
+    from unittest.mock import patch
+
+    # 1. Cinema Widescreen (2.35:1, e.g. 1280x544, 854x362, 640x272, 426x182, 256x128)
+    mock_widescreen = {
+        "id": "nHfiKCRloN0",
+        "title": "RE:BORN CinemaScope Action Movie",
+        "duration": 5746,
+        "is_live": False,
+        "live_status": "not_live",
+        "formats": [
+            {"format_id": "394", "ext": "mp4", "width": 256, "height": 128, "vcodec": "av01"},
+            {"format_id": "395", "ext": "mp4", "width": 426, "height": 182, "vcodec": "av01"},
+            {"format_id": "396", "ext": "mp4", "width": 640, "height": 272, "vcodec": "av01"},
+            {"format_id": "397", "ext": "mp4", "width": 854, "height": 362, "vcodec": "av01"},
+            {"format_id": "398", "ext": "mp4", "width": 1280, "height": 544, "vcodec": "av01"},
+        ]
+    }
+    with patch.object(media_service, "_sync_extract_info", return_value=mock_widescreen):
+        ok, info, err = await media_service.get_media_info("nHfiKCRloN0")
+        assert ok is True
+        assert info is not None
+        assert info["available_resolutions"] == ["144p", "240p", "360p", "480p", "720p"]
+
+    # 2. Vertical 9:16 Shorts / Reels (e.g. 1080x1920, 720x1280)
+    mock_vertical = {
+        "id": "vertical123",
+        "title": "Viral Short Video",
+        "duration": 45,
+        "is_live": False,
+        "live_status": "not_live",
+        "formats": [
+            {"format_id": "v1", "ext": "mp4", "width": 720, "height": 1280, "vcodec": "avc1"},
+            {"format_id": "v2", "ext": "mp4", "width": 1080, "height": 1920, "vcodec": "avc1"},
+        ]
+    }
+    with patch.object(media_service, "_sync_extract_info", return_value=mock_vertical):
+        ok, info, err = await media_service.get_media_info("vertical123")
+        assert ok is True
+        assert info is not None
+        assert "720p" in info["available_resolutions"]
+        assert "1080p" in info["available_resolutions"]
+
+    # 3. Classic 4:3 Video (e.g. 1440x1080, 960x720)
+    mock_classic = {
+        "id": "classic123",
+        "title": "Classic 4:3 Video",
+        "duration": 180,
+        "is_live": False,
+        "live_status": "not_live",
+        "formats": [
+            {"format_id": "c1", "ext": "mp4", "width": 960, "height": 720, "vcodec": "avc1"},
+            {"format_id": "c2", "ext": "mp4", "width": 1440, "height": 1080, "vcodec": "avc1"},
+        ]
+    }
+    with patch.object(media_service, "_sync_extract_info", return_value=mock_classic):
+        ok, info, err = await media_service.get_media_info("classic123")
+        assert ok is True
+        assert info is not None
+        assert "720p" in info["available_resolutions"]
+        assert "1080p" in info["available_resolutions"]
+
+

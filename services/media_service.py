@@ -33,6 +33,17 @@ from services.music_service import format_duration
 logger = logging.getLogger(__name__)
 
 
+STANDARD_TIER_WIDTHS: Dict[int, int] = {
+    144: 256,
+    240: 426,
+    360: 640,
+    480: 854,
+    720: 1280,
+    1080: 1920,
+    1440: 2560
+}
+
+
 class MediaService:
     """Manages media downloads, quality inspection, and conversions."""
 
@@ -61,6 +72,9 @@ class MediaService:
         opts: Dict[str, Any] = {
             "remote_components": ["ejs:github"],
         }
+        node_bin = shutil.which("node") or shutil.which("nodejs")
+        if node_bin:
+            opts["js_runtimes"] = {"node": {"path": node_bin}}
         if YTDLP_PROXY:
             opts["proxy"] = YTDLP_PROXY
         cookie_file = get_cookie_file()
@@ -184,19 +198,42 @@ class MediaService:
 
         # Filter genuinely available video resolutions (low to high)
         formats = raw_info.get("formats", [])
+        video_dims = []
         available_heights = set()
         for f in formats:
-            height = f.get("height")
             vcodec = f.get("vcodec")
-            if height and vcodec and vcodec != "none":
-                available_heights.add(height)
+            if not vcodec or vcodec == "none":
+                continue
+            w = f.get("width")
+            h = f.get("height")
+            if h:
+                available_heights.add(h)
+            if w or h:
+                video_dims.append((w, h))
 
-        # Standard supported resolutions matching available heights
+        # Standard supported resolutions matching available dimensions (supports standard 16:9, widescreen 2.35:1, vertical 9:16, 4:3)
         available_resolutions: List[str] = []
         for res_str in SUPPORTED_VIDEO_RESOLUTIONS:
-            h_val = int(res_str.replace("p", ""))
-            # Check if source has this exact height or one within ±20px
-            if any(abs(h - h_val) <= 20 for h in available_heights):
+            tier_h = int(res_str.replace("p", ""))
+            tier_w = STANDARD_TIER_WIDTHS.get(tier_h, int(tier_h * 16 / 9))
+
+            matched = False
+            for w, h in video_dims:
+                # 1. Direct height match
+                if h and abs(h - tier_h) <= 20:
+                    matched = True
+                    break
+                # 2. Direct width match (e.g. widescreen cinema where width defines resolution tier)
+                if w and abs(w - tier_w) <= 30:
+                    matched = True
+                    break
+                # 3. Aspect-ratio adjusted effective height
+                if w and h:
+                    effective_h = max(h, int(w * 9 / 16)) if w >= h else min(w, h)
+                    if abs(effective_h - tier_h) <= 25:
+                        matched = True
+                        break
+            if matched:
                 available_resolutions.append(res_str)
 
         # If no standard matched but video formats exist, add available heights directly
@@ -299,7 +336,6 @@ class MediaService:
             "concurrent_fragment_downloads": 8,
             "buffersize": 4 * 1024 * 1024,
             "http_chunk_size": 10485760,
-            "throttledratelimit": 102400,
             "retries": 10,
             "fragment_retries": 10,
             "file_access_retries": 5,
@@ -417,13 +453,16 @@ class MediaService:
         """
         job_dir = job_dir or self._get_job_dir()
         height_val = int(resolution.replace("p", ""))
+        width_val = STANDARD_TIER_WIDTHS.get(height_val, int(height_val * 16 / 9))
 
         download_template = str(job_dir / "input_media.%(ext)s")
-        # Select best video with height <= height_val, and best audio
+        # Select best video matching either height or width constraint (supporting widescreen cinema), and best audio
         format_selector = (
             f"bestvideo[height<={height_val}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[width<={width_val}][ext=mp4]+bestaudio[ext=m4a]/"
             f"bestvideo[height<={height_val}]+bestaudio/"
-            f"best[height<={height_val}]"
+            f"bestvideo[width<={width_val}]+bestaudio/"
+            f"best[height<={height_val}]/best"
         )
 
         ydl_opts: Dict[str, Any] = {
@@ -437,7 +476,6 @@ class MediaService:
             "concurrent_fragment_downloads": 8,
             "buffersize": 4 * 1024 * 1024,
             "http_chunk_size": 10485760,
-            "throttledratelimit": 102400,
             "retries": 10,
             "fragment_retries": 10,
             "file_access_retries": 5,

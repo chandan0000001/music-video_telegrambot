@@ -712,7 +712,7 @@ Stop-Process -Name "python"
 
 ## 🧪 Automated Testing
 
-The bot includes an automated test suite covering all 15 core scenarios:
+The bot includes an automated test suite covering all 15 core scenarios and multi-aspect ratio video streaming:
 
 ```bash
 # Activate virtual environment
@@ -722,7 +722,7 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 99 automated test cases will execute:
+All 100 automated test cases will execute:
 ```text
 tests/test_all_buttons.py ...                                            [  3%]
 tests/test_coupons_and_referrals.py ..........                           [ 13%]
@@ -732,11 +732,11 @@ tests/test_instagram.py .............                                    [ 48%]
 tests/test_progress.py ...............                                   [ 63%]
 tests/test_queue_and_spam.py .......                                     [ 70%]
 tests/test_rate_limiter.py ...                                           [ 73%]
-tests/test_services.py ........                                          [ 81%]
-tests/test_twitter.py ........                                           [ 89%]
+tests/test_services.py .........                                         [ 82%]
+tests/test_twitter.py ........                                           [ 90%]
 tests/test_validators.py ..........                                      [100%]
 
-============================== 99 passed in 5.23s ==============================
+============================== 100 passed in 6.45s ==============================
 ```
 
 ---
