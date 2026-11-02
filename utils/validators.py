@@ -357,14 +357,27 @@ def classify_media_restriction(error_text: Optional[str]) -> Optional[Tuple[str,
         "live event will begin",
         "premiere will begin",
         "is currently live",
-        "waiting for live stream",
-        "offline live"
+        "currently live",
+        "video is live",
+        "live stream",
+        "livestream",
+        "live_stream",
+        "waiting for live",
+        "live_stream_offline",
+        "live stream is offline",
+        "live event has ended",
+        "live stream recording is not available",
+        "live stream recording is not allowed",
+        "download of a live stream will not stop",
+        "post_live",
+        "upcoming premiere",
+        "this video is a live stream"
     ]
     if any(k in err for k in live_keywords):
         notice = (
-            "⏳ <b>Access Notice: Live Event / Upcoming Premiere</b>\n\n"
-            "⚠️ This media is an ongoing live stream or an upcoming premiere.\n\n"
-            "<i>Please wait until the broadcast ends and archives as a regular video before downloading.</i>"
+            "🔴 <b>Access Restricted: Active Live Stream / Premiere</b>\n\n"
+            "⚠️ This video is an <b>Ongoing Live Stream</b> or an <b>Upcoming Premiere</b> that cannot be downloaded right now.\n\n"
+            "<i>Active live streams do not have a finished file or duration. Please wait until the broadcast ends and archives as a completed video before downloading!</i>"
         )
         return "live_premiere", notice
 

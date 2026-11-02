@@ -135,6 +135,35 @@ class MediaService:
         if not raw_info:
             return False, None, "No metadata returned by the source."
 
+        # Check if the video is an active live stream, upcoming premiere, or post-live processing
+        is_live = raw_info.get("is_live") is True
+        live_status = (raw_info.get("live_status") or "").lower()
+
+        if is_live or live_status in ("is_live", "is_upcoming", "post_live"):
+            import html
+            title_escaped = html.escape(raw_info.get("title", "Live Event"))
+            if live_status == "is_upcoming" or "premiere" in str(raw_info.get("title", "")).lower():
+                return False, None, (
+                    "⏳ <b>Access Notice: Upcoming Premiere / Live Event</b>\n\n"
+                    f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
+                    "⚠️ This event has not premiered or started broadcasting yet.\n\n"
+                    "<i>Please check back and download after the premiere has concluded!</i>"
+                )
+            elif live_status == "post_live":
+                return False, None, (
+                    "⏳ <b>Access Notice: Live Stream Processing</b>\n\n"
+                    f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
+                    "⚠️ This live broadcast recently finished and is currently being processed by YouTube servers into a regular video.\n\n"
+                    "<i>Please try again in a few minutes once processing completes!</i>"
+                )
+            else:
+                return False, None, (
+                    "🔴 <b>Access Restricted: Active Live Stream</b>\n\n"
+                    f"🎬 <b>Title:</b> <code>{title_escaped}</code>\n\n"
+                    "⚠️ This video is currently <b>Broadcasting Live</b> and cannot be downloaded while in progress.\n\n"
+                    "<i>Please wait until the live stream finishes and saves as a complete video archive!</i>"
+                )
+
         duration = raw_info.get("duration")
         is_valid, err_msg = validate_media_limits(duration, None)
         if not is_valid:
@@ -283,6 +312,9 @@ class MediaService:
                     await asyncio.sleep(1.5)
 
         if not download_success:
+            classified = classify_media_restriction(last_error)
+            if classified:
+                return False, None, classified[1], job_dir
             return False, None, f"Audio download failed: {last_error[:100]}", job_dir
 
         # Identify downloaded file
@@ -418,6 +450,9 @@ class MediaService:
                     await asyncio.sleep(2)
 
         if not download_success:
+            classified = classify_media_restriction(last_error)
+            if classified:
+                return False, None, classified[1], job_dir
             return False, None, f"Video download failed: {last_error[:100]}", job_dir
 
         downloaded_files = list(job_dir.glob("input_media.*"))

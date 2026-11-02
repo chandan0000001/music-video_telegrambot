@@ -15,6 +15,7 @@ from keyboards.quality_keyboard import (
     get_retry_keyboard,
     get_cancel_download_keyboard
 )
+from keyboards.main_menu import get_back_to_main_keyboard
 from utils.rate_limiter import concurrency_manager
 from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter, vanish_status_message
@@ -181,12 +182,19 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
 
         if not success or not result:
             await db.update_download_status(download_id, "failed")
-            await telegram_service.update_status_with_keyboard(
-                status_msg,
-                f"❌ *Audio Processing Failed:*\n{err or 'Unknown error occurred.'}\n\n"
-                f"Click below to retry the download or choose a different format:",
-                reply_markup=get_retry_keyboard(retry_cb, back_cb)
-            )
+            if err and ("access restricted" in err.lower() or "access notice" in err.lower()):
+                await status_msg.edit_text(
+                    err,
+                    reply_markup=get_back_to_main_keyboard(),
+                    parse_mode="HTML"
+                )
+            else:
+                await telegram_service.update_status_with_keyboard(
+                    status_msg,
+                    f"❌ *Audio Processing Failed:*\n{err or 'Unknown error occurred.'}\n\n"
+                    f"Click below to retry the download or choose a different format:",
+                    reply_markup=get_retry_keyboard(retry_cb, back_cb)
+                )
             return
 
         sent = await telegram_service.send_audio_file(
