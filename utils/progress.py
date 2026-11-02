@@ -16,16 +16,20 @@ from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter, TelegramBad
 logger = logging.getLogger(__name__)
 
 
-async def vanish_status_message(message: Optional[Message], delay: float = 0.2) -> bool:
+async def vanish_status_message(
+    message: Optional[Message],
+    delay: float = 0.2,
+    max_retries: int = 5
+) -> bool:
     """
     Safely vanish (delete) a status or progress message from Telegram.
-    Handles rate-limiting (TelegramRetryAfter) and suppresses errors if
-    the message was already deleted or cannot be found.
+    Handles rate-limiting (TelegramRetryAfter) and retries on transient errors.
 
     Args:
         message: The aiogram Message object to delete.
         delay: Optional seconds to wait before deletion (e.g. 0.2s) to allow
                Telegram clients to render media arrival smoothly.
+        max_retries: Maximum deletion retry attempts before giving up.
 
     Returns:
         bool: True if deleted or already gone, False on unexpected error.
@@ -36,28 +40,35 @@ async def vanish_status_message(message: Optional[Message], delay: float = 0.2) 
     if delay > 0:
         await asyncio.sleep(delay)
 
-    try:
-        await message.delete()
-        return True
-    except TelegramRetryAfter as e:
+    for attempt in range(max_retries):
         try:
-            await asyncio.sleep(e.retry_after + 0.1)
             await message.delete()
             return True
-        except Exception:
-            return False
-    except TelegramBadRequest as e:
-        err_msg = str(e).lower()
-        if "message to delete not found" in err_msg or "message can't be deleted" in err_msg:
-            return True
-        logger.debug(f"vanish_status_message bad request: {e}")
-        return False
-    except TelegramAPIError as e:
-        logger.debug(f"vanish_status_message TelegramAPIError: {e}")
-        return False
-    except Exception as e:
-        logger.debug(f"vanish_status_message unexpected error: {e}")
-        return False
+        except TelegramRetryAfter as e:
+            wait_time = max(1.0, float(e.retry_after) + 0.3)
+            logger.info(f"vanish_status_message: Telegram flood wait {wait_time:.1f}s (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(wait_time)
+        except TelegramBadRequest as e:
+            err_msg = str(e).lower()
+            if "message to delete not found" in err_msg or "message can't be deleted" in err_msg:
+                return True
+            logger.debug(f"vanish_status_message bad request (attempt {attempt+1}): {e}")
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            try:
+                bot = getattr(message, "bot", None)
+                chat = getattr(message, "chat", None)
+                chat_id = getattr(chat, "id", None)
+                message_id = getattr(message, "message_id", None)
+                if bot and chat_id and message_id:
+                    await bot.delete_message(chat_id=chat_id, message_id=message_id)
+                    return True
+            except Exception:
+                pass
+            logger.warning(f"vanish_status_message attempt {attempt+1} failed: {e}")
+            await asyncio.sleep(0.5)
+
+    return False
 
 
 def make_progress_bar(percentage: float, length: int = 10) -> str:
@@ -209,6 +220,14 @@ class AsyncProgressReporter:
             logger.debug(f"Initial progress render error: {e}")
 
         while not self._stop_event.is_set():
+            # If download is nearly complete, stop sending redundant edits so transitions are smooth
+            if self.tracker.percentage >= 99.9 or (self.tracker.total_bytes > 0 and self.tracker.downloaded_bytes >= self.tracker.total_bytes):
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=0.3)
+                except asyncio.TimeoutError:
+                    pass
+                continue
+
             try:
                 now = time.time()
                 if (now - self.tracker.last_update_time) >= self.tracker.min_update_interval:
@@ -427,6 +446,14 @@ class AsyncUploadProgressReporter:
             logger.debug(f"Initial upload card render error: {e}")
 
         while not self._stop_event.is_set():
+            # If upload is nearly complete, stop sending redundant edits so deleteMessage succeeds immediately
+            if self.tracker.percentage >= 99.9 or (self.tracker.total_bytes > 0 and self.tracker.uploaded_bytes >= self.tracker.total_bytes):
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=0.3)
+                except asyncio.TimeoutError:
+                    pass
+                continue
+
             try:
                 now = time.time()
                 if (now - self.tracker.last_update_time) >= self.tracker.min_update_interval:

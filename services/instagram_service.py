@@ -223,23 +223,7 @@ class InstagramService:
         canonical_url = f"https://www.instagram.com/{category}/{identifier}/"
         last_error = None
 
-        # Strategy 1: Direct Embed / Web HTML / GraphQL extraction (best for photos & mixed carousels)
-        try:
-            items = await self._extract_via_embed_and_html(identifier, category)
-            if items:
-                return True, items, None
-        except Exception as e:
-            logger.debug(f"Direct embed/HTML extraction failed for {identifier}: {e}")
-
-        # Strategy 2: Public Cobalt API extraction
-        try:
-            items = await self._extract_via_cobalt(canonical_url)
-            if items:
-                return True, items, None
-        except Exception as e:
-            logger.debug(f"Cobalt extraction failed for {canonical_url}: {e}")
-
-        # Strategy 3: Direct yt-dlp extraction with cookie support
+        # Strategy 1: Direct yt-dlp extraction with CustomInstagramIE (full support for photos, reels, mixed carousels)
         try:
             items, err = await self._extract_via_ytdlp(canonical_url)
             if items:
@@ -248,6 +232,22 @@ class InstagramService:
                 last_error = err
         except Exception as e:
             logger.debug(f"yt-dlp extraction error for {canonical_url}: {e}")
+
+        # Strategy 2: Direct Embed / Web HTML / GraphQL extraction
+        try:
+            items = await self._extract_via_embed_and_html(identifier, category)
+            if items:
+                return True, items, None
+        except Exception as e:
+            logger.debug(f"Direct embed/HTML extraction failed for {identifier}: {e}")
+
+        # Strategy 3: Public Cobalt API extraction
+        try:
+            items = await self._extract_via_cobalt(canonical_url)
+            if items:
+                return True, items, None
+        except Exception as e:
+            logger.debug(f"Cobalt extraction failed for {canonical_url}: {e}")
 
         # Strategy 4: ddinstagram mirror extraction for multi-media carousels
         try:
@@ -261,9 +261,9 @@ class InstagramService:
             return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or requires login session."
 
         if last_error:
-            if "this account is private" in last_error.lower() or "account is private" in last_error.lower():
+            if "this account is private" in last_error.lower() or "account is private" in last_error.lower() or "only available for registered users" in last_error.lower():
                 return False, [], "🔒 This content belongs to a Private Account and cannot be downloaded directly."
-            if "login" in last_error.lower() or "sign in" in last_error.lower() or "checkpoint" in last_error.lower():
+            if "login" in last_error.lower() or "sign in" in last_error.lower() or "checkpoint" in last_error.lower() or "rate-limit for accessing posts anonymously" in last_error.lower():
                 return False, [], "⚠️ Instagram login session required for this post. Add your sessionid or cookies.txt in .env to bypass."
 
         return False, [], "⚠️ Could not retrieve media from this Instagram post. The post may be restricted or requires Instagram cookies."
@@ -513,16 +513,26 @@ class InstagramService:
         return None
 
     async def _extract_via_ytdlp(self, url: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Extract media using yt-dlp native Instagram extractor."""
+        """
+        Extract media using yt-dlp native Instagram extractor with custom product_info
+        interceptor for flawless extraction of photos, reels, and mixed multi-item carousels.
+        """
         loop = asyncio.get_event_loop()
 
         def _sync_ytdlp():
+            captured = []
+            from yt_dlp.extractor.instagram import InstagramIE
+
+            class CustomInstagramIE(InstagramIE):
+                def _extract_product(self, product_info, video_id=None, get_comments=False):
+                    if product_info:
+                        captured.append(product_info)
+                    return super()._extract_product(product_info, video_id, get_comments)
+
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                "extract_flat": False,
                 "skip_download": True,
-                "noplaylist": True,
                 "socket_timeout": 20,
             }
             cookie_file = get_instagram_cookie_file()
@@ -530,60 +540,133 @@ class InstagramService:
                 ydl_opts["cookiefile"] = str(cookie_file)
             if YTDLP_PROXY:
                 ydl_opts["proxy"] = YTDLP_PROXY
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
 
-        try:
-            info = await loop.run_in_executor(None, _sync_ytdlp)
-            if not info:
-                return [], "Could not extract media info."
+            ydl = yt_dlp.YoutubeDL(ydl_opts)
+            ie = CustomInstagramIE(ydl)
+            last_err = None
+            try:
+                ie.extract(url)
+            except Exception as e:
+                last_err = str(e)
 
-            # Case A: Playlist / Carousel entries
-            if "entries" in info and info["entries"]:
+            # If we intercepted raw product_info, extract original HD media directly
+            if captured:
+                p_info = captured[0]
+                if isinstance(p_info, list):
+                    p_info = p_info[0]
+
                 items = []
-                for entry in info["entries"]:
-                    if not entry:
-                        continue
-                    direct_url = entry.get("url")
-                    if not direct_url and entry.get("formats"):
-                        direct_url = entry["formats"][-1].get("url")
-                    if not direct_url and entry.get("thumbnail"):
-                        direct_url = entry.get("thumbnail")
-                    elif not direct_url and entry.get("thumbnails"):
-                        direct_url = entry["thumbnails"][-1].get("url")
-
-                    if direct_url:
-                        is_video = bool(entry.get("vcodec") and entry.get("vcodec") != "none") or (entry.get("ext") == "mp4")
+                carousel = p_info.get("carousel_media")
+                if carousel:
+                    for idx, item in enumerate(carousel):
+                        v_versions = item.get("video_versions")
+                        img_candidates = item.get("image_versions2", {}).get("candidates", [])
+                        if v_versions:
+                            best_vid = max(v_versions, key=lambda v: (v.get("width", 0) * v.get("height", 0)))
+                            items.append({
+                                "type": "video",
+                                "url": best_vid["url"],
+                                "width": best_vid.get("width") or item.get("original_width"),
+                                "height": best_vid.get("height") or item.get("original_height"),
+                            })
+                        elif img_candidates:
+                            best_img = max(img_candidates, key=lambda i: (i.get("width", 0) * i.get("height", 0)))
+                            items.append({
+                                "type": "photo",
+                                "url": best_img["url"],
+                                "width": best_img.get("width") or item.get("original_width"),
+                                "height": best_img.get("height") or item.get("original_height"),
+                            })
+                        elif item.get("display_uri"):
+                            items.append({
+                                "type": "photo",
+                                "url": item["display_uri"],
+                                "width": item.get("original_width"),
+                                "height": item.get("original_height"),
+                            })
+                else:
+                    v_versions = p_info.get("video_versions")
+                    img_candidates = p_info.get("image_versions2", {}).get("candidates", [])
+                    if v_versions:
+                        best_vid = max(v_versions, key=lambda v: (v.get("width", 0) * v.get("height", 0)))
                         items.append({
-                            "type": "video" if is_video else "photo",
-                            "url": direct_url,
-                            "thumbnail_url": entry.get("thumbnail"),
-                            "duration": entry.get("duration"),
-                            "width": entry.get("width"),
-                            "height": entry.get("height")
+                            "type": "video",
+                            "url": best_vid["url"],
+                            "width": best_vid.get("width") or p_info.get("original_width"),
+                            "height": best_vid.get("height") or p_info.get("original_height"),
                         })
+                    elif img_candidates:
+                        best_img = max(img_candidates, key=lambda i: (i.get("width", 0) * i.get("height", 0)))
+                        items.append({
+                            "type": "photo",
+                            "url": best_img["url"],
+                            "width": best_img.get("width") or p_info.get("original_width"),
+                            "height": best_img.get("height") or p_info.get("original_height"),
+                        })
+                    elif p_info.get("display_uri"):
+                        items.append({
+                            "type": "photo",
+                            "url": p_info["display_uri"],
+                            "width": p_info.get("original_width"),
+                            "height": p_info.get("original_height"),
+                        })
+
                 if items:
                     return items, None
 
-            # Case B: Single video or photo
-            direct_url = info.get("url")
-            if not direct_url and info.get("formats"):
-                direct_url = info["formats"][-1].get("url")
-            if not direct_url and info.get("thumbnail"):
-                direct_url = info.get("thumbnail")
+            # Fallback to standard yt-dlp extraction if CustomInstagramIE did not capture product
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info:
+                    if "entries" in info and info["entries"]:
+                        items = []
+                        for entry in info["entries"]:
+                            if not entry:
+                                continue
+                            direct_url = entry.get("url")
+                            if not direct_url and entry.get("formats"):
+                                direct_url = entry["formats"][-1].get("url")
+                            if not direct_url and entry.get("thumbnail"):
+                                direct_url = entry.get("thumbnail")
+                            if direct_url:
+                                is_video = bool(entry.get("vcodec") and entry.get("vcodec") != "none") or (entry.get("ext") == "mp4")
+                                items.append({
+                                    "type": "video" if is_video else "photo",
+                                    "url": direct_url,
+                                    "thumbnail_url": entry.get("thumbnail"),
+                                    "duration": entry.get("duration"),
+                                    "width": entry.get("width"),
+                                    "height": entry.get("height")
+                                })
+                        if items:
+                            return items, None
 
-            if direct_url:
-                is_video = bool(info.get("vcodec") and info.get("vcodec") != "none") or (info.get("ext") == "mp4")
-                return [{
-                    "type": "video" if is_video else "photo",
-                    "url": direct_url,
-                    "thumbnail_url": info.get("thumbnail"),
-                    "duration": info.get("duration"),
-                    "width": info.get("width"),
-                    "height": info.get("height")
-                }], None
+                    direct_url = info.get("url")
+                    if not direct_url and info.get("formats"):
+                        direct_url = info["formats"][-1].get("url")
+                    if not direct_url and info.get("thumbnail"):
+                        direct_url = info.get("thumbnail")
+                    if direct_url:
+                        is_video = bool(info.get("vcodec") and info.get("vcodec") != "none") or (info.get("ext") == "mp4")
+                        return [{
+                            "type": "video" if is_video else "photo",
+                            "url": direct_url,
+                            "thumbnail_url": info.get("thumbnail"),
+                            "duration": info.get("duration"),
+                            "width": info.get("width"),
+                            "height": info.get("height")
+                        }], None
+            except Exception as e:
+                if not last_err:
+                    last_err = str(e)
 
-            return [], "No downloadable stream found in this post."
+            return [], last_err or "No downloadable stream found in this post."
+
+        try:
+            items, err = await loop.run_in_executor(None, _sync_ytdlp)
+            if items:
+                return items, None
+            return [], err
         except Exception as e:
             logger.warning(f"yt-dlp extraction failed for Instagram {url}: {e}")
             return [], f"⚠️ Post extraction failed: {str(e)[:80]}"

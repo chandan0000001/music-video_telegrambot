@@ -243,7 +243,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
         except Exception:
             pass
     finally:
-        await up_reporter.stop(render_final=False)
+        await up_reporter.vanish(delay=0.1)
         queue_manager.release_upload_slot(user_id)
         twitter_service.cleanup_job_dir(job_dir)
 
