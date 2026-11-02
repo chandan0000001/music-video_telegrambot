@@ -418,3 +418,62 @@ def classify_media_restriction(error_text: Optional[str]) -> Optional[Tuple[str,
 
     return None
 
+
+def is_cancel_intent(text: str) -> bool:
+    """Detect if user input expresses an intent to cancel, exit, dismiss, or return to menu.
+
+    Handles English commands (cancel, exit, close, back, stop, quit, menu)
+    and colloquial Hindi / Hinglish dismissal phrases (hata do, hatado, haatado, hatao,
+    parda hata do, parada hatado, ye parda hata do, ye parada hatado, band karo, etc.).
+    """
+    if not text:
+        return False
+
+    clean = text.strip().lower()
+
+    simple_cancels = {
+        "cancel", "exit", "close", "back", "stop", "quit", "menu", "main menu",
+        "/cancel", "/stop", "/exit", "/menu", "/back",
+        "hata do", "hatado", "hatao", "haatado", "hataye", "hataiye",
+        "band karo", "band kar", "band kardo", "radd karo",
+        "parda hata do", "parda hatado", "parda hatao", "parda haatado",
+        "parada hata do", "parada hatado", "parada hatao", "parada haatado",
+        "ye parda hata do", "ye parda hatado", "ye parada hata do", "ye parada hatado", "ye parada haatado",
+        "ye hata do", "ye hatado", "isko hata do", "isko hatado", "ise hata do", "ise hatado",
+        "ye screen hata do", "ye screen hatado", "parada hata", "parda hata"
+    }
+    if clean in simple_cancels:
+        return True
+
+    # Prefix matches like "cancel ...", "close ...", "exit ..."
+    for prefix in ("cancel", "stop", "close", "exit", "back to"):
+        if clean.startswith(prefix + " ") or clean == prefix:
+            return True
+
+    # Normalize punctuation and extra spaces
+    norm = re.sub(r"[^\w\s]", " ", clean)
+    norm = " ".join(norm.split())
+    if norm in simple_cancels:
+        return True
+
+    # Check for dismissal intent in short phrases (<= 5 words)
+    words = norm.split()
+    if 1 <= len(words) <= 5:
+        has_dismiss_action = any(
+            w in ("hata", "hatado", "haatado", "hatao", "band", "radd", "close", "cancel", "stop", "dismiss")
+            for w in words
+        )
+        has_dismiss_target = any(
+            w in ("parda", "parada", "ye", "isko", "ise", "screen", "menu", "prompt", "box")
+            for w in words
+        )
+        has_music_indicator = any(
+            w in ("song", "gaana", "gana", "video", "mp3", "music", "audio", "remix")
+            for w in words
+        )
+        if has_dismiss_action and has_dismiss_target and not has_music_indicator:
+            return True
+
+    return False
+
+

@@ -515,13 +515,13 @@ async def test_youtube_playlist_link_handler_warning():
 
 @pytest.mark.asyncio
 async def test_cancel_phrases_clear_state_and_return_menu():
-    """Verify phrases like 'ye parada hatado', 'cancel', 'back' clear FSM state and show main menu."""
+    """Verify phrases like 'ye parada hatado', 'ye parada haatado', 'cancel', 'back' clear FSM state and show main menu."""
     from handlers.search import handle_user_text
     from handlers.states import UserStates
     from database import db
     await db.init_db()
 
-    for phrase in ["ye parada hatado", "cancel", "hata do", "back", "close"]:
+    for phrase in ["ye parada hatado", "ye parada haatado", "parda hata do", "cancel", "hata do", "back", "close", "band karo"]:
         mock_msg = MagicMock(spec=Message)
         mock_msg.text = phrase
         mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
@@ -535,6 +535,38 @@ async def test_cancel_phrases_clear_state_and_return_menu():
         mock_state.clear.assert_awaited()
         mock_msg.answer.assert_awaited_once()
         assert "Welcome to **Music & Video Bot**" in mock_msg.answer.call_args[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_admin_clear_search_history():
+    """Verify admin /clear_searches command clears database records."""
+    from handlers.admin import cb_clear_searches
+    from database import db
+    import config
+    await db.init_db()
+
+    # Register dummy user and dummy search
+    await db.add_or_update_user(telegram_id=12345, username="tester", first_name="Tester")
+    await db.record_search(12345, "Dummy Test Query")
+    recent = await db.get_recent_searches(5)
+    assert any(s["search_query"] == "Dummy Test Query" for s in recent)
+
+    admin_id = next(iter(config.ADMIN_IDS)) if config.ADMIN_IDS else 12345
+    if not config.ADMIN_IDS:
+        config.ADMIN_IDS = {admin_id}
+
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.from_user = User(id=admin_id, is_bot=False, first_name="Admin")
+    mock_msg.answer = AsyncMock()
+
+    await cb_clear_searches(mock_msg)
+    mock_msg.answer.assert_awaited_once()
+    assert "Successfully cleared" in mock_msg.answer.call_args[0][0]
+
+    # Verify database is now empty of searches
+    recent_after = await db.get_recent_searches(5)
+    assert len(recent_after) == 0
+
 
 
 

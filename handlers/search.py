@@ -19,7 +19,8 @@ from utils.validators import (
     is_youtube_music_url,
     is_youtube_playlist_url,
     is_valid_twitter_url,
-    is_valid_instagram_url
+    is_valid_instagram_url,
+    is_cancel_intent
 )
 from utils.rate_limiter import link_spam_guard
 from handlers.states import UserStates
@@ -181,14 +182,7 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         return
 
     # Check for cancel / dismiss commands or phrases
-    clean_lower = text.lower()
-    cancel_words = {
-        "cancel", "exit", "close", "back", "stop",
-        "hata do", "hatado", "hatao", "ye parda hata do", "ye parada hatado",
-        "parda hata do", "parda hatado", "band karo", "radd karo",
-        "menu", "main menu"
-    }
-    if clean_lower in cancel_words or any(clean_lower.startswith(w + " ") for w in ("cancel", "stop", "close", "exit")):
+    if is_cancel_intent(text):
         await state.clear()
         user_name = user.first_name if user else "Music Lover"
         from handlers.start import get_welcome_text

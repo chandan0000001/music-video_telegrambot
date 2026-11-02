@@ -14,7 +14,7 @@ from services.media_service import media_service
 from keyboards.quality_keyboard import get_youtube_music_keyboard
 from keyboards.main_menu import get_ytmusic_menu_keyboard, get_back_to_main_keyboard
 from keyboards.search_keyboard import get_search_results_keyboard
-from utils.validators import is_valid_youtube_url, is_youtube_music_url, is_youtube_playlist_url
+from utils.validators import is_valid_youtube_url, is_youtube_music_url, is_youtube_playlist_url, is_cancel_intent
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,19 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
     """Common processing for YouTube Music input (URL or search query)."""
     user = message.from_user
     user_id = user.id if user else 0
+
+    # Check for cancel / dismiss commands or phrases
+    if is_cancel_intent(text):
+        await state.clear()
+        user_name = user.first_name if user else "Music Lover"
+        from handlers.start import get_welcome_text
+        from keyboards.main_menu import get_main_menu_keyboard
+        await message.answer(
+            text=get_welcome_text(user_name),
+            reply_markup=get_main_menu_keyboard(user_id),
+            parse_mode="Markdown"
+        )
+        return
 
     # Case 1: Input is a URL
     if text.startswith("http://") or text.startswith("https://"):

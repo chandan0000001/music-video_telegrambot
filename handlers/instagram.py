@@ -32,7 +32,8 @@ from keyboards.main_menu import get_back_to_main_keyboard, get_instagram_menu_ke
 from utils.validators import (
     is_valid_instagram_url,
     extract_instagram_info,
-    parse_instagram_input
+    parse_instagram_input,
+    is_cancel_intent
 )
 from utils.rate_limiter import link_spam_guard
 from utils.queue_manager import queue_manager
@@ -510,6 +511,18 @@ async def handle_instagram_waiting_input(message: Message, state: FSMContext) ->
     """Handle text input when in waiting_for_instagram state."""
     text = (message.text or "").strip()
     if not text:
+        return
+
+    if is_cancel_intent(text):
+        await state.clear()
+        user_name = message.from_user.first_name if message.from_user else "User"
+        from handlers.start import get_welcome_text
+        from keyboards.main_menu import get_main_menu_keyboard
+        await message.answer(
+            text=get_welcome_text(user_name),
+            reply_markup=get_main_menu_keyboard(message.from_user.id if message.from_user else 0),
+            parse_mode="Markdown"
+        )
         return
 
     parsed = parse_instagram_input(text)

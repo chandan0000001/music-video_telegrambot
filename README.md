@@ -163,8 +163,10 @@ flowchart TD
    - Prevents link flooding by requiring 6 seconds between link submissions.
    - Triggers friendly warnings: *"⚠️ Ladle, don't spam here! Otherwise you will be banned."*
    - Repeated abuse (3 violations within 30 seconds) triggers an automated **10-minute temporary ban**.
-5. **🧹 Automated Temp Storage Cleaner:**
+5. **🧹 Automated Temp Storage Cleaner & Pre-Flight Disk Guard:**
    - Background worker executes every 15 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
+   - Pre-flight storage check verifies available disk space before starting heavy media conversions to prevent out-of-disk crashes.
+   - Live server storage diagnostics on the Admin Dashboard display exact available free space, percentage, and system disk usage.
 6. **📸 Instagram & 🐦 X (Twitter) Multi-Media Downloaders:**
    - **Instagram Suite:**
      - **Reels & Posts:** High-definition single MP4 videos, full-resolution untouched photos, and complete carousels (all items in the album, no artificial limit).
@@ -722,21 +724,21 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 103 automated test cases will execute:
+All 104 automated test cases will execute:
 ```text
 tests/test_all_buttons.py ...                                            [  2%]
 tests/test_coupons_and_referrals.py ..........                           [ 12%]
 tests/test_database.py ....                                              [ 16%]
-tests/test_handlers.py ...................                               [ 34%]
-tests/test_instagram.py .............                                    [ 47%]
+tests/test_handlers.py ....................                              [ 35%]
+tests/test_instagram.py .............                                    [ 48%]
 tests/test_progress.py ...............                                   [ 62%]
-tests/test_queue_and_spam.py .......                                     [ 68%]
-tests/test_rate_limiter.py ...                                           [ 71%]
+tests/test_queue_and_spam.py .......                                     [ 69%]
+tests/test_rate_limiter.py ...                                           [ 72%]
 tests/test_services.py ...........                                       [ 82%]
 tests/test_twitter.py ........                                           [ 90%]
 tests/test_validators.py ..........                                      [100%]
 
-============================= 103 passed in 11.11s =============================
+============================= 104 passed in 10.24s =============================
 ```
 
 ---

@@ -286,6 +286,13 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
+    async def clear_search_history(self) -> int:
+        """Clear search history table and return count of deleted records."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute("DELETE FROM search_history")
+            await conn.commit()
+            return cur.rowcount
+
     async def get_statistics(self) -> dict[str, Any]:
         """Aggregate all dashboard metrics."""
         async with self._get_connection() as conn:

@@ -77,13 +77,11 @@ async def render_admin_dashboard_text() -> str:
     )
 
     from utils.disk_cleaner import get_disk_usage_stats
-    from config import get_cookie_file, INSTAGRAM_SESSION_ID, YTDLP_PROXY
+    from config import get_cookie_file
 
     disk = get_disk_usage_stats()
     cookie_f = get_cookie_file()
     yt_cookie_status = f"✅ Active ({cookie_f.stat().st_size / 1024:.1f} KB)" if (cookie_f and cookie_f.exists()) else "⚪ None"
-    ig_cookie_status = "✅ Active" if INSTAGRAM_SESSION_ID else "⚪ None"
-    proxy_status = "✅ Connected (WARP)" if YTDLP_PROXY else "⚪ Direct"
 
     return (
         "🛡️ <b>Administrator Control Dashboard</b>\n\n"
@@ -92,11 +90,10 @@ async def render_admin_dashboard_text() -> str:
         f"🔍 <b>Total Searches Performed:</b> <code>{stats['total_searches']}</code>\n"
         f"✅ <b>Successful Downloads:</b> <code>{stats['successful_downloads']}</code>\n"
         f"❌ <b>Failed Downloads:</b> <code>{stats['failed_downloads']}</code>\n\n"
-        "🖥️ <b>Server & Storage Diagnostics:</b>\n"
-        f"  • <b>Disk Storage:</b> <code>{disk['free_gb']:.1f} GB / {disk['total_gb']:.1f} GB Free ({disk['free_percent']:.0f}%)</code>\n"
-        f"  • <b>YouTube Cookies:</b> <code>{yt_cookie_status}</code>\n"
-        f"  • <b>Instagram Session:</b> <code>{ig_cookie_status}</code>\n"
-        f"  • <b>Proxy / WARP:</b> <code>{proxy_status}</code>\n\n"
+        "🖥️ <b>Server Storage & Health:</b>\n"
+        f"  • <b>Available Free Space:</b> <code>{disk['free_gb']:.1f} GB ({disk['free_percent']:.0f}% Free) 🟢</code>\n"
+        f"  • <b>Used Disk:</b> <code>{disk['used_gb']:.1f} GB / {disk['total_gb']:.1f} GB (System & Apps)</code>\n"
+        f"  • <b>YouTube Cookies:</b> <code>{yt_cookie_status}</code>\n\n"
         f"🔥 <b>Top Searched Songs:</b>\n{top_searches_str}\n\n"
         f"👤 <b>Recently Joined Users:</b>\n{recent_users_str}\n\n"
         "⚡ <i>Use the buttons below or commands for detailed operations.</i>"
@@ -245,7 +242,10 @@ async def cmd_or_cb_searchlogs(event: Message | CallbackQuery) -> None:
 
     text = "\n".join(lines)
     keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")]]
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🧹 Clear Search Logs", callback_data="admin:clear_searches")],
+            [InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")]
+        ]
     )
 
     if isinstance(event, CallbackQuery):
@@ -258,7 +258,32 @@ async def cmd_or_cb_searchlogs(event: Message | CallbackQuery) -> None:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-@router.message(Command("downloadlogs"))
+@router.message(Command("clear_searches"))
+@router.callback_query(F.data == "admin:clear_searches")
+async def cb_clear_searches(event: Message | CallbackQuery) -> None:
+    """Clear all search logs (admin only)."""
+    user = event.from_user
+    if not user or not is_admin(user.id):
+        if isinstance(event, CallbackQuery):
+            await event.answer("Access Denied.", show_alert=True)
+        else:
+            await event.answer("⛔ Access Denied.")
+        return
+
+    count = await db.clear_search_history()
+    confirm_text = f"✅ <b>Successfully cleared {count} search history records!</b>"
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 Back to Dashboard", callback_data="admin:dashboard")]]
+    )
+    if isinstance(event, CallbackQuery):
+        await event.answer("Search history cleared!", show_alert=True)
+        if event.message:
+            try:
+                await event.message.edit_text(confirm_text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception:
+                pass
+    else:
+        await event.answer(confirm_text, reply_markup=keyboard, parse_mode="HTML")
 @router.callback_query(F.data == "admin:downloadlogs")
 async def cmd_or_cb_downloadlogs(event: Message | CallbackQuery) -> None:
     """Display recent download activities."""

@@ -18,7 +18,7 @@ from aiogram.fsm.context import FSMContext
 from database import db
 from services.twitter_service import twitter_service
 from keyboards.main_menu import get_twitter_menu_keyboard, get_back_to_main_keyboard
-from utils.validators import is_valid_twitter_url
+from utils.validators import is_valid_twitter_url, is_cancel_intent
 from utils.rate_limiter import link_spam_guard
 from utils.queue_manager import queue_manager
 from utils.progress import (
@@ -270,6 +270,18 @@ async def handle_twitter_waiting_input(message: Message, state: FSMContext) -> N
     """Handle text input when in waiting_for_twitter state."""
     text = (message.text or "").strip()
     if not text:
+        return
+
+    if is_cancel_intent(text):
+        await state.clear()
+        user_name = message.from_user.first_name if message.from_user else "User"
+        from handlers.start import get_welcome_text
+        from keyboards.main_menu import get_main_menu_keyboard
+        await message.answer(
+            text=get_welcome_text(user_name),
+            reply_markup=get_main_menu_keyboard(message.from_user.id if message.from_user else 0),
+            parse_mode="Markdown"
+        )
         return
 
     if is_valid_twitter_url(text):
