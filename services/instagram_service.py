@@ -15,7 +15,11 @@ import aiohttp
 import yt_dlp
 
 from config import TEMP_DIR, get_instagram_cookie_file, INSTAGRAM_SESSION_ID, YTDLP_PROXY
-from utils.validators import extract_instagram_info, is_valid_instagram_url
+from utils.validators import (
+    extract_instagram_info,
+    is_valid_instagram_url,
+    classify_media_restriction
+)
 
 logger = logging.getLogger(__name__)
 
@@ -261,8 +265,9 @@ class InstagramService:
             return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or requires login session."
 
         if last_error:
-            if "this account is private" in last_error.lower() or "account is private" in last_error.lower() or "only available for registered users" in last_error.lower():
-                return False, [], "🔒 This content belongs to a Private Account and cannot be downloaded directly."
+            classified = classify_media_restriction(last_error)
+            if classified:
+                return False, [], classified[1]
             if "login" in last_error.lower() or "sign in" in last_error.lower() or "checkpoint" in last_error.lower() or "rate-limit for accessing posts anonymously" in last_error.lower():
                 return False, [], "⚠️ Instagram login session required for this post. Add your sessionid or cookies.txt in .env to bypass."
 

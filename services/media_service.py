@@ -22,7 +22,12 @@ from config import (
     SUPPORTED_VIDEO_RESOLUTIONS
 )
 from services.ffmpeg_service import ffmpeg_service
-from utils.validators import extract_youtube_id, sanitize_filename, validate_media_limits
+from utils.validators import (
+    extract_youtube_id,
+    sanitize_filename,
+    validate_media_limits,
+    classify_media_restriction
+)
 from services.music_service import format_duration
 
 logger = logging.getLogger(__name__)
@@ -122,6 +127,9 @@ class MediaService:
             raw_info = await asyncio.to_thread(self._sync_extract_info, canonical_url)
         except Exception as e:
             logger.error(f"Failed to extract info for {canonical_url}: {e}")
+            classified = classify_media_restriction(str(e))
+            if classified:
+                return False, None, classified[1]
             return False, None, f"Could not retrieve video information: {str(e)[:120]}"
 
         if not raw_info:

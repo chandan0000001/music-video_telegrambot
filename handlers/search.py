@@ -219,7 +219,18 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         success, info, err = await media_service.get_media_info(text)
 
         if not success or not info:
-            await inspect_msg.edit_text(f"❌ **Error:** {err or 'Could not process URL.'}", parse_mode="Markdown")
+            if err and ("access restricted" in err.lower() or "access notice" in err.lower()):
+                await inspect_msg.edit_text(
+                    err,
+                    reply_markup=get_back_to_main_keyboard(),
+                    parse_mode="HTML"
+                )
+            else:
+                await inspect_msg.edit_text(
+                    f"❌ **Error:** {err or 'Could not process URL.'}",
+                    reply_markup=get_back_to_main_keyboard(),
+                    parse_mode="Markdown"
+                )
             return
 
         video_id = info["id"]

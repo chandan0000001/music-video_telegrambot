@@ -224,14 +224,9 @@ async def _execute_instagram_download(message: Message, url: str) -> None:
 
     success, media_items, err_msg = await instagram_service.get_instagram_media(url)
     if not success or not media_items:
-        if err_msg and "private account" in err_msg.lower() and "login" not in err_msg.lower() and "session" not in err_msg.lower():
-            notice = (
-                "🔒 <b>Private Account Notice:</b>\n"
-                "This media belongs to a private Instagram account and cannot be downloaded.\n\n"
-                "💡 <i>Tip: Send their @username or profile link to view their HD profile picture and bio!</i>"
-            )
+        if err_msg and ("access restricted" in err_msg.lower() or "private category" in err_msg.lower() or "members-only" in err_msg.lower()):
             await status_msg.edit_text(
-                notice,
+                err_msg,
                 reply_markup=get_back_to_main_keyboard(),
                 parse_mode="HTML"
             )

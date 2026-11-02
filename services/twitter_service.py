@@ -14,7 +14,11 @@ import aiohttp
 import yt_dlp
 
 from config import TEMP_DIR
-from utils.validators import extract_twitter_info, is_valid_twitter_url
+from utils.validators import (
+    extract_twitter_info,
+    is_valid_twitter_url,
+    classify_media_restriction
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,11 @@ class TwitterService:
             async with aiohttp.ClientSession() as session:
                 async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=12)) as resp:
                     if resp.status == 404:
-                        return False, [], "⚠️ This X/Twitter post was not found, has been deleted, or is from a private/locked account."
+                        return False, [], (
+                            "🔒 <b>Access Restricted: Private Category</b>\n\n"
+                            "⚠️ This X (Twitter) post was not found, has been deleted, or belongs to a <b>Private / Protected</b> account.\n\n"
+                            "<i>Private posts cannot be accessed or downloaded without authorized follower access.</i>"
+                        )
 
                     if resp.status == 200:
                         data = await resp.json()
@@ -192,6 +200,9 @@ class TwitterService:
                 }], None
         except Exception as e:
             logger.error(f"yt-dlp fallback error for {url}: {e}")
+            classified = classify_media_restriction(str(e))
+            if classified:
+                return False, [], classified[1]
             return False, [], f"⚠️ Failed to process X post: {str(e)[:80]}"
 
     async def download_file(self, url: str, dest_path: Path, tracker: Optional[Any] = None) -> bool:

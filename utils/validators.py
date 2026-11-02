@@ -277,3 +277,96 @@ def validate_media_limits(duration_seconds: Optional[int], filesize_bytes: Optio
         return False, f"Estimated file size ({curr_mb:.1f} MB) exceeds maximum upload limit of {max_mb} MB."
 
     return True, None
+
+
+def classify_media_restriction(error_text: Optional[str]) -> Optional[Tuple[str, str]]:
+    """
+    Classify restricted media errors (Members-only, Private, Age-restricted, Live/Premiere)
+    across YouTube, Instagram, and X (Twitter) into friendly warning messages.
+
+    Returns:
+        Tuple of (category_id, html_formatted_warning) or None if not a recognized restriction.
+    """
+    if not error_text:
+        return None
+
+    err = str(error_text).lower()
+
+    # 1. Members-Only / Subscriber-Only Category
+    members_keywords = [
+        "member",
+        "members-only",
+        "members only",
+        "members on level",
+        "join this channel",
+        "channel membership",
+        "subscriber-only",
+        "subscribers only",
+        "exclusive to subscribers",
+        "close friends",
+        "sponsorship"
+    ]
+    if any(k in err for k in members_keywords):
+        notice = (
+            "🔒 <b>Access Restricted: Members-Only Category</b>\n\n"
+            "⚠️ This content belongs to a <b>Members-Only</b> or <b>Subscriber-Only</b> category.\n\n"
+            "<i>We cannot access or download this media because it requires an active paid channel membership or subscription that cannot be accessed.</i>"
+        )
+        return "members_only", notice
+
+    # 2. Private Account / Private Video Category
+    private_keywords = [
+        "private video",
+        "this video is private",
+        "private account",
+        "account is private",
+        "this account is private",
+        "only available for registered users who follow this account",
+        "only available for registered users",
+        "tweets are protected",
+        "protected tweet",
+        "account is protected"
+    ]
+    if any(k in err for k in private_keywords):
+        notice = (
+            "🔒 <b>Access Restricted: Private Category</b>\n\n"
+            "⚠️ This media belongs to a <b>Private</b> account or video that cannot be accessed.\n\n"
+            "<i>Private content is restricted by the owner and cannot be downloaded without authorized personal access.</i>"
+        )
+        return "private", notice
+
+    # 3. Age-Restricted Content
+    age_keywords = [
+        "confirm your age",
+        "age-restricted",
+        "age restricted",
+        "inappropriate for some users",
+        "age_verification_required",
+        "age_check_required"
+    ]
+    if any(k in err for k in age_keywords):
+        notice = (
+            "🔞 <b>Access Restricted: Age-Gated Content</b>\n\n"
+            "⚠️ This video is <b>Age-Restricted</b> by the platform.\n\n"
+            "<i>Anonymous playback is restricted for age-gated videos and cannot be bypassed.</i>"
+        )
+        return "age_restricted", notice
+
+    # 4. Live Stream / Upcoming Premiere
+    live_keywords = [
+        "live event will begin",
+        "premiere will begin",
+        "is currently live",
+        "waiting for live stream",
+        "offline live"
+    ]
+    if any(k in err for k in live_keywords):
+        notice = (
+            "⏳ <b>Access Notice: Live Event / Upcoming Premiere</b>\n\n"
+            "⚠️ This media is an ongoing live stream or an upcoming premiere.\n\n"
+            "<i>Please wait until the broadcast ends and archives as a regular video before downloading.</i>"
+        )
+        return "live_premiere", notice
+
+    return None
+

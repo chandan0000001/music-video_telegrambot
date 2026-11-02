@@ -105,9 +105,18 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
 
     success, media_items, err_msg = await twitter_service.get_tweet_media(url)
     if not success or not media_items:
+        if err_msg and ("access restricted" in err_msg.lower() or "private category" in err_msg.lower() or "members-only" in err_msg.lower()):
+            await status_msg.edit_text(
+                err_msg,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+            return
+
         await status_msg.edit_text(
             f"❌ {err_msg or 'Could not retrieve media from this post.'}",
-            parse_mode="Markdown"
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
         )
         return
 
