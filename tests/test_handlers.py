@@ -513,6 +513,30 @@ async def test_youtube_playlist_link_handler_warning():
     assert "Playlists Are Currently Not Supported" in mock_msg.answer.call_args[0][0]
 
 
+@pytest.mark.asyncio
+async def test_cancel_phrases_clear_state_and_return_menu():
+    """Verify phrases like 'ye parada hatado', 'cancel', 'back' clear FSM state and show main menu."""
+    from handlers.search import handle_user_text
+    from handlers.states import UserStates
+    from database import db
+    await db.init_db()
+
+    for phrase in ["ye parada hatado", "cancel", "hata do", "back", "close"]:
+        mock_msg = MagicMock(spec=Message)
+        mock_msg.text = phrase
+        mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
+        mock_msg.answer = AsyncMock()
+
+        mock_state = MagicMock()
+        mock_state.clear = AsyncMock()
+        mock_state.get_state = AsyncMock(return_value=UserStates.waiting_for_search_query)
+
+        await handle_user_text(mock_msg, mock_state)
+        mock_state.clear.assert_awaited()
+        mock_msg.answer.assert_awaited_once()
+        assert "Welcome to **Music & Video Bot**" in mock_msg.answer.call_args[1]["text"]
+
+
 
 
 

@@ -234,39 +234,36 @@ class InstagramService:
         canonical_url = f"https://www.instagram.com/{category}/{identifier}/"
         last_error = None
 
-        # Strategy 1: Direct yt-dlp extraction with CustomInstagramIE (full support for photos, reels, mixed carousels)
-        try:
-            items, err = await self._extract_via_ytdlp(canonical_url)
-            if items:
-                return True, items, None
-            if err:
-                last_error = err
-        except Exception as e:
-            logger.debug(f"yt-dlp extraction error for {canonical_url}: {e}")
+        # Smart Adaptive Routing for Ultra-Fast Extraction (< 1-2 seconds):
+        # • For posts ("p"): run lightweight public embed HTML/JSON extraction FIRST (0.3s) to prevent 15s yt-dlp photo timeouts.
+        # • For reels/tv ("reel", "tv"): run native yt-dlp first (with fast 6s socket timeout) for high-bitrate video streams.
+        is_reel = category in ("reel", "reels", "tv")
+        if is_reel:
+            ordered_extractors = [
+                ("yt-dlp", lambda: self._extract_via_ytdlp(canonical_url)),
+                ("embed", lambda: self._extract_via_embed_and_html(identifier, category)),
+                ("cobalt", lambda: self._extract_via_cobalt(canonical_url))
+            ]
+        else:
+            ordered_extractors = [
+                ("embed", lambda: self._extract_via_embed_and_html(identifier, category)),
+                ("yt-dlp", lambda: self._extract_via_ytdlp(canonical_url)),
+                ("cobalt", lambda: self._extract_via_cobalt(canonical_url))
+            ]
 
-        # Strategy 2: Direct Embed / Web HTML / GraphQL extraction
-        try:
-            items = await self._extract_via_embed_and_html(identifier, category)
-            if items:
-                return True, items, None
-        except Exception as e:
-            logger.debug(f"Direct embed/HTML extraction failed for {identifier}: {e}")
-
-        # Strategy 3: Public Cobalt API extraction
-        try:
-            items = await self._extract_via_cobalt(canonical_url)
-            if items:
-                return True, items, None
-        except Exception as e:
-            logger.debug(f"Cobalt extraction failed for {canonical_url}: {e}")
-
-        # Strategy 4: ddinstagram mirror extraction for multi-media carousels
-        try:
-            items = await self._extract_via_ddinstagram(identifier)
-            if items:
-                return True, items, None
-        except Exception as e:
-            logger.debug(f"ddinstagram extraction failed for {identifier}: {e}")
+        for name, extractor in ordered_extractors:
+            try:
+                res = await extractor()
+                if isinstance(res, tuple):
+                    items, err = res
+                    if err:
+                        last_error = err
+                else:
+                    items = res
+                if items:
+                    return True, items, None
+            except Exception as e:
+                logger.debug(f"Instagram extraction strategy ({name}) error for {canonical_url}: {e}")
 
         if category in ("story", "highlight"):
             return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or requires login session."
@@ -303,7 +300,7 @@ class InstagramService:
         async with aiohttp.ClientSession(connector=connector) as session:
             for fetch_url in urls_to_try:
                 try:
-                    async with session.get(fetch_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    async with session.get(fetch_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
                         if resp.status != 200:
                             continue
                         content_type = resp.headers.get("Content-Type", "")
@@ -441,6 +438,12 @@ class InstagramService:
             items.append({"type": "photo", "url": og_img.group(1).replace("&amp;", "&")})
             return items
 
+        # 4. EmbeddedMediaImage in public embed
+        embed_img = re.search(r'class=[\"\']EmbeddedMediaImage[\"\'][^\>]*src=[\"\']([^\"\']+)[\"\']', html_text)
+        if embed_img:
+            items.append({"type": "photo", "url": embed_img.group(1).replace("&amp;", "&")})
+            return items
+
         return items
 
     async def _extract_via_ddinstagram(self, shortcode: str) -> Optional[List[Dict[str, Any]]]:
@@ -495,7 +498,7 @@ class InstagramService:
                         f"{base_api}/",
                         json=payload,
                         headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=8)
+                        timeout=aiohttp.ClientTimeout(total=3.5)
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json()
@@ -545,7 +548,7 @@ class InstagramService:
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
-                "socket_timeout": 20,
+                "socket_timeout": 6,
             }
             cookie_file = get_instagram_cookie_file()
             if cookie_file:
@@ -703,7 +706,7 @@ class InstagramService:
 
                     with open(dest_path, "wb") as f:
                         while True:
-                            chunk = await resp.content.read(64 * 1024)
+                            chunk = await resp.content.read(256 * 1024)
                             if not chunk:
                                 break
                             f.write(chunk)
@@ -1013,7 +1016,7 @@ class InstagramService:
                         f"{base_api}/",
                         json=payload,
                         headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=8)
+                        timeout=aiohttp.ClientTimeout(total=3.5)
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json()

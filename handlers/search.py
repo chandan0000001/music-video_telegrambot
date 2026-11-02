@@ -180,6 +180,26 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         await message.answer("🚫 *You have been restricted from using this service.*")
         return
 
+    # Check for cancel / dismiss commands or phrases
+    clean_lower = text.lower()
+    cancel_words = {
+        "cancel", "exit", "close", "back", "stop",
+        "hata do", "hatado", "hatao", "ye parda hata do", "ye parada hatado",
+        "parda hata do", "parda hatado", "band karo", "radd karo",
+        "menu", "main menu"
+    }
+    if clean_lower in cancel_words or any(clean_lower.startswith(w + " ") for w in ("cancel", "stop", "close", "exit")):
+        await state.clear()
+        user_name = user.first_name if user else "Music Lover"
+        from handlers.start import get_welcome_text
+        from keyboards.main_menu import get_main_menu_keyboard
+        await message.answer(
+            text=get_welcome_text(user_name),
+            reply_markup=get_main_menu_keyboard(user.id if user else 0),
+            parse_mode="Markdown"
+        )
+        return
+
     # Check if input looks like a URL
     if text.startswith("http://") or text.startswith("https://"):
         # Anti-Spam Link Cooldown Check
