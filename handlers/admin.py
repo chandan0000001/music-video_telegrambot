@@ -583,7 +583,7 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
             LIMIT 30
             """
         )
-        subscribers = await cur.fetchall()
+        subscribers = [dict(r) for r in await cur.fetchall()]
 
         # Count active users per plan
         cur = await conn.execute(
@@ -713,7 +713,7 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
             LIMIT 15
             """
         )
-        orders = await cur.fetchall()
+        orders = [dict(r) for r in await cur.fetchall()]
 
     lines = [
         "💳 <b>Recent Completed Payment Orders</b>\n",
