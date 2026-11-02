@@ -26,7 +26,8 @@ from utils.progress import (
     UploadProgressTracker,
     AsyncProgressReporter,
     AsyncUploadProgressReporter,
-    TrackedFSInputFile
+    TrackedFSInputFile,
+    vanish_status_message
 )
 from handlers.states import UserStates
 
@@ -222,20 +223,18 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
                 await message.answer_media_group(media=media_group)
 
         # Record download in database
-        await db.add_download(
+        await db.record_download(
             telegram_id=user_id,
+            media_title=title,
+            source=url,
             media_type="twitter_media",
-            format_name="original",
-            quality=f"{len(downloaded)} items",
+            selected_quality="Original HD",
+            selected_format="original",
             status="completed"
         )
 
-        # Delete the progress status message cleanly
-        try:
-            await asyncio.sleep(0.6)
-            await status_msg.delete()
-        except Exception:
-            pass
+        # Vanish the progress status message cleanly
+        await up_reporter.vanish(delay=0.3)
 
     except Exception as e:
         logger.error(f"Error delivering Twitter media to user {user_id}: {e}", exc_info=True)
@@ -244,7 +243,7 @@ async def _execute_twitter_download(message: Message, url: str) -> None:
         except Exception:
             pass
     finally:
-        await up_reporter.stop()
+        await up_reporter.stop(render_final=False)
         queue_manager.release_upload_slot(user_id)
         twitter_service.cleanup_job_dir(job_dir)
 

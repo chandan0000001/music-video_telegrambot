@@ -131,7 +131,7 @@ class MTProtoService:
             return False
         finally:
             if upload_reporter:
-                await upload_reporter.stop()
+                await upload_reporter.stop(render_final=False)
 
     async def send_audio(
         self,
@@ -184,7 +184,7 @@ class MTProtoService:
             return False
         finally:
             if upload_reporter:
-                await upload_reporter.stop()
+                await upload_reporter.stop(render_final=False)
 
 
 mtproto_service = MTProtoService()

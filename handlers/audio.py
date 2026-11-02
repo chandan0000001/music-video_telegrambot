@@ -17,7 +17,7 @@ from keyboards.quality_keyboard import (
 )
 from utils.rate_limiter import concurrency_manager
 from utils.queue_manager import queue_manager
-from utils.progress import DownloadProgressTracker, AsyncProgressReporter
+from utils.progress import DownloadProgressTracker, AsyncProgressReporter, vanish_status_message
 from utils.task_registry import task_registry
 
 logger = logging.getLogger(__name__)
@@ -202,10 +202,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
 
         if sent:
             await db.update_download_status(download_id, "completed")
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
+            await vanish_status_message(status_msg, delay=0.3)
         else:
             await db.update_download_status(download_id, "failed")
             await telegram_service.update_status_with_keyboard(

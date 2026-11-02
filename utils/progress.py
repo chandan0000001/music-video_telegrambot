@@ -10,9 +10,53 @@ from typing import Optional, AsyncGenerator
 import aiofiles
 from aiogram import Bot
 from aiogram.types import FSInputFile, Message, InlineKeyboardMarkup
-from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter, TelegramBadRequest
 
 logger = logging.getLogger(__name__)
+
+
+async def vanish_status_message(message: Optional[Message], delay: float = 0.2) -> bool:
+    """
+    Safely vanish (delete) a status or progress message from Telegram.
+    Handles rate-limiting (TelegramRetryAfter) and suppresses errors if
+    the message was already deleted or cannot be found.
+
+    Args:
+        message: The aiogram Message object to delete.
+        delay: Optional seconds to wait before deletion (e.g. 0.2s) to allow
+               Telegram clients to render media arrival smoothly.
+
+    Returns:
+        bool: True if deleted or already gone, False on unexpected error.
+    """
+    if not message:
+        return True
+
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+    try:
+        await message.delete()
+        return True
+    except TelegramRetryAfter as e:
+        try:
+            await asyncio.sleep(e.retry_after + 0.1)
+            await message.delete()
+            return True
+        except Exception:
+            return False
+    except TelegramBadRequest as e:
+        err_msg = str(e).lower()
+        if "message to delete not found" in err_msg or "message can't be deleted" in err_msg:
+            return True
+        logger.debug(f"vanish_status_message bad request: {e}")
+        return False
+    except TelegramAPIError as e:
+        logger.debug(f"vanish_status_message TelegramAPIError: {e}")
+        return False
+    except Exception as e:
+        logger.debug(f"vanish_status_message unexpected error: {e}")
+        return False
 
 
 def make_progress_bar(percentage: float, length: int = 10) -> str:
@@ -144,6 +188,7 @@ class AsyncProgressReporter:
         self.reply_markup = reply_markup
         self._stop_event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
+        self._is_stopped = False
 
     async def _run(self) -> None:
         # Initial render immediately so user sees 0% meter without delay
@@ -183,23 +228,34 @@ class AsyncProgressReporter:
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
-    async def stop(self) -> None:
+    async def stop(self, render_final: bool = False) -> None:
+        """Stop the reporter background loop. Optionally render 100% completion card."""
+        if self._is_stopped:
+            return
+        self._is_stopped = True
         self._stop_event.set()
-        if self._task:
+        if self._task and not self._task.done():
+            self._task.cancel()
             try:
                 await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if render_final:
+            try:
+                self.tracker.percentage = 100.0
+                if self.tracker.total_bytes > 0:
+                    self.tracker.downloaded_bytes = self.tracker.total_bytes
+                card = self.tracker.render_download_card()
+                if card != self.tracker.last_rendered_text:
+                    await self.message.edit_text(card, parse_mode="Markdown", reply_markup=self.reply_markup)
             except Exception:
                 pass
-        # Final render: ensure 100% is displayed
-        try:
-            self.tracker.percentage = 100.0
-            if self.tracker.total_bytes > 0:
-                self.tracker.downloaded_bytes = self.tracker.total_bytes
-            card = self.tracker.render_download_card()
-            if card != self.tracker.last_rendered_text:
-                await self.message.edit_text(card, parse_mode="Markdown", reply_markup=self.reply_markup)
-        except Exception:
-            pass
+
+    async def vanish(self, delay: float = 0.2) -> bool:
+        """Stop progress reporting immediately (no final edit) and delete the status message."""
+        await self.stop(render_final=False)
+        return await vanish_status_message(self.message, delay=delay)
 
 
 class UploadProgressTracker:
@@ -338,6 +394,7 @@ class AsyncUploadProgressReporter:
         self.tracker = tracker
         self._stop_event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
+        self._is_stopped = False
 
     async def _run(self) -> None:
         # Initial render immediately so user sees 0% upload meter right away
@@ -373,20 +430,31 @@ class AsyncUploadProgressReporter:
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
-    async def stop(self) -> None:
+    async def stop(self, render_final: bool = False) -> None:
+        """Stop the upload reporter background loop. Optionally render 100% completion card."""
+        if self._is_stopped:
+            return
+        self._is_stopped = True
         self._stop_event.set()
-        if self._task:
+        if self._task and not self._task.done():
+            self._task.cancel()
             try:
                 await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if render_final:
+            try:
+                self.tracker.percentage = 100.0
+                if self.tracker.total_bytes > 0:
+                    self.tracker.uploaded_bytes = self.tracker.total_bytes
+                card = self.tracker.render_upload_card()
+                if card != self.tracker.last_rendered_text:
+                    await self.message.edit_text(card, parse_mode="Markdown")
             except Exception:
                 pass
-        # Final render: ensure 100% upload is displayed
-        try:
-            self.tracker.percentage = 100.0
-            if self.tracker.total_bytes > 0:
-                self.tracker.uploaded_bytes = self.tracker.total_bytes
-            card = self.tracker.render_upload_card()
-            if card != self.tracker.last_rendered_text:
-                await self.message.edit_text(card, parse_mode="Markdown")
-        except Exception:
-            pass
+
+    async def vanish(self, delay: float = 0.2) -> bool:
+        """Stop upload reporting immediately (no final edit) and delete the status message."""
+        await self.stop(render_final=False)
+        return await vanish_status_message(self.message, delay=delay)

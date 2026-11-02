@@ -152,7 +152,7 @@ class TelegramService:
                         )
                     finally:
                         if upload_reporter:
-                            await upload_reporter.stop()
+                            await upload_reporter.stop(render_final=False)
                 return True
 
         upload_tracker = None
@@ -209,7 +209,7 @@ class TelegramService:
             return False
         finally:
             if upload_reporter:
-                await upload_reporter.stop()
+                await upload_reporter.stop(render_final=False)
             stop_action.set()
             await action_task
 
@@ -315,7 +315,7 @@ class TelegramService:
                         )
                     finally:
                         if upload_reporter:
-                            await upload_reporter.stop()
+                            await upload_reporter.stop(render_final=False)
                 return True
 
         file_size_bytes = file_path.stat().st_size
@@ -353,7 +353,7 @@ class TelegramService:
             return True
         except TelegramEntityTooLarge:
             if upload_reporter:
-                await upload_reporter.stop()
+                await upload_reporter.stop(render_final=False)
             logger.warning(f"TelegramEntityTooLarge: {file_path} ({file_size_mb:.1f} MB) rejected by cloud server.")
             if status_message:
                 await TelegramService.update_status(
@@ -400,7 +400,7 @@ class TelegramService:
                         return True
                     finally:
                         if comp_reporter:
-                            await comp_reporter.stop()
+                            await comp_reporter.stop(render_final=False)
             except Exception as comp_err:
                 logger.error(f"Fallback compression failed: {comp_err}")
 
@@ -428,7 +428,7 @@ class TelegramService:
             return False
         finally:
             if upload_reporter:
-                await upload_reporter.stop()
+                await upload_reporter.stop(render_final=False)
             stop_action.set()
             await action_task
 
