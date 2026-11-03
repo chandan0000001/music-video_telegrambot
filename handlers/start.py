@@ -45,7 +45,7 @@ HELP_TEXT = (
     "• **Audio:** MP3 (128k, 192k, 320k), M4A (AAC), Lossless WAV\n"
     "• **Video:** MP4 from 144p up to 1080p Full HD\n"
     "• **Social Media:** Original HD Reels, Carousels, Photos & GIFs\n\n"
-    "💡 *Core Commands:* `/start` • `/ytmusic` • `/instagram` • `/twitter` • `/history`"
+    "💡 *Core Commands:* `/start` • `/ytmusic` • `/instagram` • `/twitter` • `/history` • `/privacy`"
 )
 
 ABOUT_TEXT = (
@@ -199,6 +199,53 @@ async def cmd_about(message: Message) -> None:
         reply_markup=get_back_to_main_keyboard(),
         parse_mode="Markdown"
     )
+
+
+PRIVACY_TEXT = (
+    "🛡️ <b>Privacy Policy (@songsuperzxbot)</b>\n\n"
+    "We are committed to absolute data privacy and minimal information collection:\n\n"
+    "🔒 <b>Zero Permanent Media Retention:</b>\n"
+    "All downloaded videos, reels, and audio tracks are processed in temporary folders and <b>permanently deleted immediately</b> after delivery to your chat.\n\n"
+    "👤 <b>Data We Store:</b>\n"
+    "• Numerical Telegram ID & Name (to manage download quotas & VIP status)\n"
+    "• Recent search & download history (viewable only by you in /history)\n"
+    "• 12-digit UPI UTR for payment validation (NO bank credentials or PINs)\n\n"
+    "🚫 <b>What We Never Do:</b>\n"
+    "• We never sell, rent, or trade your data with third parties\n"
+    "• We never read or inspect messages in group chats\n"
+    "• We never send unsolicited spam or marketing broadcasts\n\n"
+    "🗑️ <b>Data Deletion:</b>\n"
+    "Contact @coder_chandan anytime to request permanent erasure of your account data."
+)
+
+
+@router.message(Command("privacy", "policy"))
+async def cmd_privacy(message: Message) -> None:
+    """Handle /privacy or /policy command."""
+    await message.answer(
+        text=PRIVACY_TEXT,
+        reply_markup=get_back_to_main_keyboard(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "menu:privacy")
+async def cb_privacy_menu(callback: CallbackQuery) -> None:
+    """Display privacy policy from menu."""
+    if callback.message:
+        try:
+            await callback.message.edit_text(
+                text=PRIVACY_TEXT,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+        except Exception:
+            await callback.message.answer(
+                text=PRIVACY_TEXT,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:main")

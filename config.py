@@ -239,8 +239,8 @@ SUBSCRIPTION_PLANS = {
         "description": os.getenv("DESC_TIER_ULTRA", "80 HD/2K Videos/day + VIP Queue Priority")
     },
     "max": {
-        "name": "Max",
-        "badge": "👑 Max VIP Pass",
+        "name": "MAX VIP",
+        "badge": "👑 MAX VIP",
         "price": _safe_int(os.getenv("PRICE_TIER_MAX"), 799),
         "days": _safe_int(os.getenv("DAYS_TIER_MAX"), 365),
         "daily_limit": _safe_int(os.getenv("LIMIT_TIER_MAX_DAILY"), 150),

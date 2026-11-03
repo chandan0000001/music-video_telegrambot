@@ -837,6 +837,20 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
+def get_tier_badge(plan_tier: str) -> str:
+    """Format official plan badges matching dashboard style."""
+    key = (plan_tier or "").lower().strip()
+    badges = {
+        "max": "👑 MAX VIP",
+        "ultra": "⚡ ULTRA PASS",
+        "pro": "🚀 PRO PASS",
+        "go": "⚡ GO PASS",
+        "weekly": "⚡ GO PASS",
+        "normal": "🟢 NORMAL (Free)"
+    }
+    return badges.get(key, f"💎 {key.upper()} PASS")
+
+
 @router.message(Command("sub_activate", "sub_active"))
 async def cmd_admin_activate_sub(message: Message) -> None:
     """Admin command to grant or override a subscription: /sub_activate <user_id> <plan> [days]"""
@@ -845,35 +859,56 @@ async def cmd_admin_activate_sub(message: Message) -> None:
         await message.answer("🚫 Access Denied.")
         return
 
-    args = (message.text or "").split()[1:]
-    if len(args) < 2:
+    raw_args = (message.text or "").split()[1:]
+    if len(raw_args) < 2:
         await message.answer(
             "📖 <b>Usage:</b> <code>/sub_activate &lt;user_id&gt; &lt;plan&gt; [days]</code>\n\n"
-            "• <b>Plans:</b> <code>go</code>, <code>pro</code>, <code>ultra</code>, <code>max</code>\n"
+            "• <b>Plans:</b> <code>go</code>, <code>pro</code>, <code>ultra</code>, <code>max</code> (or <code>MAX VIP</code>)\n"
             "• <i>Examples:</i>\n"
             "  <code>/sub_activate 123456789 pro</code>\n"
+            "  <code>/sub_activate 123456789 MAX VIP</code>\n"
             "  <code>/sub_activate 123456789 max 365</code>",
             parse_mode="HTML"
         )
         return
 
     try:
-        target_uid = int(args[0])
+        target_uid = int(raw_args[0])
     except ValueError:
         await message.answer("❌ Invalid User ID. Must be numeric Telegram ID.")
         return
 
-    plan_key = args[1].lower()
-    custom_days = int(args[2]) if len(args) > 2 and args[2].isdigit() else None
+    # Parse plan name and optional days flexibly (supporting 'MAX VIP', 'max vip 365', etc.)
+    rem_tokens = raw_args[1:]
+    rem_text = " ".join(rem_tokens).lower()
+
+    custom_days = None
+    for tok in rem_tokens:
+        if tok.isdigit():
+            custom_days = int(tok)
+            break
+
+    if "max" in rem_text:
+        plan_key = "max"
+    elif "ultra" in rem_text:
+        plan_key = "ultra"
+    elif "pro" in rem_text:
+        plan_key = "pro"
+    elif "go" in rem_text or "weekly" in rem_text:
+        plan_key = "go"
+    else:
+        plan_key = rem_tokens[0].lower()
 
     await db.add_or_update_user(target_uid, username=None, first_name=None)
     result = await db.activate_subscription(target_uid, plan_key, custom_days)
 
+    plan_display = get_tier_badge(result.get("plan_tier"))
     exp_ist = format_ist(result.get("expiry_date"))
+
     await message.answer(
         f"✅ <b>Subscription Activated!</b>\n\n"
         f"• <b>User ID:</b> <code>{target_uid}</code>\n"
-        f"• <b>Plan:</b> <b>{result['plan_tier'].capitalize()} Pass</b>\n"
+        f"• <b>Plan:</b> <b>{plan_display}</b>\n"
         f"• <b>Daily HD Quota:</b> <code>{result['daily_video_limit']} videos/day</code>\n"
         f"• <b>Valid Duration:</b> <code>{result['days']} days</code>\n"
         f"• <b>Expires At:</b> <code>{exp_ist}</code>",
@@ -885,10 +920,10 @@ async def cmd_admin_activate_sub(message: Message) -> None:
             chat_id=target_uid,
             text=(
                 f"🎉 <b>Subscription Activated by Administrator!</b>\n\n"
-                f"You have been upgraded to the <b>{result['plan_tier'].capitalize()} Pass</b>!\n"
+                f"You have been upgraded to <b>{plan_display}</b>!\n"
                 f"• Daily HD Video Quota: <b>{result['daily_video_limit']} videos/day</b>\n"
                 f"• Valid Until: <code>{exp_ist}</code>\n\n"
-                f"Enjoy unlimited high-speed downloads!"
+                f"Enjoy high-speed downloads!"
             ),
             parse_mode="HTML"
         )
@@ -977,9 +1012,10 @@ async def cmd_admin_sub_status(message: Message) -> None:
         return
 
     exp_ist = format_ist(sub.get("expiry_date"))
+    plan_display = get_tier_badge(sub.get("plan_tier"))
     await message.answer(
         f"👑 <b>Subscription Status for User <code>{target_uid}</code></b>\n\n"
-        f"• <b>Tier:</b> <code>{sub['plan_tier'].capitalize()} Pass</code>\n"
+        f"• <b>Tier:</b> <b>{plan_display}</b>\n"
         f"• <b>Daily HD Limit:</b> <code>{sub['daily_limit']} videos/day</code>\n"
         f"• <b>Used Today:</b> <code>{sub['today_used']} videos</code>\n"
         f"• <b>Remaining Today:</b> <code>{sub['today_remaining']} videos</code>\n"
