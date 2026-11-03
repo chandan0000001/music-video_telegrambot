@@ -275,6 +275,31 @@ async def cb_dosearch(callback: CallbackQuery, state: FSMContext) -> None:
         await execute_search(callback.message, query, state, user_id=user_id, edit_message=True)
 
 
+COMMON_TLDS = frozenset({
+    "com", "org", "net", "edu", "gov", "mil", "io", "co", "in", "us", "uk", "ca",
+    "de", "fr", "jp", "au", "ru", "ch", "it", "nl", "se", "no", "es", "br", "be",
+    "ly", "to", "tv", "me", "xyz", "app", "dev", "ai", "gg", "cc", "is", "fm",
+    "link", "online", "site", "live", "store", "tech", "club", "space"
+})
+
+
+def looks_like_url(text: str) -> bool:
+    """Detect whether input is a web URL or domain rather than a song title."""
+    t = text.strip()
+    if " " in t:
+        return False
+    low = t.lower()
+    if low.startswith(("http://", "https://", "www.")):
+        return True
+    if low.startswith(("youtube.com/", "youtu.be/", "m.youtube.com/", "music.youtube.com/", "instagram.com/", "twitter.com/", "x.com/")):
+        return True
+    domain_part = low.split("/")[0]
+    parts = domain_part.split(".")
+    if len(parts) >= 2 and parts[-1] in COMMON_TLDS:
+        return True
+    return False
+
+
 @router.message(F.text)
 async def handle_user_text(message: Message, state: FSMContext) -> None:
     """Handle general text input, URLs, and active FSM states."""
@@ -310,28 +335,32 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         )
         return
 
-    # Check if input looks like a URL
-    if text.startswith("http://") or text.startswith("https://"):
+    # Check if input looks like a URL or web domain
+    if looks_like_url(text):
+        normalized_url = text.strip()
+        if not normalized_url.lower().startswith(("http://", "https://")):
+            normalized_url = "https://" + normalized_url
+
         # Anti-Spam Link Cooldown Check
         is_spam, spam_msg = await link_spam_guard.check_link_spam(user.id if user else 0)
         if is_spam:
             await message.answer(spam_msg, parse_mode="Markdown")
             return
 
-        if is_valid_twitter_url(text):
+        if is_valid_twitter_url(normalized_url):
             await state.clear()
             from handlers.twitter import _execute_twitter_download
-            await _execute_twitter_download(message, text, check_spam=False)
+            await _execute_twitter_download(message, normalized_url, check_spam=False)
             return
 
-        if is_valid_instagram_url(text):
+        if is_valid_instagram_url(normalized_url):
             await state.clear()
             from handlers.instagram import _execute_instagram_download
-            await _execute_instagram_download(message, text, check_spam=False)
+            await _execute_instagram_download(message, normalized_url, check_spam=False)
             return
 
         # Check if URL is a YouTube Playlist link
-        if is_youtube_playlist_url(text):
+        if is_youtube_playlist_url(normalized_url):
             await state.clear()
             await message.answer(
                 "⚠️ <b>Playlists Are Currently Not Supported</b>\n\n"
@@ -343,10 +372,11 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
             return
 
         # Strict YouTube & YouTube Music security validation
-        if not is_valid_youtube_url(text):
+        if not is_valid_youtube_url(normalized_url):
             await message.answer(
                 "Jaannii gharr akke marunga valid link bhejj 😂👊\n\n"
                 "💡 Sirf **YouTube**, **Instagram**, ya **X (Twitter)** ke links bhejo!",
+                reply_markup=get_back_to_main_keyboard(),
                 parse_mode="Markdown"
             )
             return
@@ -354,14 +384,14 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         # It is a valid YouTube or YouTube Music URL
         await state.clear()
         
-        is_yt_music = is_youtube_music_url(text)
+        is_yt_music = is_youtube_music_url(normalized_url)
         status_label = "🎧 <b>Inspecting YouTube Music track...</b>" if is_yt_music else "🔍 <b>Inspecting media availability...</b>"
         inspect_msg = await message.answer(status_label, parse_mode="HTML")
 
         try:
-            success, info, err = await media_service.get_media_info(text)
+            success, info, err = await media_service.get_media_info(normalized_url)
         except Exception as e:
-            logger.exception(f"Unexpected error in get_media_info for {text}: {e}")
+            logger.exception(f"Unexpected error in get_media_info for {normalized_url}: {e}")
             success, info, err = False, None, f"Could not inspect media: {str(e)[:100]}"
 
         if not success or not info:
