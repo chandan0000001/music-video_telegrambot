@@ -167,7 +167,7 @@ flowchart TD
    - Background worker executes every 15 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
    - Pre-flight storage check verifies available disk space before starting heavy media conversions to prevent out-of-disk crashes.
    - Live server storage diagnostics on the Admin Dashboard display exact available free space, percentage, and system disk usage.
-6. **📸 Instagram & 🐦 X (Twitter) Multi-Media Downloaders:**
+6. **📸 Instagram & 𝕏 X (Twitter) Multi-Media Downloaders:**
    - **Instagram Suite:**
      - **Reels & Posts:** High-definition single MP4 videos, full-resolution untouched photos, and complete carousels (all items in the album, no artificial limit).
      - **Music & Audio Links:** Paste any Instagram audio link (`instagram.com/reels/audio/<id>`, `/audio/<id>`, or `/music/<id>`) to extract and receive native high-fidelity Telegram audio with full ID3 tags (artist, title, and cover artwork).
@@ -205,6 +205,13 @@ flowchart TD
       - `/coupon revoke <CODE>`
       - `/coupon list`
     - Complete edge-case handling for expired codes, max usage caps, duplicate redemptions, and admin revocation.
+12. **🎭 Compact Companion Animations (<700 KB):**
+    - Entertains users during media download/upload pipelines with lightweight animated GIFs.
+    - Dynamically discovered from `assets/animations/` without hardcoded filename dependencies.
+    - All companion animations are strictly compressed under 700 KB to eliminate mobile latency.
+    - Dispatched silently (`disable_notification=True`) and cleanly vanished automatically the instant media delivery completes.
+13. **🇮🇳 Universal GMT+5:30 (IST) Timezone Formatting:**
+    - All admin search/download logs, user history records, coupon redemptions, and subscription expiration notices are automatically converted and presented in Indian Standard Time (`DD-MM-YYYY hh:mm AM/PM IST`).
 
 ---
 
@@ -645,7 +652,7 @@ You can run the bot 24/7 under your own user account and have it automatically b
 #### Option 2: System-wide Service (Requires Sudo)
 1. Create a systemd service file:
    ```bash
-   sudo nano /etc/systemd/system/music-bot.service
+   sudo nano /etc/systemd/system/musicbot.service
    ```
 
 2. Add the following content:
@@ -670,12 +677,12 @@ You can run the bot 24/7 under your own user account and have it automatically b
 3. Enable and start:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl enable --now music-bot
+   sudo systemctl enable --now musicbot.service
    ```
 
 4. Check logs:
    ```bash
-   journalctl -u music-bot -f
+   journalctl -u musicbot.service -f
    ```
 
 ---
@@ -750,7 +757,12 @@ tests/test_validators.py ..........                                      [100%]
 **A:** Open `config.py` and replace `PASTE_NEW_REGENERATED_BOT_TOKEN_HERE` with your actual token from `@BotFather`.
 
 ### Q: How does the bot send files larger than 50 MB on Telegram?
-**A:** If a video's natural size exceeds 49.5 MB, the bot automatically triggers FFmpeg's target-bitrate compression engine to compress the video down to ~48 MB so Telegram's cloud API accepts it without failing.
+**A:** The bot features dual upload routing:
+1. **Native Telegram MTProto (up to 2000 MB / 2 GB):** By providing `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in `.env`, the bot uploads files directly to Telegram Data Centers with zero compression loss up to 2 GB!
+2. **Lossless Zero-Reencode Chunking (Fallback):** If MTProto is not configured and the video exceeds 48 MB, the bot splits the stream into 40–45 MB MP4 parts without re-encoding to preserve 100% original visual quality.
+
+### Q: Why does YouTube download in 2 parts (video + audio) on AWS and upload in 1 part?
+**A:** YouTube uses DASH adaptive streaming, serving high-definition video (silent) and audio (no video) as two separate streams. On your AWS server, `yt-dlp` downloads both parts, then instantly merges them with FFmpeg into one complete `.mp4` file (`merge_output_format: "mp4"`). Since the merged file (e.g. 115 MB) is under the 2000 MB (2 GB) MTProto limit, the bot uploads the complete video as a single file directly to the user!
 
 ### Q: How do I provide `cookies.txt` when deploying to Cloud Providers (Railway, Render, VPS)?
 **A:** Because `cookies.txt` is in `.gitignore`, there are two convenient ways to supply it:
