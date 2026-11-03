@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database import db
 from handlers.states import AdminStates
+from utils.time_utils import format_ist
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_router")
@@ -232,7 +233,7 @@ async def cmd_or_cb_searchlogs(event: Message | CallbackQuery) -> None:
     logs = await db.get_recent_searches(limit=20)
     lines = ["🔍 <b>Recent Search Logs (Last 20):</b>\n"]
     for item in logs:
-        time_str = item.get("searched_at", "").split(".")[0]
+        time_str = format_ist(item.get("searched_at"))
         uname = f"@{html.escape(item['username'])}" if item.get("username") else f"ID:<code>{item['telegram_id']}</code>"
         q_str = html.escape(item.get("search_query", ""))
         lines.append(f"• <code>{q_str}</code> by {uname} at <i>{time_str}</i>")
@@ -301,7 +302,7 @@ async def cmd_or_cb_downloadlogs(event: Message | CallbackQuery) -> None:
     logs = await db.get_recent_downloads(limit=20)
     lines = ["📦 <b>Recent Download Logs (Last 20):</b>\n"]
     for item in logs:
-        time_str = item.get("created_at", "").split(".")[0]
+        time_str = format_ist(item.get("created_at"))
         uname = f"@{html.escape(item['username'])}" if item.get("username") else f"ID:<code>{item['telegram_id']}</code>"
         status_icon = "✅" if item["status"] == "completed" else ("❌" if item["status"] == "failed" else "⏳")
         title_str = html.escape(item.get("media_title", "Unknown"))
@@ -666,7 +667,7 @@ async def cmd_or_cb_plan_subscribers(event: Message | CallbackQuery) -> None:
             plan_name = tier_badges.get(plan_raw, plan_raw.upper())
             status = "🟢 <b>ACTIVE</b>" if sub.get("is_active") else "🔴 <b>EXPIRED</b>"
             raw_exp = sub.get("expiry_date") or ""
-            exp = raw_exp.split(".")[0] if raw_exp else "Never"
+            exp = format_ist(raw_exp) if raw_exp else "Never"
             lines.append(
                 f"{idx}. 👤 <b>{name}</b> ({uname})\n"
                 f"   ├ 🆔 <b>User ID:</b> <code>{sub['telegram_id']}</code>\n"
@@ -852,13 +853,14 @@ async def cmd_admin_activate_sub(message: Message) -> None:
     await db.add_or_update_user(target_uid, username=None, first_name=None)
     result = await db.activate_subscription(target_uid, plan_key, custom_days)
 
+    exp_ist = format_ist(result.get("expiry_date"))
     await message.answer(
         f"✅ <b>Subscription Activated!</b>\n\n"
         f"• <b>User ID:</b> <code>{target_uid}</code>\n"
         f"• <b>Plan:</b> <b>{result['plan_tier'].capitalize()} Pass</b>\n"
         f"• <b>Daily HD Quota:</b> <code>{result['daily_video_limit']} videos/day</code>\n"
         f"• <b>Valid Duration:</b> <code>{result['days']} days</code>\n"
-        f"• <b>Expires At:</b> <code>{result['expiry_date']} UTC</code>",
+        f"• <b>Expires At:</b> <code>{exp_ist}</code>",
         parse_mode="HTML"
     )
 
@@ -869,7 +871,7 @@ async def cmd_admin_activate_sub(message: Message) -> None:
                 f"🎉 <b>Subscription Activated by Administrator!</b>\n\n"
                 f"You have been upgraded to the <b>{result['plan_tier'].capitalize()} Pass</b>!\n"
                 f"• Daily HD Video Quota: <b>{result['daily_video_limit']} videos/day</b>\n"
-                f"• Valid Until: <code>{result['expiry_date']} UTC</code>\n\n"
+                f"• Valid Until: <code>{exp_ist}</code>\n\n"
                 f"Enjoy unlimited high-speed downloads!"
             ),
             parse_mode="HTML"
@@ -958,13 +960,14 @@ async def cmd_admin_sub_status(message: Message) -> None:
         )
         return
 
+    exp_ist = format_ist(sub.get("expiry_date"))
     await message.answer(
         f"👑 <b>Subscription Status for User <code>{target_uid}</code></b>\n\n"
         f"• <b>Tier:</b> <code>{sub['plan_tier'].capitalize()} Pass</code>\n"
         f"• <b>Daily HD Limit:</b> <code>{sub['daily_limit']} videos/day</code>\n"
         f"• <b>Used Today:</b> <code>{sub['today_used']} videos</code>\n"
         f"• <b>Remaining Today:</b> <code>{sub['today_remaining']} videos</code>\n"
-        f"• <b>Expires At:</b> <code>{sub['expiry_date']} UTC</code>\n"
+        f"• <b>Expires At:</b> <code>{exp_ist}</code>\n"
         f"• <b>Status:</b> 🟢 Active",
         parse_mode="HTML"
     )

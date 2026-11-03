@@ -21,6 +21,7 @@ from keyboards.quality_keyboard import (
     get_video_quality_keyboard,
 )
 from handlers.states import UserStates
+from utils.time_utils import get_current_ist_str
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment_router")
@@ -451,7 +452,7 @@ async def cb_admin_reject(callback: CallbackQuery) -> None:
 
 async def notify_admin_payment_proof(bot, order: dict, utr: str, user_name: str, user_id: int, auto_verified: bool = True) -> None:
     """Send permanent proof receipt to administrator for logging and user support."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now_str = get_current_ist_str()
     plan_desc = format_plan_name(order.get("order_type", ""), order.get("quality", "720p"))
     status_label = "✅ 100% Automated Instant Verification" if auto_verified else "✅ Admin Force-Approved"
 

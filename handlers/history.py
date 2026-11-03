@@ -11,6 +11,7 @@ from aiogram.filters import Command
 
 from database import db
 from keyboards.main_menu import get_back_to_main_keyboard
+from utils.time_utils import format_ist
 
 logger = logging.getLogger(__name__)
 router = Router(name="history_router")
@@ -27,7 +28,7 @@ async def render_user_history(user_id: int) -> str:
     lines.append("🔍 <b>Recent Searches:</b>")
     if searches:
         for idx, s in enumerate(searches, start=1):
-            date_part = s.get("searched_at", "").split(".")[0]
+            date_part = format_ist(s.get("searched_at"))
             q_clean = html.escape(s.get("search_query", ""))
             lines.append(f"{idx}. <code>{q_clean}</code> — <i>{date_part}</i>")
     else:
@@ -36,7 +37,7 @@ async def render_user_history(user_id: int) -> str:
     lines.append("\n📦 <b>Recent Downloads:</b>")
     if downloads:
         for idx, d in enumerate(downloads, start=1):
-            date_part = d.get("created_at", "").split(".")[0]
+            date_part = format_ist(d.get("created_at"))
             status_icon = "✅" if d["status"] == "completed" else ("❌" if d["status"] == "failed" else "⏳")
             media_type = d.get("media_type", "media").capitalize()
             quality = d.get("selected_quality", "")

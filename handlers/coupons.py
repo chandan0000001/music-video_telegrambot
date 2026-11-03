@@ -15,6 +15,7 @@ from config import ADMIN_IDS, SUBSCRIPTION_PLANS
 from database import db
 from handlers.states import UserStates, AdminStates
 from keyboards.main_menu import get_back_to_main_keyboard
+from utils.time_utils import format_ist
 
 logger = logging.getLogger(__name__)
 router = Router(name="coupons_router")
@@ -160,6 +161,7 @@ async def process_coupon_redemption(message: Message, code_input: str, state: FS
     plan_title = plan_meta.get("badge", f"{plan_tier.upper()} Pass")
     days = info.get("days", 7)
     exp_str = info.get("expiry_date", "N/A")
+    exp_ist = format_ist(exp_str) if exp_str != "N/A" else "N/A"
     daily_limit = info.get("daily_video_limit", 20)
 
     success_text = (
@@ -167,7 +169,7 @@ async def process_coupon_redemption(message: Message, code_input: str, state: FS
         f"🎟️ <b>Coupon Code:</b> <code>{clean_code}</code>\n"
         f"💎 <b>Subscription:</b> {plan_title}\n"
         f"⏳ <b>Days Granted:</b> <b>+{days} Days</b>\n"
-        f"📅 <b>Valid Until:</b> <code>{exp_str} UTC</code>\n"
+        f"📅 <b>Valid Until:</b> <code>{exp_ist}</code>\n"
         f"🎬 <b>Daily HD Limit:</b> <code>{daily_limit} videos/day</code>\n\n"
         "🚀 <i>Your VIP benefits are immediately active. Enjoy high-speed downloads!</i>"
     )

@@ -724,21 +724,22 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 108 automated test cases will execute:
+All 113 automated test cases will execute:
 ```text
 tests/test_all_buttons.py ...                                            [  2%]
-tests/test_coupons_and_referrals.py ..........                           [ 12%]
+tests/test_coupons_and_referrals.py ..........                           [ 11%]
 tests/test_database.py ....                                              [ 15%]
-tests/test_handlers.py ........................                          [ 37%]
-tests/test_instagram.py .............                                    [ 50%]
-tests/test_progress.py ...............                                   [ 63%]
-tests/test_queue_and_spam.py .......                                     [ 70%]
-tests/test_rate_limiter.py ...                                           [ 73%]
-tests/test_services.py ...........                                       [ 83%]
-tests/test_twitter.py ........                                           [ 90%]
+tests/test_handlers.py ........................                          [ 36%]
+tests/test_instagram.py .............                                    [ 47%]
+tests/test_progress.py ...............                                   [ 61%]
+tests/test_queue_and_spam.py .......                                     [ 67%]
+tests/test_rate_limiter.py ...                                           [ 69%]
+tests/test_services.py ...........                                       [ 79%]
+tests/test_time_utils.py .....                                           [ 84%]
+tests/test_twitter.py ........                                           [ 91%]
 tests/test_validators.py ..........                                      [100%]
 
-============================= 108 passed in 10.45s =============================
+============================= 113 passed in 10.78s =============================
 ```
 
 ---
