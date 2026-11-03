@@ -56,6 +56,17 @@ async def cb_choose_audio_format(callback: CallbackQuery) -> None:
                 reply_markup=get_audio_format_keyboard(video_id),
                 parse_mode="Markdown"
             )
+
+        # Track session with 10-min TTL
+        user_id = callback.from_user.id if callback.from_user else 0
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=callback.message.message_id,
+            video_id=video_id
+        )
     await callback.answer()
 
 
@@ -96,6 +107,17 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
             )
         except Exception:
             pass
+
+        # Track session with 10-min TTL
+        user_id = callback.from_user.id if callback.from_user else 0
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=callback.message.message_id,
+            video_id=video_id
+        )
 
 
 @router.callback_query(F.data.startswith("adl:"))

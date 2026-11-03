@@ -217,3 +217,27 @@ async def test_vip_exempt_from_spam_guard():
         # Immediate 2nd request -> still allowed for VIP!
         blocked2, _ = await guard.check_link_spam(vip_user)
         assert blocked2 is False
+
+
+@pytest.mark.asyncio
+async def test_selection_session_10min_expiry():
+    """Verify selection sessions expire after 10 minutes and notify user."""
+    from utils.selection_session import SelectionSessionManager
+    import time
+
+    mgr = SelectionSessionManager(ttl_seconds=600.0)
+    bot = MagicMock()
+    bot.edit_message_text = AsyncMock()
+
+    # Register session
+    await mgr.register_session(bot, user_id=9999, chat_id=123, message_id=456, video_id="vid_test")
+    assert mgr.check_validity(user_id=9999, video_id="vid_test")[0] is True
+
+    # Simulate 11 minutes later (660 seconds)
+    mgr._active_sessions[9999]["created_at"] = time.time() - 660.0
+
+    # User clicks after 11 minutes -> expired!
+    valid, reason = mgr.check_validity(user_id=9999, video_id="vid_test")
+    assert valid is False
+    assert "10 minutes" in reason
+    assert "/start" in reason

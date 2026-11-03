@@ -64,14 +64,16 @@ async def on_startup(bot: Bot) -> None:
     else:
         logger.warning("⚠️ YouTube Cookies: No valid cookies.txt found! Put cookies.txt in ~/music_bot/ or ~/")
 
-    # 4. Storage Cleaner & Queue Manager Startup
+    # 4. Storage Cleaner, Session Expiry Cleaner & Queue Manager Startup
     from utils.disk_cleaner import purge_stale_temp_files, periodic_disk_cleaner_task
     from utils.queue_manager import queue_manager
+    from utils.selection_session import selection_session_manager
     purge_stale_temp_files()
     asyncio.create_task(periodic_disk_cleaner_task())
     asyncio.create_task(daily_quota_reset_task())
+    asyncio.create_task(selection_session_manager.periodic_cleaner_task())
     queue_manager.start_worker()
-    logger.info("Storage Cleaner, Quota Reset Cron, and Concurrency Queue Manager started.")
+    logger.info("Storage Cleaner, Quota Reset Cron, Session Expiry Watcher, and Queue Manager started.")
 
     bot_info = await bot.get_me()
     logger.info(f"Bot connected: @{bot_info.username} (ID: {bot_info.id})")

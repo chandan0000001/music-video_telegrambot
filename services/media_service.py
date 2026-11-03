@@ -143,7 +143,13 @@ class MediaService:
         canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
         try:
-            raw_info = await asyncio.to_thread(self._sync_extract_info, canonical_url)
+            raw_info = await asyncio.wait_for(
+                asyncio.to_thread(self._sync_extract_info, canonical_url),
+                timeout=25.0
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Extraction timed out after 25s for {canonical_url}")
+            return False, None, "⏱ <b>Request Timed Out:</b> YouTube took too long to respond (>25s). Please try again or hit /start."
         except Exception as e:
             logger.error(f"Failed to extract info for {canonical_url}: {e}")
             classified = classify_media_restriction(str(e))

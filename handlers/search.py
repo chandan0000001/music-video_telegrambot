@@ -1,6 +1,7 @@
 """
 Music Search & YouTube Link Processing Handler
 """
+import html
 import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -277,10 +278,14 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         await state.clear()
         
         is_yt_music = is_youtube_music_url(text)
-        status_label = "🎧 *Inspecting YouTube Music track...*" if is_yt_music else "🔍 *Inspecting media availability...*"
-        inspect_msg = await message.answer(status_label, parse_mode="Markdown")
+        status_label = "🎧 <b>Inspecting YouTube Music track...</b>" if is_yt_music else "🔍 <b>Inspecting media availability...</b>"
+        inspect_msg = await message.answer(status_label, parse_mode="HTML")
 
-        success, info, err = await media_service.get_media_info(text)
+        try:
+            success, info, err = await media_service.get_media_info(text)
+        except Exception as e:
+            logger.exception(f"Unexpected error in get_media_info for {text}: {e}")
+            success, info, err = False, None, f"Could not inspect media: {str(e)[:100]}"
 
         if not success or not info:
             if err and ("access restricted" in err.lower() or "access notice" in err.lower()):
@@ -291,43 +296,59 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
                 )
             else:
                 await inspect_msg.edit_text(
-                    f"❌ **Error:** {err or 'Could not process URL.'}",
+                    f"❌ <b>Error:</b> {html.escape(err or 'Could not process URL.')}\n\n"
+                    f"👉 Hit <b>/start</b> to begin again or send another link.",
                     reply_markup=get_back_to_main_keyboard(),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
             return
 
         video_id = info["id"]
+        safe_title = html.escape(info.get("title", "Unknown Title"))
+        safe_artist = html.escape(info.get("artist", "Unknown Artist"))
+        safe_duration = html.escape(info.get("duration_str", "00:00"))
 
         if is_yt_music:
             # Dedicated YouTube Music Fast-Download Interface
             desc = (
-                f"🎧 **YouTube Music Track**\n\n"
-                f"🎵 **Title:** `{info['title']}`\n"
-                f"👤 **Artist:** {info['artist']}\n"
-                f"⏱ **Duration:** `{info['duration_str']}`\n\n"
-                f"⚡ **Tap a quality below to start downloading instantly:**"
+                f"🎧 <b>YouTube Music Track</b>\n\n"
+                f"🎵 <b>Title:</b> <code>{safe_title}</code>\n"
+                f"👤 <b>Artist:</b> {safe_artist}\n"
+                f"⏱ <b>Duration:</b> <code>{safe_duration}</code>\n\n"
+                f"⚡ <b>Tap a quality below to start downloading instantly:</b>"
             )
-            await inspect_msg.edit_text(
-                text=desc,
-                reply_markup=get_youtube_music_keyboard(video_id),
-                parse_mode="Markdown"
-            )
+            keyboard = get_youtube_music_keyboard(video_id)
         else:
             # Standard YouTube Interface
             desc = (
-                f"🎬 **{info['title']}**\n"
-                f"👤 *Channel:* {info['artist']}\n"
-                f"⏱ *Duration:* `{info['duration_str']}`\n\n"
+                f"🎬 <b>{safe_title}</b>\n"
+                f"👤 <i>Channel:</i> {safe_artist}\n"
+                f"⏱ <i>Duration:</i> <code>{safe_duration}</code>\n\n"
+                f"Select your desired download type below:"
+            )
+            keyboard = get_media_type_keyboard(video_id)
+
+        try:
+            await inspect_msg.edit_text(
+                text=desc,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit inspect_msg with HTML: {e}. Falling back to plain text.")
+            plain_desc = (
+                f"🎬 {info.get('title', 'Unknown Title')}\n"
+                f"👤 Channel: {info.get('artist', 'Unknown Artist')}\n"
+                f"⏱ Duration: {info.get('duration_str', '00:00')}\n\n"
                 f"Select your desired download type below:"
             )
             await inspect_msg.edit_text(
-                text=desc,
-                reply_markup=get_media_type_keyboard(video_id),
-                parse_mode="Markdown"
+                text=plain_desc,
+                reply_markup=keyboard,
+                parse_mode=None
             )
 
-        # Track quality selection session with 30-min TTL and link supersession
+        # Track quality selection session with 10-min TTL and link supersession
         from utils.selection_session import selection_session_manager
         await selection_session_manager.register_session(
             bot=message.bot,

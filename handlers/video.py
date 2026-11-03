@@ -1,6 +1,7 @@
 """
 Video Download and FFmpeg Remuxing Handler
 """
+import html
 import asyncio
 import logging
 from aiogram import Router, F
@@ -77,28 +78,59 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     sub = await db.get_user_subscription(user_id)
     has_active_sub = bool(sub and sub.get("is_active") and sub.get("today_remaining", 0) > 0)
 
-    admin_banner = "👑 **Admin Access:** All resolutions unlocked (Free & Unlimited)\n" if is_admin else (
-        f"⚡ **VIP Pass Active ({sub['plan_tier'].capitalize()}):** {sub['today_remaining']}/{sub['daily_limit']} HD videos remaining today\n" if has_active_sub else ""
+    admin_banner = "👑 <b>Admin Access:</b> All resolutions unlocked (Free &amp; Unlimited)\n" if is_admin else (
+        f"⚡ <b>VIP Pass Active ({html.escape(sub['plan_tier'].capitalize())}):</b> {sub['today_remaining']}/{sub['daily_limit']} HD videos remaining today\n" if has_active_sub else ""
     )
 
+    safe_title = html.escape(info.get("title", "Unknown Title"))
+    safe_duration = html.escape(info.get("duration_str", "00:00"))
+
     text = (
-        f"🎬 **Video Resolution Selection**\n\n"
-        f"**Title:** {info['title']}\n"
-        f"**Duration:** `{info['duration_str']}`\n\n"
+        f"🎬 <b>Video Resolution Selection</b>\n\n"
+        f"<b>Title:</b> {safe_title}\n"
+        f"<b>Duration:</b> <code>{safe_duration}</code>\n\n"
         f"{admin_banner}"
         f"Select a genuinely available resolution below (low to high):"
     )
 
     if callback.message:
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=get_video_quality_keyboard(
-                video_id=video_id,
-                available_resolutions=resolutions,
-                is_admin=is_admin,
-                has_active_sub=has_active_sub
-            ),
-            parse_mode="Markdown"
+        try:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=get_video_quality_keyboard(
+                    video_id=video_id,
+                    available_resolutions=resolutions,
+                    is_admin=is_admin,
+                    has_active_sub=has_active_sub
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit with HTML in cb_choose_video_quality: {e}. Fallback to plain text.")
+            plain_text = (
+                f"🎬 Video Resolution Selection\n\n"
+                f"Title: {info.get('title', 'Unknown Title')}\n"
+                f"Duration: {info.get('duration_str', '00:00')}\n\n"
+                f"Select a genuinely available resolution below (low to high):"
+            )
+            await callback.message.edit_text(
+                text=plain_text,
+                reply_markup=get_video_quality_keyboard(
+                    video_id=video_id,
+                    available_resolutions=resolutions,
+                    is_admin=is_admin,
+                    has_active_sub=has_active_sub
+                ),
+                parse_mode=None
+            )
+
+        # Track quality selection session with 10-min TTL
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=callback.message.message_id,
+            video_id=video_id
         )
     await callback.answer()
 
