@@ -29,12 +29,8 @@ router = Router(name="audio_router")
 async def cb_choose_audio_format(callback: CallbackQuery) -> None:
     """Prompt user to select audio container format (MP3, M4A, WAV)."""
     video_id = callback.data.split(":")[1]
-    user_id = callback.from_user.id if callback.from_user else 0
-
     from utils.selection_session import selection_session_manager
-    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
-    if not is_valid:
-        await callback.answer(reason, show_alert=True)
+    if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
     text = (
         "🎧 **Audio Format Selection**\n\n"
@@ -73,10 +69,14 @@ async def cb_choose_audio_format(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("afmt:"))
 async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
     """Prompt user to select audio bitrate quality (128, 192, 320 kbps)."""
-    await callback.answer()
     parts = callback.data.split(":")
     video_id = parts[1]
     selected_format = parts[2].lower()
+
+    from utils.selection_session import selection_session_manager
+    if not await selection_session_manager.enforce_session_validity(callback, video_id):
+        return
+    await callback.answer()
 
     if callback.message:
         try:
@@ -136,9 +136,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         return
 
     from utils.selection_session import selection_session_manager
-    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
-    if not is_valid:
-        await callback.answer(reason, show_alert=True)
+    if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
     selection_session_manager.clear_session(user_id)
 

@@ -66,6 +66,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     if not user:
         return
 
+    from utils.selection_session import selection_session_manager
+    selection_session_manager.clear_session(user.id)
+
     # Check if user is blocked
     if await db.is_user_blocked(user.id):
         await message.answer("🚫 *You have been restricted from using this service.*")
@@ -185,6 +188,8 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Return to main menu."""
     await state.clear()
     user_id = callback.from_user.id if callback.from_user else 0
+    from utils.selection_session import selection_session_manager
+    selection_session_manager.clear_session(user_id)
     first_name = (callback.from_user.first_name or "Music Lover") if callback.from_user else "Music Lover"
     is_admin = user_id in ADMIN_IDS
     welcome = get_welcome_text(first_name)
@@ -255,6 +260,8 @@ async def cb_cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
     """Cancel current state and action, cleanly returning to main menu."""
     await state.clear()
     user_id = callback.from_user.id if callback.from_user else 0
+    from utils.selection_session import selection_session_manager
+    selection_session_manager.clear_session(user_id)
     first_name = (callback.from_user.first_name or "Music Lover") if callback.from_user else "Music Lover"
     is_admin = user_id in ADMIN_IDS
     welcome = get_welcome_text(first_name)

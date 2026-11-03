@@ -48,6 +48,10 @@ def format_plan_name(order_type: str, quality: str = "720p") -> str:
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_select_payment_plan(callback: CallbackQuery) -> None:
     """User selected a payment plan (single, go, pro, ultra, max) from paywall."""
+    from utils.selection_session import selection_session_manager
+    if not await selection_session_manager.enforce_session_validity(callback):
+        return
+
     parts = callback.data.split(":")
     plan_type = parts[1]        # 'single', 'go', 'pro', 'ultra', 'max'
     raw_video_id = parts[2]
@@ -134,11 +138,19 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
             await callback.message.delete()
         except Exception:
             pass
-        await callback.message.answer_photo(
+        qr_msg = await callback.message.answer_photo(
             photo=qr_file,
             caption=caption,
             reply_markup=get_payment_qr_keyboard(order_id, upi_uri),
             parse_mode="Markdown"
+        )
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=qr_msg.message_id,
+            video_id=clean_video_id,
+            is_photo=True
         )
     await callback.answer()
 
@@ -146,6 +158,10 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("submit_utr:"))
 async def cb_prompt_utr_submission(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to input 12-digit UTR number."""
+    from utils.selection_session import selection_session_manager
+    if not await selection_session_manager.enforce_session_validity(callback):
+        return
+
     order_id = callback.data.split(":")[1]
     order = await db.get_order(order_id)
     if not order or db.is_order_expired(order):
@@ -162,10 +178,17 @@ async def cb_prompt_utr_submission(callback: CallbackQuery, state: FSMContext) -
         "👉 *Send your 12-digit UTR now:*"
     )
     if callback.message:
-        await callback.message.answer(
+        prompt_msg = await callback.message.answer(
             prompt,
             reply_markup=get_utr_input_keyboard(order_id),
             parse_mode="Markdown"
+        )
+        user_id = callback.from_user.id if callback.from_user else 0
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=prompt_msg.message_id
         )
     await callback.answer()
 
@@ -183,6 +206,9 @@ async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
         await db.cancel_order(order_id)
 
     user = callback.from_user
+    user_id = user.id if user else 0
+    from utils.selection_session import selection_session_manager
+    selection_session_manager.clear_session(user_id)
     user_id = user.id if user else 0
     is_admin = user_id in ADMIN_IDS
 

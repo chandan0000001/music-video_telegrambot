@@ -98,7 +98,15 @@ async def cmd_referral(message: Message) -> None:
 
     stats = await db.get_referral_stats(user.id)
     text, kb = build_referral_panel(user.id, stats)
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    sent = await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    from utils.selection_session import selection_session_manager
+    chat_id = getattr(getattr(message, "chat", None), "id", getattr(user, "id", 0)) if user else 0
+    await selection_session_manager.register_session(
+        bot=message.bot,
+        user_id=user.id,
+        chat_id=chat_id,
+        message_id=getattr(sent, "message_id", None)
+    )
 
 
 @router.callback_query(F.data == "menu:referral")
@@ -119,10 +127,18 @@ async def cb_menu_referral(callback: CallbackQuery) -> None:
     text, kb = build_referral_panel(user.id, stats)
 
     if callback.message:
+        sent_msg = None
         try:
-            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            sent_msg = await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+            sent_msg = await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user.id,
+            chat_id=callback.message.chat.id,
+            message_id=sent_msg.message_id if sent_msg else callback.message.message_id
+        )
     await callback.answer()
 
 

@@ -70,10 +70,19 @@ async def cb_user_redeem_coupon(callback: CallbackQuery, state: FSMContext) -> N
         "👉 <b>Type or paste your code below:</b>"
     )
     if callback.message:
+        sent_msg = None
         try:
-            await callback.message.edit_text(text, reply_markup=get_coupon_menu_keyboard(), parse_mode="HTML")
+            sent_msg = await callback.message.edit_text(text, reply_markup=get_coupon_menu_keyboard(), parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=get_coupon_menu_keyboard(), parse_mode="HTML")
+            sent_msg = await callback.message.answer(text, reply_markup=get_coupon_menu_keyboard(), parse_mode="HTML")
+        from utils.selection_session import selection_session_manager
+        user_id = callback.from_user.id if callback.from_user else 0
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=sent_msg.message_id if sent_msg else callback.message.message_id
+        )
 
 
 @router.message(Command("coupon"))

@@ -38,18 +38,26 @@ async def cb_menu_ytmusic(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.set_state(UserStates.waiting_for_ytmusic)
     if callback.message:
+        sent_msg = None
         try:
-            await callback.message.edit_text(
+            sent_msg = await callback.message.edit_text(
                 text=YTMUSIC_HUB_TEXT,
                 reply_markup=get_ytmusic_menu_keyboard(),
                 parse_mode="Markdown"
             )
         except Exception:
-            await callback.message.answer(
+            sent_msg = await callback.message.answer(
                 text=YTMUSIC_HUB_TEXT,
                 reply_markup=get_ytmusic_menu_keyboard(),
                 parse_mode="Markdown"
             )
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user.id if user else 0,
+            chat_id=callback.message.chat.id,
+            message_id=sent_msg.message_id if sent_msg else callback.message.message_id
+        )
     await callback.answer()
 
 
@@ -65,10 +73,18 @@ async def cmd_ytmusic(message: Message, state: FSMContext) -> None:
     command_args = message.text.partition(" ")[2].strip() if message.text else ""
     if not command_args:
         await state.set_state(UserStates.waiting_for_ytmusic)
-        await message.answer(
+        sent = await message.answer(
             text=YTMUSIC_HUB_TEXT,
             reply_markup=get_ytmusic_menu_keyboard(),
             parse_mode="Markdown"
+        )
+        from utils.selection_session import selection_session_manager
+        chat_id = getattr(getattr(message, "chat", None), "id", getattr(user, "id", 0))
+        await selection_session_manager.register_session(
+            bot=message.bot,
+            user_id=user.id if user else 0,
+            chat_id=chat_id,
+            message_id=getattr(sent, "message_id", None)
         )
         return
 

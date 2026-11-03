@@ -43,9 +43,16 @@ async def cb_menu_search(callback: CallbackQuery, state: FSMContext) -> None:
     )
     if callback.message:
         try:
-            await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+            sent_msg = await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
-            await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+            sent_msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=callback.from_user.id if callback.from_user else 0,
+            chat_id=callback.message.chat.id,
+            message_id=sent_msg.message_id if sent_msg else callback.message.message_id
+        )
 
 
 @router.callback_query(F.data == "menu:audio")
@@ -61,9 +68,16 @@ async def cb_menu_audio(callback: CallbackQuery, state: FSMContext) -> None:
     )
     if callback.message:
         try:
-            await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+            sent_msg = await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
-            await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+            sent_msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=callback.from_user.id if callback.from_user else 0,
+            chat_id=callback.message.chat.id,
+            message_id=sent_msg.message_id if sent_msg else callback.message.message_id
+        )
 
 
 @router.callback_query(F.data == "menu:video")
@@ -79,9 +93,17 @@ async def cb_menu_video(callback: CallbackQuery, state: FSMContext) -> None:
     )
     if callback.message:
         try:
-            await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+            sent_msg = await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
         except Exception:
-            await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+            sent_msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=callback.from_user.id if callback.from_user else 0,
+            chat_id=callback.message.chat.id,
+            message_id=sent_msg.message_id if sent_msg else callback.message.message_id
+        )
+
 
 
 @router.message(Command("search", "song"))
@@ -160,12 +182,23 @@ async def execute_search(
         reply_markup=get_search_results_keyboard(results),
         parse_mode="Markdown"
     )
+    from utils.selection_session import selection_session_manager
+    await selection_session_manager.register_session(
+        bot=status_msg.bot,
+        user_id=user_id,
+        chat_id=status_msg.chat.id,
+        message_id=status_msg.message_id
+    )
 
 
 @router.callback_query(F.data.startswith("sel:"))
 async def cb_select_result(callback: CallbackQuery) -> None:
     """User clicked one of the search results."""
     video_id = callback.data.split(":")[1]
+    from utils.selection_session import selection_session_manager
+    if not await selection_session_manager.enforce_session_validity(callback, video_id):
+        return
+
     text = (
         "🎯 **Selected Track**\n\n"
         "How would you like to download this media?\n\n"
@@ -185,12 +218,24 @@ async def cb_select_result(callback: CallbackQuery) -> None:
                 reply_markup=get_media_type_keyboard(video_id),
                 parse_mode="Markdown"
             )
+        user_id = callback.from_user.id if callback.from_user else 0
+        await selection_session_manager.register_session(
+            bot=callback.bot,
+            user_id=user_id,
+            chat_id=callback.message.chat.id,
+            message_id=callback.message.message_id,
+            video_id=video_id
+        )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("dosearch:"))
 async def cb_dosearch(callback: CallbackQuery, state: FSMContext) -> None:
     """User confirmed search query from plain text suggestion."""
+    from utils.selection_session import selection_session_manager
+    if not await selection_session_manager.enforce_session_validity(callback):
+        return
+
     query = callback.data.partition(":")[2]
     await callback.answer()
     user_id = callback.from_user.id if callback.from_user else 0
@@ -374,7 +419,7 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
     # If no state is active, offer a 1-tap search button rather than blindly executing an unrequested YouTube search
     clean_query = text[:60]
-    await message.answer(
+    suggest_msg = await message.answer(
         f"🎵 **Looking for music?**\n\n"
         f"Would you like to search for `\"{clean_query}\"`?\n\n"
         "💡 *Click below to search or send any YouTube / Instagram / X link directly:*",
@@ -385,4 +430,12 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
             ]
         ),
         parse_mode="Markdown"
+    )
+    from utils.selection_session import selection_session_manager
+    chat_id = getattr(getattr(message, "chat", None), "id", getattr(user, "id", 0)) if user else 0
+    await selection_session_manager.register_session(
+        bot=message.bot,
+        user_id=user.id if user else 0,
+        chat_id=chat_id,
+        message_id=getattr(suggest_msg, "message_id", None)
     )

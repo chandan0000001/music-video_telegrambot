@@ -66,3 +66,15 @@ def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def get_session_expired_keyboard() -> InlineKeyboardMarkup:
+    """Generate clean 'Start Again' keyboard for expired windows and sessions."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🚀 Start Again (/start)", callback_data="menu:main")
+            ]
+        ]
+    )
+

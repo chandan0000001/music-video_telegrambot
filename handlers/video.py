@@ -31,12 +31,8 @@ router = Router(name="video_router")
 async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     """Inspect and present available video resolutions from low to high."""
     video_id = callback.data.split(":")[1]
-    user_id = callback.from_user.id if callback.from_user else 0
-
     from utils.selection_session import selection_session_manager
-    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
-    if not is_valid:
-        await callback.answer(reason, show_alert=True)
+    if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
 
     await callback.answer()
@@ -150,9 +146,7 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
         return
 
     from utils.selection_session import selection_session_manager
-    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
-    if not is_valid:
-        await callback.answer(reason, show_alert=True)
+    if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
     selection_session_manager.clear_session(user_id)
 
@@ -200,6 +194,13 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
                 text=paywall_text,
                 reply_markup=get_paywall_keyboard(video_id, resolution),
                 parse_mode="Markdown"
+            )
+            await selection_session_manager.register_session(
+                bot=callback.bot,
+                user_id=user_id,
+                chat_id=status_msg.chat.id,
+                message_id=status_msg.message_id,
+                video_id=video_id
             )
             await callback.answer()
             return
