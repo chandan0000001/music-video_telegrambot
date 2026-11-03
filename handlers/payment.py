@@ -30,6 +30,7 @@ from keyboards.quality_keyboard import (
 from handlers.states import UserStates
 from utils.time_utils import get_current_ist_str
 from utils.validators import extract_youtube_id
+from utils.progress import send_vanishing_message
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment_router")
@@ -270,11 +271,13 @@ async def handle_utr_input(message: Message, state: FSMContext) -> None:
     """Handle 12-digit UTR text sent by user and run automated Gmail verification."""
     text = (message.text or "").strip()
     if not text.isdigit() or len(text) != 12:
-        await message.answer(
-            "⚠️ **Invalid UTR Format**\n\n"
-            "The UPI Reference ID must be exactly **12 numeric digits**.\n"
-            "Please check your transaction history and send the 12 digits.",
-            parse_mode="Markdown"
+        await send_vanishing_message(
+            message,
+            "🧐 <b>Bhai ye kaisa UTR number hai? Hawa me payment ho gayi kya? 😂</b>\n\n"
+            "⚠️ <i>UPI Reference ID / UTR me exactly <b>12 numeric digits</b> hone chahiye.</i>\n\n"
+            "Screenshot dekh ke apna asli 12-digit UTR dhyan se bhejo!",
+            delay=90.0,
+            parse_mode="HTML"
         )
         return
 

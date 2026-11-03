@@ -16,6 +16,7 @@ from database import db
 from handlers.states import UserStates, AdminStates
 from keyboards.main_menu import get_back_to_main_keyboard
 from utils.time_utils import format_ist
+from utils.progress import send_vanishing_message
 
 logger = logging.getLogger(__name__)
 router = Router(name="coupons_router")
@@ -145,23 +146,35 @@ async def process_coupon_redemption(message: Message, code_input: str, state: FS
 
     clean_code = code_input.strip().upper()
     if not clean_code:
-        await message.answer("⚠️ Please enter a valid coupon code.", parse_mode="HTML")
+        await send_vanishing_message(
+            message,
+            "⚠️ <b>Khali coupon code bhej rahe ho? 😂 Kuch code toh type karo!</b>",
+            delay=90.0,
+            parse_mode="HTML"
+        )
         return
 
     success, info, err = await db.redeem_coupon(telegram_id=user.id, code=clean_code)
     await state.clear()
 
     if not success:
-        err_msg = err or "❌ Invalid or inactive coupon code."
+        err_msg = (
+            "🕵️‍♂️ <b>Kaha se laate ho aise scheme-baaz coupon? 😂</b>\n\n"
+            f"❌ <i>{html.escape(err or 'Ye wala coupon expire ho chuka hai ya galat hai.')}</i>\n\n"
+            "💡 Sahi code dhyan se dalo ya VIP subscription choose karo!"
+        )
         retry_kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(text="🔄 Try Another Code", callback_data="coupon:redeem"),
+                    InlineKeyboardButton(text="💎 Upgrade VIP", callback_data="menu:upgrade")
+                ],
+                [
                     InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")
                 ]
             ]
         )
-        await message.answer(f"{err_msg}", reply_markup=retry_kb, parse_mode="HTML")
+        await send_vanishing_message(message, err_msg, delay=90.0, reply_markup=retry_kb, parse_mode="HTML")
         return
 
     # Success!

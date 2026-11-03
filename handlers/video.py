@@ -176,13 +176,16 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
         if not is_admin and not has_active_sub:
             if sub and sub.get("is_active") and sub.get("today_remaining", 0) <= 0:
                 await callback.answer("Daily video quota reached!", show_alert=True)
+                plan_name = sub.get("plan_tier", "").capitalize()
+                limit_num = sub.get("daily_limit", 0)
                 await status_msg.edit_text(
-                    f"⚠️ **Daily Video Limit Reached**\n\n"
-                    f"You have used all **{sub['daily_limit']} HD videos** for today on your {sub['plan_tier'].capitalize()} plan.\n\n"
-                    f"Your quota automatically resets at midnight.\n"
-                    f"Standard qualities (144p - 480p) and music downloads remain completely free!",
+                    f"🎬 **Aaj ka quota khatam babu bhaiya! Pura internet aaj hi download karega kya? 😂**\n\n"
+                    f"You have used all **{limit_num} HD videos** for today on your {plan_name} plan.\n\n"
+                    f"💡 *Midnight (12:00 AM) ko quota reset hoga!*\n"
+                    f"Standard qualities (144p - 480p) aur music downloads abhi bhi completely free hain!",
                     parse_mode="Markdown"
                 )
+                asyncio.create_task(vanish_status_message(status_msg, delay=90.0))
                 return
 
             price = PRICE_SINGLE_720P if resolution == "720p" else PRICE_SINGLE_1080P

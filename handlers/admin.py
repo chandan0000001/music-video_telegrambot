@@ -16,6 +16,7 @@ from config import ADMIN_IDS
 from database import db
 from handlers.states import AdminStates
 from utils.time_utils import format_ist
+from utils.progress import send_vanishing_message
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_router")
@@ -24,6 +25,17 @@ router = Router(name="admin_router")
 def is_admin(user_id: int) -> bool:
     """Check if Telegram user ID is an authorized administrator."""
     return user_id in ADMIN_IDS
+
+
+async def send_admin_denied_reply(message: Message) -> None:
+    """Send humorous, vanishing access denied message to non-admin users."""
+    await send_vanishing_message(
+        message,
+        "🚨 <b>CID bulao Daya! Ye admin banne ki koshish kar raha hai! 👮‍♂️👊</b>\n\n"
+        "⛔ <b>Access Denied:</b> <i>Chupchaap gaane suno aur chill karo, ye section sirf bot owner ke liye hai.</i>",
+        delay=90.0,
+        parse_mode="HTML"
+    )
 
 
 def get_admin_dashboard_keyboard() -> InlineKeyboardMarkup:
@@ -106,7 +118,7 @@ async def cmd_admin(message: Message, state: FSMContext) -> None:
     """Admin dashboard command."""
     user = message.from_user
     if not user or not is_admin(user.id):
-        await message.answer("⛔ <b>Access Denied:</b> You are not authorized to use admin features.", parse_mode="HTML")
+        await send_admin_denied_reply(message)
         return
 
     await state.clear()
@@ -856,7 +868,7 @@ async def cmd_admin_activate_sub(message: Message) -> None:
     """Admin command to grant or override a subscription: /sub_activate <user_id> <plan> [days]"""
     user = message.from_user
     if not user or not is_admin(user.id):
-        await message.answer("🚫 Access Denied.")
+        await send_admin_denied_reply(message)
         return
 
     raw_args = (message.text or "").split()[1:]
@@ -936,7 +948,7 @@ async def cmd_admin_deactivate_sub(message: Message) -> None:
     """Admin command to revoke a subscription: /sub_deactivate <user_id>"""
     user = message.from_user
     if not user or not is_admin(user.id):
-        await message.answer("🚫 Access Denied.")
+        await send_admin_denied_reply(message)
         return
 
     args = (message.text or "").split()[1:]
@@ -973,7 +985,7 @@ async def cmd_admin_deactivate_all_subs(message: Message) -> None:
     """Admin command to revoke all user subscriptions: /sub_deactivate_all"""
     user = message.from_user
     if not user or not is_admin(user.id):
-        await message.answer("🚫 Access Denied.")
+        await send_admin_denied_reply(message)
         return
 
     count = await db.deactivate_all_subscriptions()
@@ -989,7 +1001,7 @@ async def cmd_admin_sub_status(message: Message) -> None:
     """Admin command to check user's subscription: /sub_status <user_id>"""
     user = message.from_user
     if not user or not is_admin(user.id):
-        await message.answer("🚫 Access Denied.")
+        await send_admin_denied_reply(message)
         return
 
     args = (message.text or "").split()[1:]

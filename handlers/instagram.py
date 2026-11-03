@@ -43,6 +43,7 @@ from utils.progress import (
     AsyncProgressReporter,
     AsyncUploadProgressReporter,
     TrackedFSInputFile,
+    send_vanishing_message,
     vanish_status_message
 )
 from utils.animation_helper import send_download_animation, vanish_download_animation
@@ -131,13 +132,13 @@ async def _execute_instagram_profile(message: Message, username: str, check_spam
     if check_spam:
         is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
         if is_spam:
-            await message.answer(spam_msg, parse_mode="Markdown")
+            await send_vanishing_message(message, spam_msg, delay=90.0, parse_mode="Markdown")
             return
 
     # 2. Per-User Concurrent Download Limit Check
     can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
     if not can_start:
-        await message.answer(limit_msg, parse_mode="Markdown")
+        await send_vanishing_message(message, limit_msg, delay=90.0, parse_mode="Markdown")
         return
 
     clean_user = username.strip().lstrip("@")
@@ -323,13 +324,13 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
     if check_spam:
         is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
         if is_spam:
-            await message.answer(spam_msg, parse_mode="Markdown")
+            await send_vanishing_message(message, spam_msg, delay=90.0, parse_mode="Markdown")
             return
 
     # 2. Per-User Concurrent Download Limit Check (Max 3)
     can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
     if not can_start:
-        await message.answer(limit_msg, parse_mode="Markdown")
+        await send_vanishing_message(message, limit_msg, delay=90.0, parse_mode="Markdown")
         return
 
     status_msg = await message.answer("🔍 *Inspecting Instagram link...*", parse_mode="Markdown")

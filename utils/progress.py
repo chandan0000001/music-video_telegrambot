@@ -71,6 +71,32 @@ async def vanish_status_message(
     return False
 
 
+async def send_vanishing_message(
+    target: Any,
+    text: str,
+    delay: float = 90.0,
+    reply_markup: Any = None,
+    parse_mode: Optional[str] = None
+) -> Optional[Message]:
+    """
+    Send a message and schedule it to vanish (delete) after `delay` seconds (default 90s).
+    Ensures temporary error / funny alerts self-destruct cleanly without cluttering chat history.
+    """
+    try:
+        sent: Optional[Message] = None
+        if hasattr(target, "message") and getattr(target, "message", None) and hasattr(getattr(target, "message", None), "answer"):
+            sent = await target.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        elif hasattr(target, "answer"):
+            sent = await target.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+        if sent:
+            asyncio.create_task(vanish_status_message(sent, delay=delay))
+        return sent
+    except Exception as e:
+        logger.warning(f"send_vanishing_message failed: {e}")
+        return None
+
+
 def make_progress_bar(percentage: float, length: int = 10) -> str:
     """Create a Unicode progress bar: [▰▰▰▰▱▱▱▱▱▱]."""
     percentage = max(0.0, min(100.0, percentage))

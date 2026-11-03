@@ -146,8 +146,8 @@ class LinkSpamGuard:
                     )
 
                 return True, (
-                    f"⚠️ **Ladle, don't spam here! Otherwise you will be banned.**\n\n"
-                    f"Please wait **{remaining} second(s)** before sending another link."
+                    f"🏃💨 **Ladle, don't spam here! Saans toh lele, bullet train chala raha hai kya? 😂**\n\n"
+                    f"⏳ Bot par thoda reham khao, **{remaining} second** ruko phir agla link bhejo!"
                 )
 
             # Update last link time

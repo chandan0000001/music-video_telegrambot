@@ -620,6 +620,54 @@ async def test_plain_text_without_state_suggests_search():
 
 
 @pytest.mark.asyncio
+async def test_emoji_or_blank_funny_reply():
+    """Verify funny reply is sent when user sends pure emojis, dots, or symbols without words."""
+    from handlers.search import handle_user_text
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.text = "😂😂😂???"
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+    mock_state.get_state = AsyncMock(return_value=None)
+
+    await handle_user_text(mock_msg, mock_state)
+    mock_msg.answer.assert_awaited_once()
+    assert "Antaryami thodi hu jo bina naam ke gaana dhund lu" in mock_msg.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_invalid_utr_funny_reply():
+    """Verify funny reply when user enters non-12-digit UTR in payment."""
+    from handlers.payment import handle_utr_input
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.text = "fake_utr_123"
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+
+    await handle_utr_input(mock_msg, mock_state)
+    mock_msg.answer.assert_awaited_once()
+    assert "Bhai ye kaisa UTR number hai? Hawa me payment ho gayi kya" in mock_msg.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_invalid_coupon_funny_reply():
+    """Verify funny reply when user enters an invalid/fake coupon code."""
+    from handlers.coupons import handle_coupon_input
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.text = "NOTREALCOUPON999"
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+    mock_state.clear = AsyncMock()
+
+    await handle_coupon_input(mock_msg, mock_state)
+    mock_msg.answer.assert_awaited_once()
+    assert "Kaha se laate ho aise scheme-baaz coupon" in mock_msg.answer.call_args[0][0]
+
+
+
+@pytest.mark.asyncio
 async def test_about_text_removes_github_link():
     """Verify /about text does not contain github repository link and mentions contacting admin."""
     from handlers.start import ABOUT_TEXT

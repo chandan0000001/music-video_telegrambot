@@ -24,6 +24,7 @@ from utils.validators import (
     is_cancel_intent
 )
 from utils.rate_limiter import link_spam_guard
+from utils.progress import send_vanishing_message
 from handlers.states import UserStates
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,17 @@ async def execute_search(
 
     if user_id and await db.is_user_blocked(user_id):
         await message.answer("🚫 *You have been restricted from using this service.*")
+        return
+
+    if not query or not any(c.isalnum() for c in query):
+        await send_vanishing_message(
+            message,
+            "🔮 <b>Antaryami thodi hu jo bina naam ke gaana dhund lu? 😂</b>\n\n"
+            "🔍 <i>Gaane, video ya artist ka naam dhang se likho jani!</i>",
+            delay=90.0,
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
+        )
         return
 
     # Record search in database using the actual human user_id
@@ -328,9 +340,11 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
     # Guard against unhandled or mistyped slash commands (e.g. /sub_active typos)
     if text.startswith("/"):
         cmd_name = text.split()[0]
-        await message.answer(
+        await send_vanishing_message(
+            message,
             f"❓ **Unknown command:** `{cmd_name}`\n\n"
             "💡 Type `/help` to view all available commands or `/start` to open the Main Menu.",
+            delay=90.0,
             parse_mode="Markdown"
         )
         return
@@ -344,7 +358,7 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         # Anti-Spam Link Cooldown Check
         is_spam, spam_msg = await link_spam_guard.check_link_spam(user.id if user else 0)
         if is_spam:
-            await message.answer(spam_msg, parse_mode="Markdown")
+            await send_vanishing_message(message, spam_msg, delay=90.0, parse_mode="Markdown")
             return
 
         if is_valid_twitter_url(normalized_url):
@@ -373,9 +387,11 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
         # Strict YouTube & YouTube Music security validation
         if not is_valid_youtube_url(normalized_url):
-            await message.answer(
+            await send_vanishing_message(
+                message,
                 "Jaannii gharr akke marunga valid link bhejj 😂👊\n\n"
                 "💡 Sirf **YouTube**, **Instagram**, ya **X (Twitter)** ke links bhejo!",
+                delay=90.0,
                 reply_markup=get_back_to_main_keyboard(),
                 parse_mode="Markdown"
             )
@@ -468,6 +484,18 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
     # Current FSM state check
     curr_state = await state.get_state()
+    # Guard against pure emojis, punctuation, or whitespace
+    if not any(c.isalnum() for c in text):
+        await send_vanishing_message(
+            message,
+            "🔮 <b>Antaryami thodi hu jo bina naam ke gaana dhund lu? 😂</b>\n\n"
+            "🔍 <i>Gaane, video ya artist ka naam dhang se likho jani!</i>",
+            delay=90.0,
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
     if curr_state == UserStates.waiting_for_search_query:
         await execute_search(message, text, state)
         return
