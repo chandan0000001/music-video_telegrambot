@@ -4,7 +4,7 @@
 > **Developer:** Chandan ([@coder_chandan](https://t.me/coder_chandan))  
 > **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)  
 > **Production Status:** 🟢 **Live on AWS EC2 (Mumbai `ap-south-1`) — 24/7 Always-On**  
-> **HD Demo Video:** [Watch on Streamable (1080p)](https://streamable.com/or78t5) | [Google Drive Mirror](https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
+> **HD Demo Video:** [Watch Demo Video (1080p 60fps MP4)](https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4)
 
 A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
 
@@ -13,18 +13,12 @@ A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aio
 ## 🎬 Video Demo
 
 <div align="center">
-  <a href="https://streamable.com/or78t5" target="_blank">
+  <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4" target="_blank">
     <img src="assets/demo.gif" alt="Telegram Music & Video Bot Demo" width="720" style="border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);" />
   </a>
   <br><br>
-  <a href="https://streamable.com/or78t5">
-    <img src="https://img.shields.io/badge/Streamable-Watch_in_Crystal_Clear_1080p-00D2B4?style=for-the-badge&logo=streamable&logoColor=white" alt="Watch on Streamable" />
-  </a>
-  <a href="https://drive.google.com/drive/folders/1DewLfOBfb7-Re-xuqbBZJh2KuI6ekCLG?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto">
-    <img src="https://img.shields.io/badge/Google_Drive-Permanent_HD_Mirror-4285F4?style=for-the-badge&logo=googledrive&logoColor=white" alt="Watch on Google Drive" />
-  </a>
   <a href="https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4">
-    <img src="https://img.shields.io/badge/GitHub-Direct_MP4_Download-181717?style=for-the-badge&logo=github&logoColor=white" alt="Download Direct MP4" />
+    <img src="https://img.shields.io/badge/GitHub-Watch_Crystal_Clear_1080p_Demo-181717?style=for-the-badge&logo=github&logoColor=white" alt="Watch 1080p Demo Video" />
   </a>
 </div>
 
