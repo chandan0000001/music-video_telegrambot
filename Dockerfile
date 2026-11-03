@@ -20,5 +20,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
+# LOW-3: Create non-root system user and drop root privileges
+RUN addgroup --system botgroup && adduser --system --ingroup botgroup botuser \
+    && chown -R botuser:botgroup /app
+
+USER botuser
+
 # Start the bot
 CMD ["python", "bot.py"]

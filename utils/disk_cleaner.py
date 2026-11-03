@@ -71,12 +71,15 @@ def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STA
             mtime = item.stat().st_mtime
             if (now - mtime) > max_age:
                 if item.is_dir():
-                    shutil.rmtree(item, ignore_errors=True)
+                    try:
+                        shutil.rmtree(item)
+                    except OSError as e:
+                        logger.warning(f"Could not remove stale temp directory {item}: {e}")
                 else:
                     item.unlink(missing_ok=True)
                 pruned_count += 1
         except Exception as e:
-            logger.debug(f"Could not remove temp item {item}: {e}")
+            logger.debug(f"Could not process temp item {item}: {e}")
 
     if pruned_count > 0:
         logger.info(f"🧹 Disk Cleaner: Pruned {pruned_count} abandoned temp file(s)/directory(ies).")
@@ -84,12 +87,35 @@ def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STA
     return pruned_count
 
 
+async def purge_stale_temp_files_async(temp_dir: Optional[Path] = None, max_age: float = STALE_FILE_MAX_AGE_SECONDS) -> int:
+    """PERF-3: Non-blocking async version of purge_stale_temp_files running in thread pool."""
+    return await asyncio.to_thread(purge_stale_temp_files, temp_dir, max_age)
+
+
+def get_user_disk_usage(user_id: int, temp_dir: Optional[Path] = None) -> int:
+    """MED-3: Calculate total temporary disk usage in bytes across all jobs for a specific user."""
+    target = temp_dir or TEMP_DIR
+    if not target.exists():
+        return 0
+    user_pattern = f"*_{user_id}_*"
+    total_bytes = 0
+    try:
+        for p in target.glob(user_pattern):
+            if p.is_file():
+                total_bytes += p.stat().st_size
+            elif p.is_dir():
+                total_bytes += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+    except Exception:
+        pass
+    return total_bytes
+
+
 async def periodic_disk_cleaner_task(interval: float = CLEANUP_INTERVAL_SECONDS) -> None:
     """Background asyncio task that runs periodically to keep disk space free."""
     while True:
         try:
             await asyncio.sleep(interval)
-            purge_stale_temp_files()
+            await purge_stale_temp_files_async()
         except asyncio.CancelledError:
             break
         except Exception as e:

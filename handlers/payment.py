@@ -3,13 +3,20 @@ Payment and Subscription Router for Google Pay UPI
 Handles paywall selection, dynamic QR generation (10-min validity), 12-digit UTR submission,
 and automated verification with permanent admin proof logging.
 """
+import re
 import logging
 from datetime import datetime, timezone
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
-from config import ADMIN_IDS, PAYMENT_UPI_ID, SUBSCRIPTION_PLANS, ORDER_EXPIRY_MINUTES
+from config import (
+    ADMIN_IDS,
+    PAYMENT_UPI_ID,
+    SUBSCRIPTION_PLANS,
+    ORDER_EXPIRY_MINUTES,
+    SUPPORTED_VIDEO_RESOLUTIONS,
+)
 from database import db
 from services.payment_service import payment_service
 from services.media_service import media_service
@@ -22,6 +29,7 @@ from keyboards.quality_keyboard import (
 )
 from handlers.states import UserStates
 from utils.time_utils import get_current_ist_str
+from utils.validators import extract_youtube_id
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment_router")
@@ -42,8 +50,18 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
     """User selected a payment plan (single, go, pro, ultra, max) from paywall."""
     parts = callback.data.split(":")
     plan_type = parts[1]        # 'single', 'go', 'pro', 'ultra', 'max'
-    video_id = parts[2]
-    quality = parts[3] if len(parts) > 3 else "720p"
+    raw_video_id = parts[2]
+    raw_quality = parts[3] if len(parts) > 3 else "720p"
+
+    # HIGH-4: Sanitize video_id and quality against strict patterns and allowlist
+    clean_video_id = extract_youtube_id(f"https://www.youtube.com/watch?v={raw_video_id}")
+    if not clean_video_id:
+        clean_video_id = raw_video_id if re.fullmatch(r"^[a-zA-Z0-9_-]{11}$", raw_video_id) else None
+    if not clean_video_id:
+        await callback.answer("Invalid video ID format.", show_alert=True)
+        return
+
+    clean_quality = raw_quality if raw_quality in SUPPORTED_VIDEO_RESOLUTIONS else "720p"
 
     user = callback.from_user
     user_id = user.id if user else 0
@@ -55,8 +73,8 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
         if callback.message:
             await execute_video_download_pipeline(
                 status_msg=callback.message,
-                video_id=video_id,
-                resolution=quality,
+                video_id=clean_video_id,
+                resolution=clean_quality,
                 user_id=user_id,
                 bot=callback.bot
             )
@@ -70,21 +88,21 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
         plan_display = format_plan_name(order_type)
     else:
         order_type = "single"
-        amount = payment_service.get_price("single", quality)
-        plan_display = format_plan_name("single", quality)
+        amount = payment_service.get_price("single", clean_quality)
+        plan_display = format_plan_name("single", clean_quality)
 
     # Get video title
-    info_success, info, _ = await media_service.get_media_info(f"https://www.youtube.com/watch?v={video_id}")
-    video_title = info.get("title", f"YouTube_{video_id}") if info_success and info else f"YouTube_{video_id}"
+    info_success, info, _ = await media_service.get_media_info(f"https://www.youtube.com/watch?v={clean_video_id}")
+    video_title = info.get("title", f"YouTube_{clean_video_id}") if info_success and info else f"YouTube_{clean_video_id}"
 
     # Create pending order in database (10-min validity)
     order_id = await db.create_order(
         telegram_id=user_id,
         order_type=order_type,
         amount_inr=amount,
-        media_id=video_id,
+        media_id=clean_video_id,
         media_title=video_title,
-        quality=quality
+        quality=clean_quality
     )
 
     # Generate Dynamic UPI QR Code
@@ -160,11 +178,9 @@ async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
     order_id = parts[1] if len(parts) > 1 else ""
     order = await db.get_order(order_id) if order_id else None
 
-    # Cancel pending order in database
+    # Cancel pending order in database (HIGH-5)
     if order and order.get("status") == "pending":
-        async with db._get_connection() as conn:
-            await conn.execute("UPDATE orders SET status = 'cancelled' WHERE order_id = ?", (order_id,))
-            await conn.commit()
+        await db.cancel_order(order_id)
 
     user = callback.from_user
     user_id = user.id if user else 0
@@ -255,6 +271,21 @@ async def handle_utr_input(message: Message, state: FSMContext) -> None:
             "❌ **Order Expired**\n\n"
             "The 10-minute validity period for this order has elapsed.\n"
             "Please select the video quality again to generate a fresh QR code.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # HIGH-2: Brute-force protection on UTR submission (limit to 5 attempts)
+    attempts = data.get("utr_attempts", 0) + 1
+    await state.update_data(utr_attempts=attempts)
+    db_attempts = await db.increment_order_attempts(order_id)
+    if attempts > 5 or db_attempts > 5:
+        await state.clear()
+        await db.mark_order_expired(order_id)
+        await message.answer(
+            "❌ **Too Many Attempts**\n\n"
+            "This payment order has reached the maximum allowed verification attempts (5).\n"
+            "The order has been cancelled for security. Please create a new order.",
             parse_mode="Markdown"
         )
         return
@@ -420,10 +451,9 @@ async def cb_admin_reject(callback: CallbackQuery) -> None:
 
     order_id = callback.data.split(":")[1]
     order = await db.get_order(order_id)
+    # HIGH-5: Use database.reject_order instead of raw connection
     if order and order.get("status") == "pending":
-        async with db._get_connection() as conn:
-            await conn.execute("UPDATE orders SET status = 'rejected' WHERE order_id = ?", (order_id,))
-            await conn.commit()
+        await db.reject_order(order_id)
 
     if callback.message:
         try:

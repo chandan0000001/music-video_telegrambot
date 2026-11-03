@@ -20,6 +20,23 @@ from services.mtproto_service import mtproto_service
 logger = setup_logger("music_bot")
 
 
+async def daily_quota_reset_task() -> None:
+    """MED-4: Background cron task that resets subscriber daily download counters at midnight UTC."""
+    from datetime import datetime, timezone, timedelta
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            next_midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
+            sleep_secs = max(60.0, (next_midnight - now).total_seconds())
+            await asyncio.sleep(sleep_secs)
+            await db.reset_daily_quotas()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in daily quota reset background task: {e}")
+            await asyncio.sleep(60)
+
+
 async def on_startup(bot: Bot) -> None:
     """Startup initialization: verify environment, DB, and FFmpeg."""
     logger.info("Initializing Telegram Music & Video Downloader Bot...")
@@ -52,8 +69,9 @@ async def on_startup(bot: Bot) -> None:
     from utils.queue_manager import queue_manager
     purge_stale_temp_files()
     asyncio.create_task(periodic_disk_cleaner_task())
+    asyncio.create_task(daily_quota_reset_task())
     queue_manager.start_worker()
-    logger.info("Storage Cleaner and Concurrency Queue Manager started.")
+    logger.info("Storage Cleaner, Quota Reset Cron, and Concurrency Queue Manager started.")
 
     bot_info = await bot.get_me()
     logger.info(f"Bot connected: @{bot_info.username} (ID: {bot_info.id})")

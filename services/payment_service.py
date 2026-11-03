@@ -98,7 +98,7 @@ class PaymentService:
         if order["status"] == "paid":
             return True, "✅ Order has already been paid and activated."
 
-        # Anti-fraud check: Has this UTR been used in another order?
+        # Pre-check: Has this UTR been used in another order?
         if await db.is_utr_already_used(utr_clean, exclude_order_id=order_id):
             return False, "❌ Fraud Alert: This UTR has already been claimed by another transaction."
 
@@ -109,8 +109,11 @@ class PaymentService:
         verified, msg = await gmail_service.verify_utr_payment(utr_clean, expected_amount)
 
         if verified:
-            await db.mark_order_paid(order_id, utr_clean)
-            return True, f"✅ Payment of ₹{expected_amount:.2f} successfully verified!"
+            # CRIT-2: Atomic claim inside exclusive transaction to prevent double-spending race conditions
+            success, paid_order, claim_msg = await db.atomic_claim_and_mark_paid(order_id, utr_clean)
+            if success:
+                return True, f"✅ Payment of ₹{expected_amount:.2f} successfully verified!"
+            return False, claim_msg
 
         return False, msg
 

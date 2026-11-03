@@ -40,6 +40,15 @@ def get_cookie_file() -> Optional[Path]:
     return None
 
 
+def _write_cookie_file_secure(path: Path, content: bytes) -> None:
+    """Write cookie file with secure mode 0600 (owner read/write only)."""
+    path.write_bytes(content)
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
 COOKIE_FILE: Path = BASE_DIR / "cookies.txt"
 _cookies_b64 = os.getenv("YOUTUBE_COOKIES_BASE64")
 _cookies_raw = os.getenv("YOUTUBE_COOKIES")
@@ -50,15 +59,24 @@ if not COOKIE_FILE.exists():
         try:
             import shutil
             shutil.copy2(_detected, COOKIE_FILE)
+            os.chmod(COOKIE_FILE, 0o600)
         except Exception:
             pass
     elif _cookies_b64:
         try:
-            COOKIE_FILE.write_bytes(base64.b64decode(_cookies_b64.strip()))
+            _write_cookie_file_secure(COOKIE_FILE, base64.b64decode(_cookies_b64.strip()))
         except Exception:
             pass
     elif _cookies_raw:
-        COOKIE_FILE.write_text(_cookies_raw.strip(), encoding="utf-8")
+        try:
+            _write_cookie_file_secure(COOKIE_FILE, _cookies_raw.strip().encode("utf-8"))
+        except Exception:
+            pass
+else:
+    try:
+        os.chmod(COOKIE_FILE, 0o600)
+    except Exception:
+        pass
 
 # Instagram Cookies & Session ID (bypasses Instagram login walls and rate limits)
 INSTAGRAM_SESSION_ID: Optional[str] = os.getenv("INSTAGRAM_SESSION_ID")
@@ -92,8 +110,13 @@ if not INSTAGRAM_COOKIE_FILE and INSTAGRAM_SESSION_ID:
             "# Netscape HTTP Cookie File\n"
             f".instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t{INSTAGRAM_SESSION_ID.strip()}\n"
         )
-        _ig_file.write_text(_content, encoding="utf-8")
+        _write_cookie_file_secure(_ig_file, _content.encode("utf-8"))
         INSTAGRAM_COOKIE_FILE = _ig_file
+    except Exception:
+        pass
+elif INSTAGRAM_COOKIE_FILE and INSTAGRAM_COOKIE_FILE.exists():
+    try:
+        os.chmod(INSTAGRAM_COOKIE_FILE, 0o600)
     except Exception:
         pass
 
@@ -107,10 +130,11 @@ TELEGRAM_API_ID: Optional[int] = int(_raw_api_id.strip()) if (_raw_api_id and _r
 TELEGRAM_API_HASH: Optional[str] = os.getenv("TELEGRAM_API_HASH").strip() if os.getenv("TELEGRAM_API_HASH") else None
 
 # Administrator Telegram IDs (Numeric User IDs, comma-separated in env)
-_admin_raw = os.getenv("ADMIN_IDS", "2063913663")
+# CRIT-3: Never hardcode default administrator user IDs in source code
+_admin_raw = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS: set[int] = {
     int(x.strip()) for x in _admin_raw.split(",") if x.strip().isdigit()
-} or {2063913663}
+}
 
 # Base Paths
 DATABASE_PATH: Path = Path(os.getenv("DATABASE_PATH", str(BASE_DIR / "bot_database.sqlite3")))

@@ -19,13 +19,13 @@ from config import (
 
 
 class UserRateLimiter:
-    """Sliding-window per-user rate limiter."""
+    """Sliding-window per-user rate limiter with zero cross-user lock contention."""
 
     def __init__(self, max_requests: int = RATE_LIMIT_REQUESTS, window_seconds: int = RATE_LIMIT_WINDOW):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._user_requests: Dict[int, deque] = defaultdict(deque)
-        self._lock = asyncio.Lock()
+        self._user_locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def is_rate_limited(self, user_id: int) -> tuple[bool, float]:
         """
@@ -42,7 +42,8 @@ class UserRateLimiter:
         effective_max = 25 if is_vip else self.max_requests
 
         now = time.time()
-        async with self._lock:
+        # PERF-4: Sharded per-user lock eliminates global bottleneck
+        async with self._user_locks[user_id]:
             timestamps = self._user_requests[user_id]
 
             # Evict timestamps outside current window
@@ -94,7 +95,7 @@ class LinkSpamGuard:
         self._last_link_time: Dict[int, float] = {}
         self._spam_violations: Dict[int, list[float]] = defaultdict(list)
         self._temp_bans: Dict[int, float] = {}
-        self._lock = asyncio.Lock()
+        self._user_locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def check_link_spam(self, user_id: int) -> tuple[bool, str]:
         """
@@ -110,7 +111,8 @@ class LinkSpamGuard:
             return False, ""
 
         now = time.time()
-        async with self._lock:
+        # PERF-4: Sharded per-user lock
+        async with self._user_locks[user_id]:
             # Check if user is currently under a temporary spam ban
             ban_until = self._temp_bans.get(user_id, 0.0)
             if now < ban_until:

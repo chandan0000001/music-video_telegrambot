@@ -727,9 +727,26 @@ Stop-Process -Name "python"
 
 ---
 
+## 🛡️ Security Architecture & Audit Hardening
+
+Following a comprehensive static analysis and penetration review, the bot incorporates enterprise-grade security controls:
+
+- **Strict Payment & UTR Verification (`CRIT-1`):** Gmail IMAP verification extracts monetary amounts using regular expressions and matches against `expected_amount` within ±₹1.00 tolerance. Rejects debit/outward transaction notifications and validates merchant VPA.
+- **Atomic UTR Claims & TOCTOU Double-Spend Prevention (`CRIT-2`):** Redemptions run inside atomic SQLite transactions (`BEGIN IMMEDIATE`) with database-level uniqueness enforcement, eliminating concurrency race conditions.
+- **Admin Identity Isolation (`CRIT-3`):** No hardcoded administrative IDs in source control. Configured exclusively via deployment environment variables.
+- **Enforced TLS Certificate Validation (`CRIT-4`):** All external API and media extraction sessions enforce full TLS handshake validation (`ssl=True`) to eliminate MITM session hijacking risks.
+- **FFmpeg Argument & Flag Injection Prevention (`HIGH-1`):** External metadata (titles, artists) undergoes rigorous sanitization—stripping leading dashes, null bytes, and control characters.
+- **Brute-Force Lockout Defense (`HIGH-2`):** Orders enforce a strict 5-attempt ceiling across both memory state and SQLite persistence, auto-expiring exhausted orders.
+- **DNS-Resolving SSRF & Cloud Metadata Filter (`HIGH-3`):** `is_safe_url` resolves hostnames via DNS, blocking private LAN subnets, loopbacks, decimal/octal tricks, IPv4-mapped IPv6, and AWS IMDS endpoints (`169.254.169.254`, `169.254.170.2`, `fd00:ec2::254`).
+- **Encapsulated Data Access Layer (`HIGH-5`):** Elimination of direct internal DB handle calls from presentation handlers; dedicated `cancel_order` and `reject_order` transactions.
+- **Non-Root Docker Hardening (`LOW-3`):** Docker containers execute as an unprivileged system user (`botuser`), mitigating container breakout risks.
+- **High-Throughput Sharded Rate Limiting (`PERF-4`):** Sliding-window rate limiters use fine-grained per-user locking to eliminate global lock contention bottlenecks.
+
+---
+
 ## 🧪 Automated Testing
 
-The bot includes an automated test suite covering all 15 core scenarios and multi-aspect ratio video streaming:
+The bot includes an automated test suite covering all 15 core scenarios, multi-aspect ratio video streaming, and security hardening:
 
 ```bash
 # Activate virtual environment
@@ -739,22 +756,23 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 113 automated test cases will execute:
+All 125 automated test cases will execute:
 ```text
 tests/test_all_buttons.py ...                                            [  2%]
-tests/test_coupons_and_referrals.py ..........                           [ 11%]
-tests/test_database.py ....                                              [ 15%]
-tests/test_handlers.py ........................                          [ 36%]
-tests/test_instagram.py .............                                    [ 47%]
-tests/test_progress.py ...............                                   [ 61%]
-tests/test_queue_and_spam.py .......                                     [ 67%]
-tests/test_rate_limiter.py ...                                           [ 69%]
-tests/test_services.py ...........                                       [ 79%]
-tests/test_time_utils.py .....                                           [ 84%]
-tests/test_twitter.py ........                                           [ 91%]
+tests/test_coupons_and_referrals.py ..........                           [ 10%]
+tests/test_database.py ....                                              [ 13%]
+tests/test_handlers.py ........................                          [ 32%]
+tests/test_instagram.py .............                                    [ 43%]
+tests/test_progress.py ...............                                   [ 55%]
+tests/test_queue_and_spam.py .......                                     [ 60%]
+tests/test_rate_limiter.py .....                                         [ 64%]
+tests/test_security_fixes.py ..........                                  [ 72%]
+tests/test_services.py ...........                                       [ 81%]
+tests/test_time_utils.py .....                                           [ 85%]
+tests/test_twitter.py ........                                           [ 92%]
 tests/test_validators.py ..........                                      [100%]
 
-============================= 113 passed in 10.78s =============================
+============================= 125 passed in 16.92s =============================
 ```
 
 ---

@@ -510,11 +510,27 @@ async def process_broadcast_text(message: Message, state: FSMContext) -> None:
     await execute_broadcast(message, content, state)
 
 
+MAX_BROADCAST_LENGTH = 1000
+
+
 async def execute_broadcast(message: Message, content: str, state: FSMContext) -> None:
     """Deliver broadcast message to all non-blocked registered users."""
     await state.clear()
     user = message.from_user
     if not user or not is_admin(user.id):
+        return
+
+    # MED-6: Broadcast size limit and empty check
+    if not content:
+        await message.answer("❌ Broadcast message cannot be empty.", parse_mode="HTML")
+        return
+
+    if len(content) > MAX_BROADCAST_LENGTH:
+        await message.answer(
+            f"❌ <b>Broadcast Message Too Long</b>\n\n"
+            f"Maximum allowed length is <code>{MAX_BROADCAST_LENGTH}</code> characters (received {len(content)}).",
+            parse_mode="HTML"
+        )
         return
 
     status_msg = await message.answer("📢 <i>Initiating broadcast...</i>", parse_mode="HTML")

@@ -104,7 +104,7 @@ class InstagramService:
         if INSTAGRAM_SESSION_ID:
             headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
         url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
@@ -131,7 +131,7 @@ class InstagramService:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         url = f"https://www.instagram.com/{username}/"
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
@@ -296,7 +296,7 @@ class InstagramService:
             f"https://www.instagram.com/{category}/{shortcode}/",
         ]
 
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             for fetch_url in urls_to_try:
                 try:
@@ -454,7 +454,7 @@ class InstagramService:
             "Accept": "text/html,application/xhtml+xml",
         }
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
+            connector = aiohttp.TCPConnector()
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status == 200:
@@ -492,7 +492,7 @@ class InstagramService:
 
         for base_api in instances:
             try:
-                connector = aiohttp.TCPConnector(ssl=False)
+                connector = aiohttp.TCPConnector()
                 async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.post(
                         f"{base_api}/",
@@ -689,7 +689,7 @@ class InstagramService:
     async def download_file(self, url: str, dest_path: Path, tracker: Optional[Any] = None) -> bool:
         """Download remote media file to local destination path with live progress tracking."""
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
+            connector = aiohttp.TCPConnector()
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                     if resp.status != 200:
@@ -766,7 +766,7 @@ class InstagramService:
         # Probe content lengths quickly to estimate total size accurately
         async def _probe_size(it: Dict[str, Any]) -> int:
             try:
-                connector = aiohttp.TCPConnector(ssl=False)
+                connector = aiohttp.TCPConnector()
                 async with aiohttp.ClientSession(connector=connector) as s:
                     async with s.head(it["url"], timeout=aiohttp.ClientTimeout(total=5)) as r:
                         return int(r.headers.get("Content-Length", 0))
@@ -787,7 +787,7 @@ class InstagramService:
             dest_file = job_dir / f"media_{index + 1}.{ext}"
 
             try:
-                connector = aiohttp.TCPConnector(ssl=False)
+                connector = aiohttp.TCPConnector()
                 async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.get(item["url"], timeout=aiohttp.ClientTimeout(total=60)) as resp:
                         if resp.status != 200:
@@ -902,7 +902,7 @@ class InstagramService:
             headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
 
         url = f"https://www.instagram.com/api/v1/clips/music/{audio_id}/"
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
@@ -947,7 +947,7 @@ class InstagramService:
             headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
 
         url = f"https://www.instagram.com/reels/audio/{audio_id}/"
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
@@ -1008,7 +1008,7 @@ class InstagramService:
         instances = [
             "https://api.cobalt.tools"
         ]
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             for base_api in instances:
                 try:

@@ -26,7 +26,9 @@ class FFmpegService:
         Execute FFmpeg/FFprobe securely without shell=True.
         Returns (success, stderr_or_stdout).
         """
-        logger.debug(f"Executing command: {' '.join(cmd)}")
+        # LOW-1: Truncate and sanitize debug log to prevent leaking full filesystem structure
+        target_name = Path(cmd[-1]).name if cmd else "unknown"
+        logger.debug(f"Executing FFmpeg/FFprobe: {cmd[0] if cmd else ''} [{len(cmd)-1} args] -> {target_name}")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -407,6 +409,17 @@ class FFmpegService:
         success, _ = await self._run_command(cmd, timeout=15)
         return success and output_image.exists()
 
+    @staticmethod
+    def sanitize_metadata(value: str, max_len: int = 200) -> str:
+        """
+        HIGH-1: Strip ffmpeg-interpretable characters from metadata values.
+        Prevents argument injection: strips leading hyphens, null bytes, newlines, and carriage returns.
+        """
+        if not value:
+            return ""
+        clean = str(value).strip().lstrip("-").replace("\x00", "").replace("\n", " ").replace("\r", " ")
+        return clean[:max_len]
+
     async def embed_audio_metadata(
         self,
         input_path: Path,
@@ -435,9 +448,12 @@ class FFmpegService:
                 "-b:a", "320k"
             ])
 
+        clean_title = self.sanitize_metadata(title)
+        clean_artist = self.sanitize_metadata(artist)
+
         cmd.extend([
-            "-metadata", f"title={title}",
-            "-metadata", f"artist={artist}",
+            "-metadata", f"title={clean_title}",
+            "-metadata", f"artist={clean_artist}",
             str(output_path)
         ])
 

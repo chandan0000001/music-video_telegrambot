@@ -46,8 +46,13 @@ class Database:
                 await conn.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
             except Exception:
                 pass
-            # Clean up any legacy redundant duplicate indexes
-            for legacy_idx in ("idx_users_telegram_id", "idx_orders_order_id", "idx_orders_utr_number"):
+            try:
+                await conn.execute("ALTER TABLE orders ADD COLUMN attempt_count INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            # Clean up any legacy redundant duplicate indexes using strict allowlist
+            ALLOWED_LEGACY_INDEXES = frozenset({"idx_users_telegram_id", "idx_orders_order_id", "idx_orders_utr_number"})
+            for legacy_idx in ALLOWED_LEGACY_INDEXES:
                 try:
                     await conn.execute(f"DROP INDEX IF EXISTS {legacy_idx}")
                 except Exception:
@@ -63,43 +68,30 @@ class Database:
         username: Optional[str] = None,
         first_name: Optional[str] = None
     ) -> dict[str, Any]:
-        """Upsert user and update last_active timestamp."""
+        """PERF-5: Upsert user and update last_active timestamp in a single round-trip."""
         async with self._get_connection() as conn:
             cursor = await conn.execute(
-                "SELECT id, telegram_id, username, first_name, is_blocked FROM users WHERE telegram_id = ?",
-                (telegram_id,)
+                """
+                INSERT INTO users (telegram_id, username, first_name)
+                VALUES (?, ?, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    username = excluded.username,
+                    first_name = excluded.first_name,
+                    last_active = CURRENT_TIMESTAMP
+                RETURNING id, telegram_id, username, first_name, is_blocked
+                """,
+                (telegram_id, username, first_name)
             )
-            existing = await cursor.fetchone()
-
-            if existing:
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET username = ?, first_name = ?, last_active = CURRENT_TIMESTAMP
-                    WHERE telegram_id = ?
-                    """,
-                    (username, first_name, telegram_id)
-                )
-                await conn.commit()
-                return dict(existing)
-            else:
-                await conn.execute(
-                    """
-                    INSERT INTO users (telegram_id, username, first_name)
-                    VALUES (?, ?, ?)
-                    """,
-                    (telegram_id, username, first_name)
-                )
-                await conn.execute(
-                    "UPDATE bot_statistics SET total_users = total_users + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1"
-                )
-                await conn.commit()
-                return {
-                    "telegram_id": telegram_id,
-                    "username": username,
-                    "first_name": first_name,
-                    "is_blocked": 0
-                }
+            row = await cursor.fetchone()
+            await conn.commit()
+            if row:
+                return dict(row)
+            return {
+                "telegram_id": telegram_id,
+                "username": username,
+                "first_name": first_name,
+                "is_blocked": 0
+            }
 
     async def get_user(self, telegram_id: int) -> Optional[dict[str, Any]]:
         """Retrieve user details by Telegram ID."""
@@ -294,29 +286,25 @@ class Database:
             return cur.rowcount
 
     async def get_statistics(self) -> dict[str, Any]:
-        """Aggregate all dashboard metrics."""
+        """PERF-2: Aggregate all dashboard metrics in a single combined SQL query."""
         async with self._get_connection() as conn:
-            # Total users
-            cur = await conn.execute("SELECT COUNT(*) as count FROM users")
-            total_users = (await cur.fetchone())["count"]
-
-            # New users today
             cur = await conn.execute(
-                "SELECT COUNT(*) as count FROM users WHERE date(joined_at) = date('now', 'localtime')"
+                """
+                SELECT
+                    COUNT(*) AS total_users,
+                    COALESCE(SUM(CASE WHEN date(joined_at) = date('now', 'localtime') THEN 1 ELSE 0 END), 0) AS new_users_today,
+                    (SELECT COUNT(*) FROM search_history) AS total_searches,
+                    (SELECT COUNT(*) FROM downloads WHERE status = 'completed') AS successful_downloads,
+                    (SELECT COUNT(*) FROM downloads WHERE status = 'failed') AS failed_downloads
+                FROM users
+                """
             )
-            new_users_today = (await cur.fetchone())["count"]
-
-            # Total searches
-            cur = await conn.execute("SELECT COUNT(*) as count FROM search_history")
-            total_searches = (await cur.fetchone())["count"]
-
-            # Total successful downloads
-            cur = await conn.execute("SELECT COUNT(*) as count FROM downloads WHERE status = 'completed'")
-            successful_downloads = (await cur.fetchone())["count"]
-
-            # Total failed downloads
-            cur = await conn.execute("SELECT COUNT(*) as count FROM downloads WHERE status = 'failed'")
-            failed_downloads = (await cur.fetchone())["count"]
+            row = await cur.fetchone()
+            total_users = row["total_users"] if row else 0
+            new_users_today = row["new_users_today"] if row else 0
+            total_searches = row["total_searches"] if row else 0
+            successful_downloads = row["successful_downloads"] if row else 0
+            failed_downloads = row["failed_downloads"] if row else 0
 
             # Most searched songs
             top_searches = await self.get_top_searches(limit=5)
@@ -338,9 +326,10 @@ class Database:
             }
 
     async def export_table_to_csv(self, table_name: str) -> str:
-        """Export specified table data as a CSV formatted string."""
-        if table_name not in {"users", "search_history", "downloads", "user_subscriptions", "orders"}:
-            raise ValueError(f"Invalid table name: {table_name}")
+        """MED-1: Export specified table data as CSV with strictly validated allowlist."""
+        allowed_tables = frozenset({"users", "search_history", "downloads", "user_subscriptions", "orders"})
+        if table_name not in allowed_tables:
+            raise ValueError(f"Invalid table name: {table_name!r}")
 
         async with self._get_connection() as conn:
             cursor = await conn.execute(f"SELECT * FROM {table_name}")
@@ -423,36 +412,158 @@ class Database:
 
     async def is_utr_already_used(self, utr_number: str, exclude_order_id: Optional[str] = None) -> bool:
         """Check if UTR has already been successfully redeemed (anti-fraud)."""
+        clean_utr = utr_number.strip()
         async with self._get_connection() as conn:
             if exclude_order_id:
                 cur = await conn.execute(
                     "SELECT id FROM orders WHERE utr_number = ? AND status = 'paid' AND order_id != ?",
-                    (utr_number, exclude_order_id)
+                    (clean_utr, exclude_order_id)
                 )
             else:
                 cur = await conn.execute(
                     "SELECT id FROM orders WHERE utr_number = ? AND status = 'paid'",
-                    (utr_number,)
+                    (clean_utr,)
                 )
             row = await cur.fetchone()
             return row is not None
 
     async def record_order_utr(self, order_id: str, utr_number: str) -> bool:
         """Attach UTR number to order."""
+        clean_utr = utr_number.strip()
         async with self._get_connection() as conn:
             try:
                 await conn.execute(
                     "UPDATE orders SET utr_number = ? WHERE order_id = ?",
-                    (utr_number, order_id)
+                    (clean_utr, order_id)
                 )
                 await conn.commit()
                 return True
             except Exception as e:
-                logger.warning(f"Could not record UTR {utr_number} for {order_id}: {e}")
+                logger.warning(f"Could not record UTR {clean_utr} for {order_id}: {e}")
                 return False
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """HIGH-5: Cleanly cancel pending order without raw connection bypass."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "UPDATE orders SET status = 'cancelled' WHERE order_id = ? AND status = 'pending'",
+                (order_id,)
+            )
+            await conn.commit()
+            logger.info(f"Order {order_id} cancelled.")
+            return cur.rowcount > 0
+
+    async def reject_order(self, order_id: str) -> bool:
+        """HIGH-5: Reject pending order without raw connection bypass."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "UPDATE orders SET status = 'rejected' WHERE order_id = ? AND status = 'pending'",
+                (order_id,)
+            )
+            await conn.commit()
+            logger.info(f"Order {order_id} rejected by admin.")
+            return cur.rowcount > 0
+
+    async def mark_order_expired(self, order_id: str) -> bool:
+        """Mark order as expired due to timeout or attempt limit exhaustion."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "UPDATE orders SET status = 'expired' WHERE order_id = ? AND status = 'pending'",
+                (order_id,)
+            )
+            await conn.commit()
+            logger.info(f"Order {order_id} marked as expired.")
+            return cur.rowcount > 0
+
+    async def increment_order_attempts(self, order_id: str) -> int:
+        """HIGH-2: Track submission attempts per order in DB."""
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "UPDATE orders SET attempt_count = COALESCE(attempt_count, 0) + 1 WHERE order_id = ?",
+                (order_id,)
+            )
+            await conn.commit()
+            cur = await conn.execute("SELECT attempt_count FROM orders WHERE order_id = ?", (order_id,))
+            row = await cur.fetchone()
+            return row["attempt_count"] if (row and row["attempt_count"] is not None) else 1
+
+    async def atomic_claim_and_mark_paid(
+        self, order_id: str, utr_number: str
+    ) -> Tuple[bool, Optional[dict[str, Any]], str]:
+        """
+        CRIT-2: Atomically claim a UTR and mark order as paid inside an immediate exclusive transaction.
+        Eliminates TOCTOU race conditions and double-spending across concurrent user sessions.
+        Returns (success, order_dict, message).
+        """
+        clean_utr = utr_number.strip()
+        async with self._get_connection() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                # 1. Check if this UTR has already been claimed by another paid order
+                cur = await conn.execute(
+                    "SELECT id, order_id FROM orders WHERE utr_number = ? AND status = 'paid' AND order_id != ?",
+                    (clean_utr, order_id)
+                )
+                dup = await cur.fetchone()
+                if dup:
+                    await conn.rollback()
+                    return False, None, "❌ Fraud Alert: This UTR has already been claimed by another transaction."
+
+                # 2. Retrieve order
+                cur = await conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+                order = await cur.fetchone()
+                if not order:
+                    await conn.rollback()
+                    return False, None, "❌ Order not found."
+
+                order_dict = dict(order)
+                if order_dict.get("status") == "paid":
+                    await conn.commit()
+                    return True, order_dict, "✅ Order has already been paid and activated."
+
+                if self.is_order_expired(order_dict):
+                    await conn.execute("UPDATE orders SET status = 'expired' WHERE order_id = ?", (order_id,))
+                    await conn.commit()
+                    return False, None, "❌ Order Expired: The 10-minute validity period has elapsed."
+
+                # 3. Atomically update status to 'paid'
+                cur = await conn.execute(
+                    """
+                    UPDATE orders
+                    SET status = 'paid', utr_number = ?, paid_at = CURRENT_TIMESTAMP
+                    WHERE order_id = ? AND status = 'pending'
+                    """,
+                    (clean_utr, order_id)
+                )
+                if cur.rowcount == 0:
+                    await conn.rollback()
+                    return False, None, "❌ Order could not be updated (order may have expired or already processed)."
+
+                await conn.commit()
+            except Exception as e:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
+                logger.exception(f"Error in atomic_claim_and_mark_paid for {order_id}: {e}")
+                return False, None, f"Database transaction error: {e}"
+
+        # If it's a subscription pass, activate it!
+        if order_dict["order_type"].startswith("sub_"):
+            plan = order_dict["order_type"].replace("sub_", "")
+            await self.activate_subscription(order_dict["telegram_id"], plan)
+
+        order_dict["status"] = "paid"
+        order_dict["utr_number"] = clean_utr
+        return True, order_dict, "✅ Successfully verified and activated!"
 
     async def mark_order_paid(self, order_id: str, utr_number: Optional[str] = None) -> Optional[dict[str, Any]]:
         """Mark order as paid and activate subscription if order_type is a pass (Idempotent)."""
+        if utr_number:
+            success, order_dict, _ = await self.atomic_claim_and_mark_paid(order_id, utr_number)
+            if success:
+                return order_dict
+
         async with self._get_connection() as conn:
             cur = await conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
             order = await cur.fetchone()
@@ -461,33 +572,12 @@ class Database:
 
             order_dict = dict(order)
             if order_dict.get("status") == "paid":
-                # Already marked paid; update utr_number if provided and not yet set
-                if utr_number and not order_dict.get("utr_number"):
-                    try:
-                        await conn.execute("UPDATE orders SET utr_number = ? WHERE order_id = ?", (utr_number, order_id))
-                        await conn.commit()
-                        order_dict["utr_number"] = utr_number
-                    except Exception:
-                        pass
                 return order_dict
 
-            try:
-                if utr_number:
-                    await conn.execute(
-                        "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP, utr_number = ? WHERE order_id = ?",
-                        (utr_number, order_id)
-                    )
-                else:
-                    await conn.execute(
-                        "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ?",
-                        (order_id,)
-                    )
-            except Exception as e:
-                logger.warning(f"Error updating order {order_id} with UTR {utr_number}: {e}. Fallback updating status.")
-                await conn.execute(
-                    "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ?",
-                    (order_id,)
-                )
+            await conn.execute(
+                "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+                (order_id,)
+            )
             await conn.commit()
 
         # If it's a subscription pass, activate it!
@@ -496,8 +586,6 @@ class Database:
             await self.activate_subscription(order_dict["telegram_id"], plan)
 
         order_dict["status"] = "paid"
-        if utr_number:
-            order_dict["utr_number"] = utr_number
         return order_dict
 
     # ------------------ Subscriptions ------------------
@@ -640,6 +728,20 @@ class Database:
                 "expiry_date": sub["expiry_date"],
                 "expired": False
             }
+
+    async def reset_daily_quotas(self) -> int:
+        """MED-4: Background cron task to reset daily usage counters for all active subscribers."""
+        from datetime import datetime, timezone
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "UPDATE user_subscriptions SET today_video_used = 0, last_reset_date = ? WHERE last_reset_date != ?",
+                (today_str, today_str)
+            )
+            await conn.commit()
+            if cur.rowcount > 0:
+                logger.info(f"Daily Quota Reset: Reset quotas for {cur.rowcount} active subscription(s).")
+            return cur.rowcount
 
     async def use_subscription_video_quota(self, telegram_id: int) -> bool:
         """Increment daily video usage for subscriber."""

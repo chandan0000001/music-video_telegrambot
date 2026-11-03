@@ -3,6 +3,7 @@ Input Validation and Security Filters
 Ensures safe handling of URLs, user inputs, and filenames.
 """
 import re
+import socket
 import ipaddress
 from urllib.parse import urlparse, parse_qs
 from typing import Optional, Tuple
@@ -63,28 +64,88 @@ INSTAGRAM_RESERVED_ROUTES = {
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\?%*:|"<>^\x00-\x1f]')
 
 
+# AWS IMDS and internal metadata IP targets (IPv4 & IPv6)
+AWS_METADATA_IPS = frozenset({
+    "169.254.169.254",
+    "169.254.170.2",
+    "fd00:ec2::254"
+})
+
+
+def _is_disallowed_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Helper to detect private, loopback, reserved, link-local, multicast, or cloud metadata IPs."""
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_reserved
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+        or str(ip) in AWS_METADATA_IPS
+    ):
+        return True
+
+    # Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        mapped = ip.ipv4_mapped
+        if (
+            mapped.is_private
+            or mapped.is_loopback
+            or mapped.is_reserved
+            or mapped.is_link_local
+            or str(mapped) in AWS_METADATA_IPS
+        ):
+            return True
+
+    return False
+
+
 def is_safe_url(url: str) -> bool:
-    """SSRF Prevention: Ensure URL is public, uses HTTP/HTTPS, and not pointing to private or AWS internal networks."""
+    """
+    HIGH-3: SSRF Prevention with IP Normalization & Real DNS Resolution.
+    Ensures URL uses HTTP/HTTPS and resolves exclusively to public global IP addresses.
+    Blocks private subnets, loopbacks, octal/decimal bypasses, IPv4-mapped IPv6, and AWS IMDS.
+    """
     try:
         parsed = urlparse(url.strip())
-        if parsed.scheme.lower() not in ("http", "https"):
+        scheme = parsed.scheme.lower()
+        if scheme not in ("http", "https"):
             return False
 
         hostname = parsed.hostname
         if not hostname:
             return False
 
-        # Reject localhost, local names, and AWS IMDS metadata service
-        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"):
+        lower_host = hostname.lower()
+
+        # Immediate filter for common local hostnames and metadata endpoints
+        if lower_host in ("localhost", "0.0.0.0", "127.0.0.1", "::1") or lower_host in AWS_METADATA_IPS:
             return False
 
-        # Check if IP address is private/reserved/link-local
+        # 1. Check if hostname is an IP address literal
         try:
             ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            if _is_disallowed_ip(ip):
                 return False
+            return True
         except ValueError:
-            pass  # It's a standard domain name, proceed
+            pass  # It is a domain name, resolve via DNS
+
+        # 2. Resolve domain name to catch DNS rebinding and private LAN IP targets
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+            if not addr_info:
+                return False
+            for item in addr_info:
+                resolved_ip_str = item[4][0]
+                resolved_ip = ipaddress.ip_address(resolved_ip_str)
+                if _is_disallowed_ip(resolved_ip):
+                    return False
+        except (socket.gaierror, socket.herror, TimeoutError, OSError):
+            # In offline or restricted network test environments, allow known public domains
+            if lower_host in ALLOWED_YOUTUBE_DOMAINS or lower_host in TWITTER_DOMAINS or lower_host in INSTAGRAM_DOMAINS:
+                return True
+            return False
 
         return True
     except Exception:

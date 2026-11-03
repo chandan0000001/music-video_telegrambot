@@ -58,13 +58,15 @@ class MediaService:
         return job_dir
 
     def cleanup_job_dir(self, job_dir: Path) -> None:
-        """Completely clean up job directory and all temporary files."""
+        """LOW-4: Completely clean up job directory and log any cleanup errors."""
         try:
             if job_dir.exists() and job_dir.is_dir():
-                shutil.rmtree(job_dir, ignore_errors=True)
+                shutil.rmtree(job_dir)
                 logger.debug(f"Cleaned up temporary directory: {job_dir}")
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Failed to remove temp dir {job_dir}: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error removing temp dir {job_dir}: {e}")
 
     def _get_common_ydl_opts(self) -> Dict[str, Any]:
         """Base options for yt-dlp metadata and downloads."""
