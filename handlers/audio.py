@@ -145,6 +145,12 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     if not status_msg:
         return
 
+    chat_id = status_msg.chat.id if status_msg and status_msg.chat else user_id
+    try:
+        await status_msg.edit_text(f"⏳ <b>Starting {selected_format.upper()} ({bitrate}kbps) audio download...</b>", parse_mode="HTML")
+    except Exception:
+        pass
+
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
     # Record initial pending download in database
@@ -206,7 +212,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         acquired_slot = True
 
         # Send companion entertainment animation/sticker
-        anim_msg = await send_download_animation(callback.bot, user_id)
+        anim_msg = await send_download_animation(callback.bot, chat_id)
 
         retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
         back_cb = f"opt_audio:{video_id}"
@@ -251,7 +257,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
 
         sent = await telegram_service.send_audio_file(
             bot=callback.bot,
-            chat_id=user_id,
+            chat_id=chat_id,
             file_path=result["file_path"],
             title=result["title"],
             artist=result["artist"],

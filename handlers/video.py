@@ -224,6 +224,10 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             await db.use_subscription_video_quota(user_id)
 
     await callback.answer(f"Starting {resolution} video download...")
+    try:
+        await status_msg.edit_text(f"⏳ <b>Starting {resolution} video download...</b>", parse_mode="HTML")
+    except Exception:
+        pass
     await execute_video_download_pipeline(
         status_msg=status_msg,
         video_id=video_id,
@@ -244,6 +248,7 @@ async def execute_video_download_pipeline(
     if bot is None:
         bot = status_msg.bot
 
+    chat_id = status_msg.chat.id if status_msg and status_msg.chat else user_id
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
     # Record initial pending download in database
@@ -305,7 +310,7 @@ async def execute_video_download_pipeline(
         acquired_slot = True
 
         # Send companion entertainment animation/sticker
-        anim_msg = await send_download_animation(bot, user_id)
+        anim_msg = await send_download_animation(bot, chat_id)
 
         retry_cb = f"vdl:{video_id}:{resolution}"
         back_cb = f"opt_video:{video_id}"
@@ -349,7 +354,7 @@ async def execute_video_download_pipeline(
 
         sent = await telegram_service.send_video_file(
             bot=bot,
-            chat_id=user_id,
+            chat_id=chat_id,
             file_path=result["file_path"],
             title=result["title"],
             duration=result["duration"],

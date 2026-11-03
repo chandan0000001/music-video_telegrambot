@@ -152,7 +152,8 @@ async def _execute_twitter_download(message: Message, url: str, check_spam: bool
         return
 
     # Send companion entertainment animation/sticker
-    anim_msg = await send_download_animation(message.bot, user_id)
+    chat_id = message.chat.id if message and message.chat else user_id
+    anim_msg = await send_download_animation(message.bot, chat_id)
 
     job_dir = twitter_service._get_job_dir()
 
