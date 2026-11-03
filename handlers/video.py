@@ -224,16 +224,19 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             await db.use_subscription_video_quota(user_id)
 
     await callback.answer(f"Starting {resolution} video download...")
+    chat_id = status_msg.chat.id if status_msg and status_msg.chat else user_id
     try:
         await status_msg.edit_text(f"⏳ <b>Starting {resolution} video download...</b>", parse_mode="HTML")
     except Exception:
         pass
+    anim_msg = await send_download_animation(callback.bot, chat_id)
     await execute_video_download_pipeline(
         status_msg=status_msg,
         video_id=video_id,
         resolution=resolution,
         user_id=user_id,
-        bot=callback.bot
+        bot=callback.bot,
+        anim_msg=anim_msg
     )
 
 
@@ -242,7 +245,8 @@ async def execute_video_download_pipeline(
     video_id: str,
     resolution: str,
     user_id: int,
-    bot=None
+    bot=None,
+    anim_msg: Optional[Message] = None
 ) -> None:
     """Download, remux, and deliver video file with progress tracking."""
     if bot is None:
@@ -270,7 +274,9 @@ async def execute_video_download_pipeline(
     acquired_slot = False
     job_dir = None
     reporter = None
-    anim_msg = None
+
+    if anim_msg is None:
+        anim_msg = await send_download_animation(bot, chat_id)
 
     try:
         media_title = f"YouTube Video ({video_id})"
@@ -283,6 +289,7 @@ async def execute_video_download_pipeline(
         # Check per-user limit
         can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
         if not can_start:
+            await vanish_download_animation(anim_msg)
             await status_msg.edit_text(limit_msg, parse_mode="Markdown")
             return
 
@@ -290,6 +297,7 @@ async def execute_video_download_pipeline(
         from utils.disk_cleaner import check_disk_space_available
         has_disk, _ = check_disk_space_available(min_free_mb=1000)
         if not has_disk:
+            await vanish_download_animation(anim_msg)
             await status_msg.edit_text(
                 "⚠️ **Server Storage Busy**\n\n"
                 "The server's media buffer is currently handling multiple large downloads. "
@@ -306,11 +314,9 @@ async def execute_video_download_pipeline(
             status_msg=status_msg
         )
         if not acquired:
+            await vanish_download_animation(anim_msg)
             return
         acquired_slot = True
-
-        # Send companion entertainment animation/sticker
-        anim_msg = await send_download_animation(bot, chat_id)
 
         retry_cb = f"vdl:{video_id}:{resolution}"
         back_cb = f"opt_video:{video_id}"

@@ -227,12 +227,14 @@ async def _execute_instagram_audio(
     identifier: str,
     status_msg: Message,
     url: str,
-    user_id: int
+    user_id: int,
+    anim_msg: Optional[Message] = None
 ) -> None:
     """Download and deliver Instagram audio track with tags and cover artwork."""
     await status_msg.edit_text("🔍 <i>Fetching Instagram audio stream...</i>", parse_mode="HTML")
     success, audio_info, err_msg = await instagram_service.get_instagram_audio(identifier)
     if not success or not audio_info:
+        await vanish_download_animation(anim_msg)
         await status_msg.edit_text(
             f"❌ {err_msg or 'Could not retrieve audio from this link.'}",
             reply_markup=get_back_to_main_keyboard(),
@@ -250,10 +252,12 @@ async def _execute_instagram_audio(
         status_msg=status_msg
     )
     if not acquired:
+        await vanish_download_animation(anim_msg)
         return
 
     chat_id = message.chat.id if message and message.chat else user_id
-    anim_msg = await send_download_animation(message.bot, chat_id)
+    if not anim_msg:
+        anim_msg = await send_download_animation(message.bot, chat_id)
     job_dir = instagram_service._get_job_dir()
 
     dl_tracker = DownloadProgressTracker(
@@ -334,6 +338,8 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
         await send_vanishing_message(message, limit_msg, delay=90.0, parse_mode="Markdown")
         return
 
+    chat_id = message.chat.id if message and message.chat else user_id
+    anim_msg = await send_download_animation(message.bot, chat_id)
     status_msg = await message.answer("🔍 *Inspecting Instagram link...*", parse_mode="Markdown")
 
     info_tuple = extract_instagram_info(url)
@@ -341,6 +347,7 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
     identifier = info_tuple[1] if info_tuple else ""
 
     if cat == "live":
+        await vanish_download_animation(anim_msg)
         await status_msg.edit_text(
             "🔴 <b>Access Restricted: Active Live Broadcast</b>\n\n"
             "⚠️ This is an active <b>Instagram Live</b> broadcast and cannot be downloaded while in progress.\n\n"
@@ -351,11 +358,12 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
         return
 
     if cat == "audio":
-        await _execute_instagram_audio(message, identifier, status_msg, url, user_id)
+        await _execute_instagram_audio(message, identifier, status_msg, url, user_id, anim_msg=anim_msg)
         return
 
     success, media_items, err_msg = await instagram_service.get_instagram_media(url)
     if not success or not media_items:
+        await vanish_download_animation(anim_msg)
         if err_msg and ("access restricted" in err_msg.lower() or "private category" in err_msg.lower() or "members-only" in err_msg.lower()):
             await status_msg.edit_text(
                 err_msg,
@@ -390,11 +398,12 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
         status_msg=status_msg
     )
     if not acquired:
+        await vanish_download_animation(anim_msg)
         return
 
-    # Send companion entertainment animation/sticker
-    chat_id = message.chat.id if message and message.chat else user_id
-    anim_msg = await send_download_animation(message.bot, chat_id)
+    # Ensure animation message exists
+    if not anim_msg:
+        anim_msg = await send_download_animation(message.bot, chat_id)
 
     job_dir = instagram_service._get_job_dir()
 

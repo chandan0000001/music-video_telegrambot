@@ -73,31 +73,99 @@ class TwitterService:
             return False, [], "⚠️ Invalid or unsupported X (Twitter) URL. Please provide a valid post link."
 
         username, tweet_id = info
-        api_url = f"https://api.fxtwitter.com/{username}/status/{tweet_id}"
+        endpoints = [
+            (f"https://api.vxtwitter.com/{username}/status/{tweet_id}", "vxtwitter"),
+            (f"https://api.fxtwitter.com/{username}/status/{tweet_id}", "fxtwitter"),
+            (f"https://api.fixupx.com/{username}/status/{tweet_id}", "fxtwitter")
+        ]
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://t.me/songsuperzxbot)"
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=12)) as resp:
-                    if resp.status == 404:
-                        return False, [], (
-                            "🔒 <b>Access Restricted: Private Category</b>\n\n"
-                            "⚠️ This X (Twitter) post was not found, has been deleted, or belongs to a <b>Private / Protected</b> account.\n\n"
-                            "<i>Private posts cannot be accessed or downloaded without authorized follower access.</i>"
-                        )
+        for api_url, api_kind in endpoints:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4, connect=2.5)) as resp:
+                        if resp.status == 404:
+                            return False, [], (
+                                "🔒 <b>Access Restricted: Private Category</b>\n\n"
+                                "⚠️ This X (Twitter) post was not found, has been deleted, or belongs to a <b>Private / Protected</b> account.\n\n"
+                                "<i>Private posts cannot be accessed or downloaded without authorized follower access.</i>"
+                            )
 
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return self._parse_fxtwitter_response(data)
-                    else:
-                        logger.warning(f"FxTwitter API returned status {resp.status} for {url}. Attempting yt-dlp fallback...")
-        except Exception as e:
-            logger.warning(f"FxTwitter API request error for {url}: {e}. Attempting yt-dlp fallback...")
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if api_kind == "vxtwitter" and ("media_extended" in data or "mediaURLs" in data):
+                                ok, items, err = self._parse_vxtwitter_response(data)
+                            else:
+                                ok, items, err = self._parse_fxtwitter_response(data)
+                            if ok and items:
+                                return ok, items, err
+            except Exception as e:
+                logger.debug(f"{api_kind} failed for {url} ({api_url}): {e}")
+                continue
 
-        # Fallback to yt-dlp
+        # Fallback to yt-dlp with strict fast timeouts
         return await asyncio.to_thread(self._fallback_extract_with_ytdlp, url)
+
+    def _parse_vxtwitter_response(self, data: Dict[str, Any]) -> Tuple[bool, List[Dict[str, Any]], Optional[str]]:
+        """Parse structured JSON from vxTwitter API."""
+        if not data:
+            return False, [], "⚠️ Could not retrieve tweet information."
+
+        media_ext = data.get("media_extended") or []
+        parsed_items: List[Dict[str, Any]] = []
+
+        for item in media_ext:
+            m_type = item.get("type", "").lower()
+            m_url = item.get("url")
+            if not m_url:
+                continue
+
+            size = item.get("size") or {}
+            width = size.get("width")
+            height = size.get("height")
+            duration = item.get("duration_millis")
+            if duration:
+                duration = duration / 1000.0
+
+            if m_type in ("image", "photo"):
+                orig_url = self._make_orig_photo_url(m_url)
+                parsed_items.append({
+                    "type": "photo",
+                    "url": orig_url,
+                    "width": width,
+                    "height": height
+                })
+            elif m_type == "video":
+                parsed_items.append({
+                    "type": "video",
+                    "url": m_url,
+                    "thumbnail_url": item.get("thumbnail_url"),
+                    "duration": duration,
+                    "width": width,
+                    "height": height
+                })
+            elif m_type == "gif":
+                parsed_items.append({
+                    "type": "gif",
+                    "url": m_url,
+                    "thumbnail_url": item.get("thumbnail_url")
+                })
+
+        if not parsed_items:
+            for m_url in data.get("mediaURLs", []):
+                if any(m_url.lower().endswith(ext) for ext in (".mp4", ".mov", ".m4v")):
+                    parsed_items.append({"type": "video", "url": m_url})
+                elif any(m_url.lower().endswith(ext) for ext in (".gif",)):
+                    parsed_items.append({"type": "gif", "url": m_url})
+                else:
+                    parsed_items.append({"type": "photo", "url": self._make_orig_photo_url(m_url)})
+
+        if not parsed_items:
+            return False, [], "⚠️ No supported media found in this X/Twitter post."
+
+        return True, parsed_items[:self.max_items_limit], None
 
     def _parse_fxtwitter_response(self, data: Dict[str, Any]) -> Tuple[bool, List[Dict[str, Any]], Optional[str]]:
         """Parse structured JSON from FxTwitter API."""
@@ -167,12 +235,15 @@ class TwitterService:
         return True, parsed_items[:self.max_items_limit], None
 
     def _fallback_extract_with_ytdlp(self, url: str) -> Tuple[bool, List[Dict[str, Any]], Optional[str]]:
-        """Fallback extractor using yt-dlp for video extraction."""
+        """Fallback extractor using yt-dlp for video extraction with fast timeout protection."""
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "socket_timeout": 15,
+            "socket_timeout": 8,
+            "retries": 1,
+            "extractor_retries": 1,
+            "noplaylist": True,
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -224,7 +295,7 @@ class TwitterService:
 
                     with open(dest_path, "wb") as f:
                         while True:
-                            chunk = await resp.content.read(64 * 1024)
+                            chunk = await resp.content.read(256 * 1024)
                             if not chunk:
                                 break
                             f.write(chunk)
@@ -306,7 +377,7 @@ class TwitterService:
                             return None
                         with open(dest_file, "wb") as f:
                             while True:
-                                chunk = await resp.content.read(64 * 1024)
+                                chunk = await resp.content.read(256 * 1024)
                                 if not chunk:
                                     break
                                 f.write(chunk)

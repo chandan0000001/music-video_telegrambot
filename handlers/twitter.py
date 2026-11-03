@@ -120,10 +120,14 @@ async def _execute_twitter_download(message: Message, url: str, check_spam: bool
         await send_vanishing_message(message, limit_msg, delay=90.0, parse_mode="Markdown")
         return
 
+    # Send companion entertainment animation right away so user sees it during inspecting, downloading, and uploading
+    chat_id = message.chat.id if message and message.chat else user_id
+    anim_msg = await send_download_animation(message.bot, chat_id)
     status_msg = await message.answer("🔍 *Inspecting X (Twitter) media...*", parse_mode="Markdown")
 
     success, media_items, err_msg = await twitter_service.get_tweet_media(url)
     if not success or not media_items:
+        await vanish_download_animation(anim_msg)
         if err_msg and ("access restricted" in err_msg.lower() or "private category" in err_msg.lower() or "members-only" in err_msg.lower()):
             await status_msg.edit_text(
                 err_msg,
@@ -149,11 +153,12 @@ async def _execute_twitter_download(message: Message, url: str, check_spam: bool
         status_msg=status_msg
     )
     if not acquired:
+        await vanish_download_animation(anim_msg)
         return
 
-    # Send companion entertainment animation/sticker
-    chat_id = message.chat.id if message and message.chat else user_id
-    anim_msg = await send_download_animation(message.bot, chat_id)
+    # Ensure animation message exists
+    if not anim_msg:
+        anim_msg = await send_download_animation(message.bot, chat_id)
 
     job_dir = twitter_service._get_job_dir()
 

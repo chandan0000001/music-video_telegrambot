@@ -151,6 +151,8 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     except Exception:
         pass
 
+    anim_msg = await send_download_animation(callback.bot, chat_id)
+
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
     # Record initial pending download in database
@@ -174,6 +176,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     # Check per-user limit
     can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
     if not can_start:
+        await vanish_download_animation(anim_msg)
         await status_msg.edit_text(limit_msg, parse_mode="Markdown")
         return
 
@@ -185,13 +188,13 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     acquired_slot = False
     job_dir = None
     reporter = None
-    anim_msg = None
 
     try:
         # Check server storage health before accepting jobs
         from utils.disk_cleaner import check_disk_space_available
         has_disk, _ = check_disk_space_available(min_free_mb=600)
         if not has_disk:
+            await vanish_download_animation(anim_msg)
             await status_msg.edit_text(
                 "⚠️ **Server Storage Busy**\n\n"
                 "The server's media buffer is currently handling multiple large downloads. "
@@ -208,11 +211,13 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
             status_msg=status_msg
         )
         if not acquired:
+            await vanish_download_animation(anim_msg)
             return
         acquired_slot = True
 
-        # Send companion entertainment animation/sticker
-        anim_msg = await send_download_animation(callback.bot, chat_id)
+        # Ensure companion entertainment animation is active
+        if not anim_msg:
+            anim_msg = await send_download_animation(callback.bot, chat_id)
 
         retry_cb = f"adl:{video_id}:{selected_format}:{bitrate}"
         back_cb = f"opt_audio:{video_id}"
