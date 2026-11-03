@@ -568,6 +568,66 @@ async def test_admin_clear_search_history():
     assert len(recent_after) == 0
 
 
+@pytest.mark.asyncio
+async def test_unsupported_link_funny_reply():
+    """Verify funny reply is sent when an unsupported link (e.g. tiktok, facebook) is sent."""
+    from handlers.search import handle_user_text
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.text = "https://facebook.com/watch?v=12345"
+    mock_msg.from_user = User(id=987654321, is_bot=False, first_name="TestUser")
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+    mock_state.get_state = AsyncMock(return_value=None)
+
+    await handle_user_text(mock_msg, mock_state)
+    mock_msg.answer.assert_awaited_once()
+    assert "Jaannii gharr akke marunga valid link bhejj" in mock_msg.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_unknown_command_never_searches_youtube():
+    """Verify unknown slash commands return Unknown Command error instead of searching YouTube."""
+    from handlers.search import handle_user_text
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.text = "/unknown_command_test 12345"
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+    mock_state.get_state = AsyncMock(return_value=None)
+
+    await handle_user_text(mock_msg, mock_state)
+    mock_msg.answer.assert_awaited_once()
+    assert "Unknown command" in mock_msg.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_plain_text_without_state_suggests_search():
+    """Verify plain text without state offers a 1-tap search button rather than blindly searching."""
+    from handlers.search import handle_user_text
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.text = "Arijit Singh Kesariya"
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="TestUser")
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+    mock_state.get_state = AsyncMock(return_value=None)
+
+    await handle_user_text(mock_msg, mock_state)
+    mock_msg.answer.assert_awaited_once()
+    assert "Looking for music?" in mock_msg.answer.call_args[0][0]
+    # Check that search button is offered in reply_markup
+    markup = mock_msg.answer.call_args[1]["reply_markup"]
+    assert any("dosearch:" in btn.callback_data for row in markup.inline_keyboard for btn in row if btn.callback_data)
+
+
+@pytest.mark.asyncio
+async def test_about_text_removes_github_link():
+    """Verify /about text does not contain github repository link and mentions contacting admin."""
+    from handlers.start import ABOUT_TEXT
+    assert "https://github.com" not in ABOUT_TEXT
+    assert "Contact Admin" in ABOUT_TEXT
+
+
+
 
 
 

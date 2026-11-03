@@ -3,7 +3,7 @@ Music Search & YouTube Link Processing Handler
 """
 import logging
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
@@ -83,7 +83,7 @@ async def cb_menu_video(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.answer(text, reply_markup=get_back_to_main_keyboard(), parse_mode="Markdown")
 
 
-@router.message(Command("search"))
+@router.message(Command("search", "song"))
 async def cmd_search(message: Message, state: FSMContext) -> None:
     """Handle /search command with optional query parameter."""
     user = message.from_user
@@ -169,6 +169,15 @@ async def cb_select_result(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("dosearch:"))
+async def cb_dosearch(callback: CallbackQuery, state: FSMContext) -> None:
+    """User confirmed search query from plain text suggestion."""
+    query = callback.data.partition(":")[2]
+    await callback.answer()
+    if callback.message and query:
+        await execute_search(callback.message, query, state)
+
+
 @router.message(F.text)
 async def handle_user_text(message: Message, state: FSMContext) -> None:
     """Handle general text input, URLs, and active FSM states."""
@@ -190,6 +199,16 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         await message.answer(
             text=get_welcome_text(user_name),
             reply_markup=get_main_menu_keyboard(user.id if user else 0),
+            parse_mode="Markdown"
+        )
+        return
+
+    # Guard against unhandled or mistyped slash commands (e.g. /sub_active typos)
+    if text.startswith("/"):
+        cmd_name = text.split()[0]
+        await message.answer(
+            f"❓ **Unknown command:** `{cmd_name}`\n\n"
+            "💡 Type `/help` to view all available commands or `/start` to open the Main Menu.",
             parse_mode="Markdown"
         )
         return
@@ -229,9 +248,8 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         # Strict YouTube & YouTube Music security validation
         if not is_valid_youtube_url(text):
             await message.answer(
-                "⚠️ **Unsupported Link**\n\n"
-                "Please send a valid **YouTube**, **YouTube Music**, **X (Twitter)**, or **Instagram** link.\n\n"
-                "💡 *Example:* `https://youtu.be/ID`, `https://x.com/user/status/ID` or `https://instagram.com/reel/ID`",
+                "Jaannii gharr akke marunga valid link bhejj 😂👊\n\n"
+                "💡 Sirf **YouTube**, **Instagram**, ya **X (Twitter)** ke links bhejo!",
                 parse_mode="Markdown"
             )
             return
@@ -304,5 +322,17 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         )
         return
 
-    # If no state is active, treat plain text as a music search query!
-    await execute_search(message, text, state)
+    # If no state is active, offer a 1-tap search button rather than blindly executing an unrequested YouTube search
+    clean_query = text[:60]
+    await message.answer(
+        f"🎵 **Looking for music?**\n\n"
+        f"Would you like to search for `\"{clean_query}\"`?\n\n"
+        "💡 *Click below to search or send any YouTube / Instagram / X link directly:*",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=f"🔍 Search \"{clean_query[:25]}\"", callback_data=f"dosearch:{clean_query[:50]}")],
+                [InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")]
+            ]
+        ),
+        parse_mode="Markdown"
+    )

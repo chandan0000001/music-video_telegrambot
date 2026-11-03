@@ -6,15 +6,15 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Generate main navigation inline keyboard with user preferred layout."""
+    """Generate main navigation inline keyboard with user preferred layout matching sample UI."""
     buttons = [
         [
-            InlineKeyboardButton(text="🎵 Search Music", callback_data="menu:search"),
-            InlineKeyboardButton(text="🔴 YouTube Music", callback_data="menu:ytmusic"),
+            InlineKeyboardButton(text="🔍 Search Music", callback_data="menu:search"),
+            InlineKeyboardButton(text="▶️ YouTube Music", callback_data="menu:ytmusic"),
         ],
         [
-            InlineKeyboardButton(text="🐦 X (Twitter) Downloader", callback_data="menu:twitter"),
-            InlineKeyboardButton(text="📸 Instagram Downloader", callback_data="menu:instagram"),
+            InlineKeyboardButton(text="𝕏 X (Twitter) Downloader", callback_data="menu:twitter"),
+            InlineKeyboardButton(text="📷 Instagram Downloader", callback_data="menu:instagram"),
         ],
         [
             InlineKeyboardButton(text="🎬 YouTube Video Downloader", callback_data="menu:video"),
@@ -26,15 +26,17 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
             InlineKeyboardButton(text="⚡ Features & Help", callback_data="menu:help"),
-        ],
-        [
-            InlineKeyboardButton(text="👨‍💻 Developer", url="https://t.me/coder_chandan"),
         ]
     ]
 
     if is_admin:
         buttons.append([
-            InlineKeyboardButton(text="⚙️ Admin Dashboard", callback_data="admin:dashboard")
+            InlineKeyboardButton(text="👤 Developer ↗", url="https://t.me/coder_chandan"),
+            InlineKeyboardButton(text="⚙️ Admin Dashboard 🛡️", callback_data="admin:dashboard")
+        ])
+    else:
+        buttons.append([
+            InlineKeyboardButton(text="👤 Developer ↗", url="https://t.me/coder_chandan")
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

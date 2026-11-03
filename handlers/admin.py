@@ -820,7 +820,7 @@ async def cmd_or_cb_payment_orders(event: Message | CallbackQuery) -> None:
         await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-@router.message(Command("sub_activate"))
+@router.message(Command("sub_activate", "sub_active"))
 async def cmd_admin_activate_sub(message: Message) -> None:
     """Admin command to grant or override a subscription: /sub_activate <user_id> <plan> [days]"""
     user = message.from_user
@@ -878,8 +878,7 @@ async def cmd_admin_activate_sub(message: Message) -> None:
         logger.warning(f"Could not alert user {target_uid}: {e}")
 
 
-@router.message(Command("sub_deactivate"))
-@router.message(Command("sub_revoke"))
+@router.message(Command("sub_deactivate", "sub_deactive", "sub_revoke"))
 async def cmd_admin_deactivate_sub(message: Message) -> None:
     """Admin command to revoke a subscription: /sub_deactivate <user_id>"""
     user = message.from_user
@@ -932,7 +931,7 @@ async def cmd_admin_deactivate_all_subs(message: Message) -> None:
     )
 
 
-@router.message(Command("sub_status"))
+@router.message(Command("sub_status", "sub_info"))
 async def cmd_admin_sub_status(message: Message) -> None:
     """Admin command to check user's subscription: /sub_status <user_id>"""
     user = message.from_user

@@ -137,32 +137,48 @@ MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "14400"))
 MAX_CONCURRENT_DOWNLOADS: int = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "3"))
 
 # Rate Limiting (Per-user)
-RATE_LIMIT_REQUESTS: int = int(os.getenv("RATE_LIMIT_REQUESTS", "5"))
-RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "10"))
+def _safe_int(env_val: Optional[str], default: int) -> int:
+    """Safely parse integer from environment variable, falling back gracefully on format error."""
+    try:
+        return int(env_val.strip()) if env_val else default
+    except (ValueError, AttributeError):
+        return default
 
-# Audio Encoding Settings
-SUPPORTED_AUDIO_FORMATS: list[str] = ["MP3", "M4A", "WAV"]
-SUPPORTED_AUDIO_QUALITIES: list[str] = ["128", "192", "320"]  # in kbps
 
-# Video Encoding Settings
-SUPPORTED_VIDEO_FORMATS: list[str] = ["MP4"]
-SUPPORTED_VIDEO_RESOLUTIONS: list[str] = ["144p", "240p", "360p", "480p", "720p", "1080p", "1440p"]
+RATE_LIMIT_REQUESTS: int = _safe_int(os.getenv("RATE_LIMIT_REQUESTS"), 5)
+RATE_LIMIT_WINDOW: int = _safe_int(os.getenv("RATE_LIMIT_WINDOW"), 10)
+
+# Audio Encoding Settings (Configurable via .env, comma-separated)
+SUPPORTED_AUDIO_FORMATS: list[str] = [
+    f.strip().upper() for f in os.getenv("SUPPORTED_AUDIO_FORMATS", "MP3,M4A,WAV").split(",") if f.strip()
+]
+SUPPORTED_AUDIO_QUALITIES: list[str] = [
+    q.strip() for q in os.getenv("SUPPORTED_AUDIO_QUALITIES", "128,192,320").split(",") if q.strip()
+]
+
+# Video Encoding Settings (Configurable via .env, comma-separated)
+SUPPORTED_VIDEO_FORMATS: list[str] = [
+    f.strip().upper() for f in os.getenv("SUPPORTED_VIDEO_FORMATS", "MP4").split(",") if f.strip()
+]
+SUPPORTED_VIDEO_RESOLUTIONS: list[str] = [
+    r.strip() for r in os.getenv("SUPPORTED_VIDEO_RESOLUTIONS", "144p,240p,360p,480p,720p,1080p,1440p").split(",") if r.strip()
+]
 
 # Subprocess Timeout (in seconds, e.g. 1800 = 30 minutes for long videos)
-FFMPEG_TIMEOUT: int = int(os.getenv("FFMPEG_TIMEOUT", "1800"))
-YTDLP_TIMEOUT: int = int(os.getenv("YTDLP_TIMEOUT", "1800"))
+FFMPEG_TIMEOUT: int = _safe_int(os.getenv("FFMPEG_TIMEOUT"), 1800)
+YTDLP_TIMEOUT: int = _safe_int(os.getenv("YTDLP_TIMEOUT"), 1800)
 
 # Downloader Acceleration (Disabled by default: YouTube throttles aria2c to 300KB/s; native yt-dlp reaches 10+ MB/s)
 USE_ARIA2: bool = os.getenv("USE_ARIA2", "false").lower() in ("true", "1", "yes")
 
 # Payment & Subscription Configuration (INR)
-PAYMENT_UPI_ID: str = os.getenv("PAYMENT_UPI_ID", "srikantap571-1@okaxis")
-PAYMENT_MERCHANT_NAME: str = os.getenv("PAYMENT_MERCHANT_NAME", "Telegram_mv_bot")
-GMAIL_USER: str = os.getenv("GMAIL_USER", "srikantap571@gmail.com")
+PAYMENT_UPI_ID: str = os.getenv("PAYMENT_UPI_ID", "")
+PAYMENT_MERCHANT_NAME: str = os.getenv("PAYMENT_MERCHANT_NAME", "Music & Video Bot")
+GMAIL_USER: str = os.getenv("GMAIL_USER", "")
 GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
 
-PRICE_SINGLE_720P: int = int(os.getenv("PRICE_SINGLE_720P", "19"))
-PRICE_SINGLE_1080P: int = int(os.getenv("PRICE_SINGLE_1080P", "27"))
+PRICE_SINGLE_720P: int = _safe_int(os.getenv("PRICE_SINGLE_720P"), 19)
+PRICE_SINGLE_1080P: int = _safe_int(os.getenv("PRICE_SINGLE_1080P"), 27)
 
 # Subscription Plans (Normal, Go, Pro, Ultra, Max)
 SUBSCRIPTION_PLANS = {
@@ -171,43 +187,43 @@ SUBSCRIPTION_PLANS = {
         "badge": "🟢 Normal (Free)",
         "price": 0,
         "days": 0,
-        "daily_limit": 0,
-        "description": "Standard 144p-480p videos & unlimited music"
+        "daily_limit": _safe_int(os.getenv("LIMIT_TIER_NORMAL_DAILY"), 0),
+        "description": os.getenv("DESC_TIER_NORMAL", "Standard 144p-480p videos & unlimited music")
     },
     "go": {
         "name": "Go",
         "badge": "⚡ Go Pass",
-        "price": int(os.getenv("PRICE_TIER_GO", "35")),
-        "days": int(os.getenv("DAYS_TIER_GO", "7")),
-        "daily_limit": int(os.getenv("LIMIT_TIER_GO_DAILY", "20")),
-        "description": "20 HD Videos/day (720p/1080p) + High Priority"
+        "price": _safe_int(os.getenv("PRICE_TIER_GO"), 35),
+        "days": _safe_int(os.getenv("DAYS_TIER_GO"), 7),
+        "daily_limit": _safe_int(os.getenv("LIMIT_TIER_GO_DAILY"), 20),
+        "description": os.getenv("DESC_TIER_GO", "20 HD Videos/day (720p/1080p) + High Priority")
     },
     "pro": {
         "name": "Pro",
         "badge": "🚀 Pro Pass",
-        "price": int(os.getenv("PRICE_TIER_PRO", "100")),
-        "days": int(os.getenv("DAYS_TIER_PRO", "30")),
-        "daily_limit": int(os.getenv("LIMIT_TIER_PRO_DAILY", "45")),
-        "description": "45 HD Videos/day (1080p 60fps) + 8-stream Turbo"
+        "price": _safe_int(os.getenv("PRICE_TIER_PRO"), 100),
+        "days": _safe_int(os.getenv("DAYS_TIER_PRO"), 30),
+        "daily_limit": _safe_int(os.getenv("LIMIT_TIER_PRO_DAILY"), 45),
+        "description": os.getenv("DESC_TIER_PRO", "45 HD Videos/day (1080p 60fps) + 8-stream Turbo")
     },
     "ultra": {
         "name": "Ultra",
         "badge": "⚡ Ultra Pass",
-        "price": int(os.getenv("PRICE_TIER_ULTRA", "299")),
-        "days": int(os.getenv("DAYS_TIER_ULTRA", "90")),
-        "daily_limit": int(os.getenv("LIMIT_TIER_ULTRA_DAILY", "80")),
-        "description": "80 HD/2K Videos/day + VIP Queue Priority"
+        "price": _safe_int(os.getenv("PRICE_TIER_ULTRA"), 299),
+        "days": _safe_int(os.getenv("DAYS_TIER_ULTRA"), 90),
+        "daily_limit": _safe_int(os.getenv("LIMIT_TIER_ULTRA_DAILY"), 80),
+        "description": os.getenv("DESC_TIER_ULTRA", "80 HD/2K Videos/day + VIP Queue Priority")
     },
     "max": {
         "name": "Max",
         "badge": "👑 Max VIP Pass",
-        "price": int(os.getenv("PRICE_TIER_MAX", "799")),
-        "days": int(os.getenv("DAYS_TIER_MAX", "365")),
-        "daily_limit": int(os.getenv("LIMIT_TIER_MAX_DAILY", "150")),
-        "description": "150 HD/4K Videos/day + 2GB Bandwidth + VIP Badge"
+        "price": _safe_int(os.getenv("PRICE_TIER_MAX"), 799),
+        "days": _safe_int(os.getenv("DAYS_TIER_MAX"), 365),
+        "daily_limit": _safe_int(os.getenv("LIMIT_TIER_MAX_DAILY"), 150),
+        "description": os.getenv("DESC_TIER_MAX", "150 HD/4K Videos/day + 2GB Bandwidth + VIP Badge")
     }
 }
 
-ORDER_EXPIRY_MINUTES: int = int(os.getenv("ORDER_EXPIRY_MINUTES", "10"))
+ORDER_EXPIRY_MINUTES: int = _safe_int(os.getenv("ORDER_EXPIRY_MINUTES"), 10)
 
 

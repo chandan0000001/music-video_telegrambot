@@ -19,16 +19,16 @@ router = Router(name="start_router")
 
 
 def get_welcome_text(user_name: str = "Music Lover") -> str:
-    """Generate modern, clean welcome text with direct link guidance."""
+    """Generate modern, clean welcome text with direct link guidance matching sample UI."""
     return (
-        f"👋 *Hey {user_name}!* Welcome to **Music & Video Bot**\n\n"
+        f"👋 **Hey {user_name}!** Welcome to **Music & Video Bot**\n"
         "⚡ *Download high quality music and videos instantly with original fidelity!*\n\n"
-        "📥 **Send any kind of link directly below:**\n"
+        "🔗 **Send any kind of link directly:**\n"
         "• 📸 **Instagram:** Reels, Posts, Carousels, Stories & Audio\n"
         "• 🔴 **YouTube:** Videos, Shorts & YouTube Music\n"
         "• 🐦 **X (Twitter):** Videos, HD Photos & GIFs\n"
-        "• 🎵 **Song Name:** Type any song title or artist to search\n\n"
-        "👇 *Or use the quick menu buttons below to get started:*"
+        "• 🎵 **Song Search:** Type any song title or artist to search\n\n"
+        "👇 *Or use the quick menu below to get started:*"
     )
 
 
@@ -53,7 +53,7 @@ ABOUT_TEXT = (
     "• **Bot:** Music & Video Downloader (@songsuperzxbot)\n"
     "• **Engine:** Python 3.11+, aiogram 3, yt-dlp & FFmpeg\n"
     "• **Developer:** @coder_chandan\n"
-    "• **Source:** [GitHub](https://github.com/chandan0000001/music-video_telegrambot)\n\n"
+    "• **Source Code:** Contact Admin (@coder_chandan)\n\n"
     "🔒 *Privacy Guarantee: Temporary files are wiped immediately upon delivery.*"
 )
 
