@@ -103,20 +103,38 @@ async def cmd_search(message: Message, state: FSMContext) -> None:
     await execute_search(message, command_args, state)
 
 
-async def execute_search(message: Message, query: str, state: FSMContext) -> None:
+async def execute_search(
+    message: Message,
+    query: str,
+    state: FSMContext,
+    user_id: Optional[int] = None,
+    edit_message: bool = False
+) -> None:
     """Execute music search and present top 5 results."""
     await state.clear()
-    user = message.from_user
-    user_id = user.id if user else 0
+    if user_id is None:
+        user = message.from_user
+        user_id = user.id if user else 0
 
-    if user and await db.is_user_blocked(user_id):
+    if user_id and await db.is_user_blocked(user_id):
         await message.answer("🚫 *You have been restricted from using this service.*")
         return
 
-    # Record search in database
-    await db.record_search(telegram_id=user_id, search_query=query, source="youtube")
+    # Record search in database using the actual human user_id
+    if user_id:
+        try:
+            await db.record_search(telegram_id=user_id, search_query=query, source="youtube")
+        except Exception as e:
+            logger.debug(f"Could not record search for user {user_id}: {e}")
 
-    status_msg = await message.answer(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
+    if edit_message:
+        status_msg = message
+        try:
+            await status_msg.edit_text(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
+        except Exception:
+            status_msg = await message.answer(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
+    else:
+        status_msg = await message.answer(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
 
     results = await music_service.search_music(query, limit=5)
     if not results:
@@ -174,8 +192,9 @@ async def cb_dosearch(callback: CallbackQuery, state: FSMContext) -> None:
     """User confirmed search query from plain text suggestion."""
     query = callback.data.partition(":")[2]
     await callback.answer()
+    user_id = callback.from_user.id if callback.from_user else 0
     if callback.message and query:
-        await execute_search(callback.message, query, state)
+        await execute_search(callback.message, query, state, user_id=user_id, edit_message=True)
 
 
 @router.message(F.text)

@@ -181,7 +181,7 @@ class ThrottlingMiddleware(BaseMiddleware):
             # Skip throttling for inline menu navigation callbacks to allow natural browsing
             cb_data = (event.data or "")
             if any(cb_data.startswith(prefix) for prefix in (
-                "menu:", "opt_", "fmt_", "page:", "vdl:", "adl:", "back", "cancel", "coupon:", "plan:"
+                "menu:", "opt_", "fmt_", "page:", "vdl:", "adl:", "back", "cancel", "coupon:", "plan:", "dosearch:", "sel:"
             )):
                 return await handler(event, data)
 
