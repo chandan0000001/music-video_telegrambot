@@ -25,8 +25,8 @@ def get_welcome_text(user_name: str = "Music Lover") -> str:
         "⚡ *Download high quality music and videos instantly with original fidelity!*\n\n"
         "🔗 **Send any kind of link directly:**\n"
         "• 📸 **Instagram:** Reels, Posts, Carousels, Stories & Audio\n"
-        "• 🔴 **YouTube:** Videos, Shorts & YouTube Music\n"
-        "• 🐦 **X (Twitter):** Videos, HD Photos & GIFs\n"
+        "• ▶️ **YouTube:** Videos, Shorts & YouTube Music\n"
+        "• 𝕏 **X (Twitter):** Videos, HD Photos & GIFs\n"
         "• 🎵 **Song Search:** Type any song title or artist to search\n\n"
         "👇 *Or use the quick menu below to get started:*"
     )

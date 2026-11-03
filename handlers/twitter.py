@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="twitter_router")
 
 TWITTER_HUB_TEXT = (
-    "🐦 **X (Twitter) Downloader**\n"
+    "𝕏 **X (Twitter) Downloader**\n"
     "*Original HD Videos, Photos & GIFs*\n\n"
     "Paste any public X or Twitter post link below to download original uncompressed media.\n\n"
     "👉 *Paste your X link below:*"

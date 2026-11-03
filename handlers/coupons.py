@@ -177,8 +177,8 @@ async def process_coupon_redemption(message: Message, code_input: str, state: FS
     success_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🎵 Search Music", callback_data="menu:search"),
-                InlineKeyboardButton(text="🎬 Video Downloader", callback_data="menu:video")
+                InlineKeyboardButton(text="🔍 Search Music", callback_data="menu:search"),
+                InlineKeyboardButton(text="▶️ Video Downloader", callback_data="menu:video")
             ],
             [
                 InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")

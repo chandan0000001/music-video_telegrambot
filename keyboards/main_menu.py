@@ -14,10 +14,10 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="𝕏 X (Twitter) Downloader", callback_data="menu:twitter"),
-            InlineKeyboardButton(text="📷 Instagram Downloader", callback_data="menu:instagram"),
+            InlineKeyboardButton(text="📸 Instagram Downloader", callback_data="menu:instagram"),
         ],
         [
-            InlineKeyboardButton(text="🎬 YouTube Video Downloader", callback_data="menu:video"),
+            InlineKeyboardButton(text="▶️ YouTube Video Downloader", callback_data="menu:video"),
         ],
         [
             InlineKeyboardButton(text="🎁 Invite & Earn VIP", callback_data="menu:referral"),

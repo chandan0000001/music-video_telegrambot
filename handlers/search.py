@@ -71,7 +71,7 @@ async def cb_menu_video(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(UserStates.waiting_for_video_link)
     text = (
-        "🎬 **Download Video**\n\n"
+        "▶️ **YouTube Video Downloader**\n\n"
         "Paste any YouTube video or Shorts link to download.\n\n"
         "⚡ **Resolutions:** 144p, 240p, 360p, 480p, 720p HD, 1080p Full HD\n\n"
         "👉 *Paste your link below:*"
