@@ -31,10 +31,15 @@ class UserRateLimiter:
         """
         Check if user exceeded request threshold.
         Returns (is_limited, retry_after_seconds).
+        Admins and VIP users receive elevated/unrestricted limits.
         """
-        # Admin bypass
+        # Admin bypass: 100% unrestricted
         if user_id in ADMIN_IDS:
             return False, 0.0
+
+        from utils.vip_manager import vip_manager
+        is_vip = await vip_manager.is_vip(user_id)
+        effective_max = 25 if is_vip else self.max_requests
 
         now = time.time()
         async with self._lock:
@@ -44,7 +49,7 @@ class UserRateLimiter:
             while timestamps and (now - timestamps[0]) > self.window_seconds:
                 timestamps.popleft()
 
-            if len(timestamps) >= self.max_requests:
+            if len(timestamps) >= effective_max:
                 earliest = timestamps[0]
                 retry_after = round(self.window_seconds - (now - earliest), 1)
                 return True, max(0.5, retry_after)
@@ -95,7 +100,11 @@ class LinkSpamGuard:
         """
         Check if user is spamming links.
         Returns (is_blocked, message_to_user).
+        Admins and VIP users are completely exempt.
         """
+        if user_id in ADMIN_IDS:
+            return False, ""
+
         from utils.vip_manager import vip_manager
         if await vip_manager.is_vip(user_id):
             return False, ""
@@ -169,7 +178,18 @@ class ThrottlingMiddleware(BaseMiddleware):
             user_id = event.from_user.id if event.from_user else None
             target_message = event.message if isinstance(event.message, Message) else None
 
+            # Skip throttling for inline menu navigation callbacks to allow natural browsing
+            cb_data = (event.data or "")
+            if any(cb_data.startswith(prefix) for prefix in (
+                "menu:", "opt_", "fmt_", "page:", "vdl:", "adl:", "back", "cancel", "coupon:", "plan:"
+            )):
+                return await handler(event, data)
+
         if user_id:
+            # Administrators have zero rate limits
+            if user_id in ADMIN_IDS:
+                return await handler(event, data)
+
             is_limited, retry_after = await rate_limiter.is_rate_limited(user_id)
             if is_limited:
                 if isinstance(event, CallbackQuery):

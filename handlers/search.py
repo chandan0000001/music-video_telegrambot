@@ -224,13 +224,13 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         if is_valid_twitter_url(text):
             await state.clear()
             from handlers.twitter import _execute_twitter_download
-            await _execute_twitter_download(message, text)
+            await _execute_twitter_download(message, text, check_spam=False)
             return
 
         if is_valid_instagram_url(text):
             await state.clear()
             from handlers.instagram import _execute_instagram_download
-            await _execute_instagram_download(message, text)
+            await _execute_instagram_download(message, text, check_spam=False)
             return
 
         # Check if URL is a YouTube Playlist link
@@ -307,6 +307,16 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
                 reply_markup=get_media_type_keyboard(video_id),
                 parse_mode="Markdown"
             )
+
+        # Track quality selection session with 30-min TTL and link supersession
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=message.bot,
+            user_id=user.id if user else 0,
+            chat_id=message.chat.id,
+            message_id=inspect_msg.message_id,
+            video_id=video_id
+        )
         return
 
     # Current FSM state check

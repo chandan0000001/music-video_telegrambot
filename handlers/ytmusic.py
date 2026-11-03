@@ -160,6 +160,14 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
             reply_markup=get_youtube_music_keyboard(video_id),
             parse_mode="Markdown"
         )
+        from utils.selection_session import selection_session_manager
+        await selection_session_manager.register_session(
+            bot=message.bot,
+            user_id=user_id,
+            chat_id=message.chat.id,
+            message_id=inspect_msg.message_id,
+            video_id=video_id
+        )
         return
 
     # Case 2: Plain text search query

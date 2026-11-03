@@ -106,16 +106,17 @@ async def cmd_instagram(message: Message, state: FSMContext) -> None:
     )
 
 
-async def _execute_instagram_profile(message: Message, username: str) -> None:
+async def _execute_instagram_profile(message: Message, username: str, check_spam: bool = True) -> None:
     """Fetch Instagram profile card and original HD DP (Profile Picture)."""
     user = message.from_user
     user_id = user.id if user else 0
 
     # 1. Anti-Spam Link Cooldown Check
-    is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
-    if is_spam:
-        await message.answer(spam_msg, parse_mode="Markdown")
-        return
+    if check_spam:
+        is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
+        if is_spam:
+            await message.answer(spam_msg, parse_mode="Markdown")
+            return
 
     # 2. Per-User Concurrent Download Limit Check
     can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
@@ -297,16 +298,17 @@ async def _execute_instagram_audio(
     instagram_service.cleanup_job_dir(job_dir)
 
 
-async def _execute_instagram_download(message: Message, url: str) -> None:
+async def _execute_instagram_download(message: Message, url: str, check_spam: bool = True) -> None:
     """Core download and dispatch pipeline for Instagram media with queue and live meters."""
     user = message.from_user
     user_id = user.id if user else 0
 
-    # 1. Anti-Spam Link Cooldown Check
-    is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
-    if is_spam:
-        await message.answer(spam_msg, parse_mode="Markdown")
-        return
+    # 1. Anti-Spam Link Cooldown Check (if not already verified by router)
+    if check_spam:
+        is_spam, spam_msg = await link_spam_guard.check_link_spam(user_id)
+        if is_spam:
+            await message.answer(spam_msg, parse_mode="Markdown")
+            return
 
     # 2. Per-User Concurrent Download Limit Check (Max 3)
     can_start, limit_msg = await queue_manager.can_user_start_job(user_id)

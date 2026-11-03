@@ -59,6 +59,7 @@ class DownloadQueueManager:
         self._active_downloads: int = 0
         self._active_uploads: int = 0
         self._user_active_jobs: Dict[int, int] = {}
+        self._user_job_timestamps: Dict[int, List[float]] = {}
         self._waiting_queue: List[QueueItem] = []
 
         self._lock = asyncio.Lock()
@@ -69,9 +70,32 @@ class DownloadQueueManager:
         if not self._queue_worker_task or self._queue_worker_task.done():
             self._queue_worker_task = asyncio.create_task(self._queue_loop())
 
+    def _purge_stale_user_jobs(self, ttl_seconds: float = 600.0) -> None:
+        """Purge any active job timestamps older than 10 minutes so users can never be permanently locked out."""
+        now = time.time()
+        for uid in list(self._user_job_timestamps.keys()):
+            valid = [t for t in self._user_job_timestamps[uid] if (now - t) < ttl_seconds]
+            if len(valid) != len(self._user_job_timestamps[uid]):
+                if valid:
+                    self._user_job_timestamps[uid] = valid
+                    self._user_active_jobs[uid] = len(valid)
+                else:
+                    self._user_job_timestamps.pop(uid, None)
+                    self._user_active_jobs.pop(uid, None)
+
     async def can_user_start_job(self, user_id: int) -> tuple[bool, str]:
         """Check if user has exceeded their tiered concurrent active jobs limit."""
+        from config import ADMIN_IDS
+        if user_id in ADMIN_IDS:
+            return True, ""
+
         priority = await vip_manager.get_user_priority(user_id)
+        if priority >= PRIORITY_ADMIN:
+            return True, ""
+
+        # Auto-heal any stale jobs older than 10 minutes
+        self._purge_stale_user_jobs()
+
         max_allowed = vip_manager.get_max_concurrent_jobs(priority)
 
         async with self._lock:
@@ -98,13 +122,16 @@ class DownloadQueueManager:
         - Free Users: Standard FIFO queue.
         """
         self.start_worker()
+        self._purge_stale_user_jobs()
         priority = await vip_manager.get_user_priority(user_id)
 
+        now = time.time()
         async with self._lock:
             # 1. Admin absolute bypass: Never wait in queue
             if priority >= PRIORITY_ADMIN:
                 self._active_downloads += 1
                 self._user_active_jobs[user_id] = self._user_active_jobs.get(user_id, 0) + 1
+                self._user_job_timestamps.setdefault(user_id, []).append(now)
                 return True
 
             # 2. If slots are open and no one with higher/equal priority is waiting
@@ -112,6 +139,7 @@ class DownloadQueueManager:
             if self._active_downloads < self.max_downloads and not has_higher_waiting:
                 self._active_downloads += 1
                 self._user_active_jobs[user_id] = self._user_active_jobs.get(user_id, 0) + 1
+                self._user_job_timestamps.setdefault(user_id, []).append(now)
                 return True
 
             # 3. Enter queue with priority weighting
@@ -135,10 +163,13 @@ class DownloadQueueManager:
         await item.ready_event.wait()
 
         if item.is_cancelled:
+            async with self._lock:
+                self._active_downloads = max(0, self._active_downloads - 1)
             return False
 
         async with self._lock:
             self._user_active_jobs[user_id] = self._user_active_jobs.get(user_id, 0) + 1
+            self._user_job_timestamps.setdefault(user_id, []).append(time.time())
 
         return True
 
@@ -157,11 +188,22 @@ class DownloadQueueManager:
         return pos
 
     def release_download_slot(self, user_id: int) -> None:
-        """Release a download slot and advance the highest priority waiting job."""
-        asyncio.create_task(self._release_download_async())
+        """Release a download slot, decrement user's active job counter, and advance queue."""
+        asyncio.create_task(self._release_download_async(user_id))
 
-    async def _release_download_async(self) -> None:
+    async def _release_download_async(self, user_id: int) -> None:
         async with self._lock:
+            # 1. Decrement user's active job counter
+            if user_id in self._user_active_jobs:
+                self._user_active_jobs[user_id] = max(0, self._user_active_jobs[user_id] - 1)
+                if self._user_active_jobs[user_id] == 0:
+                    del self._user_active_jobs[user_id]
+            if user_id in self._user_job_timestamps and self._user_job_timestamps[user_id]:
+                self._user_job_timestamps[user_id].pop(0)
+                if not self._user_job_timestamps[user_id]:
+                    del self._user_job_timestamps[user_id]
+
+            # 2. Decrement global active downloads
             self._active_downloads = max(0, self._active_downloads - 1)
             self._sort_queue()
 
@@ -184,6 +226,10 @@ class DownloadQueueManager:
 
     async def acquire_upload_slot(self, user_id: int) -> None:
         """Wait for 1 of the 8 global upload slots."""
+        from config import ADMIN_IDS
+        if user_id in ADMIN_IDS:
+            return
+
         priority = await vip_manager.get_user_priority(user_id)
         # Admin immediate upload bypass
         if priority >= PRIORITY_ADMIN:
@@ -198,17 +244,13 @@ class DownloadQueueManager:
                     return
             await asyncio.sleep(0.4)
 
-    def release_upload_slot(self, user_id: int) -> None:
-        """Release an upload slot and decrement user's active job counter."""
-        asyncio.create_task(self._release_upload_async(user_id))
+    def release_upload_slot(self, user_id: int = 0) -> None:
+        """Release an upload slot."""
+        asyncio.create_task(self._release_upload_async())
 
-    async def _release_upload_async(self, user_id: int) -> None:
+    async def _release_upload_async(self) -> None:
         async with self._lock:
             self._active_uploads = max(0, self._active_uploads - 1)
-            if user_id in self._user_active_jobs:
-                self._user_active_jobs[user_id] = max(0, self._user_active_jobs[user_id] - 1)
-                if self._user_active_jobs[user_id] == 0:
-                    del self._user_active_jobs[user_id]
 
     def cancel_queue_item(self, user_id: int) -> bool:
         """Remove a user's item from the queue if they click cancel."""

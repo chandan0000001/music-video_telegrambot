@@ -16,7 +16,6 @@ from keyboards.quality_keyboard import (
     get_cancel_download_keyboard
 )
 from keyboards.main_menu import get_back_to_main_keyboard
-from utils.rate_limiter import concurrency_manager
 from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter, vanish_status_message
 from utils.animation_helper import send_download_animation, vanish_download_animation
@@ -30,6 +29,13 @@ router = Router(name="audio_router")
 async def cb_choose_audio_format(callback: CallbackQuery) -> None:
     """Prompt user to select audio container format (MP3, M4A, WAV)."""
     video_id = callback.data.split(":")[1]
+    user_id = callback.from_user.id if callback.from_user else 0
+
+    from utils.selection_session import selection_session_manager
+    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
+    if not is_valid:
+        await callback.answer(reason, show_alert=True)
+        return
     text = (
         "🎧 **Audio Format Selection**\n\n"
         "Please choose your preferred audio format:\n"
@@ -106,6 +112,13 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     if user and await db.is_user_blocked(user_id):
         await callback.answer("Restricted user.", show_alert=True)
         return
+
+    from utils.selection_session import selection_session_manager
+    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
+    if not is_valid:
+        await callback.answer(reason, show_alert=True)
+        return
+    selection_session_manager.clear_session(user_id)
 
     await callback.answer("Starting audio extraction...")
     status_msg = callback.message
@@ -275,6 +288,5 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         task_registry.unregister(user_id)
         if acquired_slot:
             queue_manager.release_download_slot(user_id)
-            concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

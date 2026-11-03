@@ -17,7 +17,6 @@ from keyboards.quality_keyboard import (
     get_paywall_keyboard
 )
 from keyboards.main_menu import get_back_to_main_keyboard
-from utils.rate_limiter import concurrency_manager
 from utils.queue_manager import queue_manager
 from utils.progress import DownloadProgressTracker, AsyncProgressReporter, vanish_status_message
 from utils.animation_helper import send_download_animation, vanish_download_animation
@@ -30,8 +29,16 @@ router = Router(name="video_router")
 @router.callback_query(F.data.startswith("opt_video:"))
 async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     """Inspect and present available video resolutions from low to high."""
-    await callback.answer()
     video_id = callback.data.split(":")[1]
+    user_id = callback.from_user.id if callback.from_user else 0
+
+    from utils.selection_session import selection_session_manager
+    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
+    if not is_valid:
+        await callback.answer(reason, show_alert=True)
+        return
+
+    await callback.answer()
     if callback.message:
         try:
             await callback.message.edit_text("🔍 *Probing available video streams...*", parse_mode="Markdown")
@@ -109,6 +116,13 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
     if user and await db.is_user_blocked(user_id):
         await callback.answer("Restricted user.", show_alert=True)
         return
+
+    from utils.selection_session import selection_session_manager
+    is_valid, reason = selection_session_manager.check_validity(user_id, video_id)
+    if not is_valid:
+        await callback.answer(reason, show_alert=True)
+        return
+    selection_session_manager.clear_session(user_id)
 
     status_msg = callback.message
     if not status_msg:
@@ -344,6 +358,5 @@ async def execute_video_download_pipeline(
         task_registry.unregister(user_id)
         if acquired_slot:
             queue_manager.release_download_slot(user_id)
-            concurrency_manager.release()
         if job_dir:
             media_service.cleanup_job_dir(job_dir)

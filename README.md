@@ -212,6 +212,14 @@ flowchart TD
     - Dispatched silently (`disable_notification=True`) and cleanly vanished automatically the instant media delivery completes.
 13. **🇮🇳 Universal GMT+5:30 (IST) Timezone Formatting:**
     - All admin search/download logs, user history records, coupon redemptions, and subscription expiration notices are automatically converted and presented in Indian Standard Time (`DD-MM-YYYY hh:mm AM/PM IST`).
+14. **⏳ 30-Minute Quality Session TTL & Link Supersession:**
+    - Quality selection menus auto-expire after 30 minutes, preventing stale or abandoned download triggers.
+    - Sending a new link automatically supersedes and invalidates any previous pending quality message (`🔄 Superseded by your newer link.`), preventing dual-pipeline conflicts.
+    - Administrators have absolute exemption from session expirations.
+15. **🛡️ Tiered Rate Limiting & Zero Admin Restriction:**
+    - **Administrators (`ADMIN_IDS`):** 100% unrestricted. Zero cooldown, zero rate limit, unlimited concurrent downloads, absolute queue bypass.
+    - **VIP / Paid Subscribers (`Go`, `Pro`, `Ultra`, `Max`):** Elevated request limit (25 req/10s), zero link cooldown, 10 concurrent active jobs, VIP priority fast-track.
+    - **Free Tier:** 5 req/10s for messages, 6s link cooldown, 3 concurrent active jobs, menu navigation callbacks exempt from throttling.
 
 ---
 
@@ -774,3 +782,7 @@ tests/test_validators.py ..........                                      [100%]
 
 ### Q: How can I change the rate limit?
 **A:** Edit `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW` in `config.py`.
+
+### Q: Why am I seeing ~$4 USD cost on my AWS account?
+**A:** On AWS EC2 (Mumbai `ap-south-1`), a **50 GB gp3 EBS root volume** costs `$0.08` per GB-month:
+`50 GB * $0.08 = $4.00 / month` flat storage cost regardless of usage. Additionally, outbound network traffic to Telegram is charged at `$0.09/GB` after the free allowance. Our strict pre-flight gatekeeper and spam guards protect your server from unnecessary bandwidth and compute charges.
