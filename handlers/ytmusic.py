@@ -153,35 +153,61 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
 
         await state.clear()
         inspect_msg = await message.answer(
-            "🎧 *Inspecting YouTube Music track & audio streams...*",
-            parse_mode="Markdown"
+            "🎧 <b>Inspecting YouTube Music track & audio streams...</b>",
+            parse_mode="HTML"
         )
 
         success, info, err = await media_service.get_media_info(text)
         if not success or not info:
-            await inspect_msg.edit_text(
-                f"❌ **Error:** {err or 'Could not process YouTube Music URL.'}",
-                parse_mode="Markdown"
-            )
+            safe_err = html.escape(err or "Could not process YouTube Music URL.")
+            try:
+                await inspect_msg.edit_text(
+                    f"❌ <b>Error:</b> {safe_err}",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await inspect_msg.edit_text(
+                    f"❌ Error: {err or 'Could not process YouTube Music URL.'}",
+                    parse_mode=None
+                )
             return
 
         video_id = info["id"]
+        safe_title = html.escape(info.get("title", "Unknown Title"))
+        safe_artist = html.escape(info.get("artist", "Unknown Artist"))
+        safe_dur = html.escape(info.get("duration_str", "00:00"))
+
         desc = (
-            f"🎧 **{info['title']}**\n"
-            f"👤 *Artist:* {info['artist']} | ⏱ `{info['duration_str']}`\n\n"
-            f"⚡ *Select studio quality to download instantly:*"
+            f"🎧 <b>{safe_title}</b>\n"
+            f"👤 <i>Artist:</i> {safe_artist} | ⏱ <code>{safe_dur}</code>\n\n"
+            f"⚡ <i>Select studio quality to download instantly:</i>"
         )
-        await inspect_msg.edit_text(
-            text=desc,
-            reply_markup=get_youtube_music_keyboard(video_id),
-            parse_mode="Markdown"
-        )
+        try:
+            await inspect_msg.edit_text(
+                text=desc,
+                reply_markup=get_youtube_music_keyboard(video_id),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit ytmusic inspect_msg with HTML: {e}. Falling back to plain text.")
+            plain_desc = (
+                f"🎧 {info.get('title', 'Unknown Title')}\n"
+                f"👤 Artist: {info.get('artist', 'Unknown Artist')} | ⏱ {info.get('duration_str', '00:00')}\n\n"
+                f"Select studio quality to download instantly:"
+            )
+            await inspect_msg.edit_text(
+                text=plain_desc,
+                reply_markup=get_youtube_music_keyboard(video_id),
+                parse_mode=None
+            )
+
         from utils.selection_session import selection_session_manager
+        chat_id = getattr(getattr(message, "chat", None), "id", user_id)
         await selection_session_manager.register_session(
             bot=message.bot,
             user_id=user_id,
-            chat_id=message.chat.id,
-            message_id=inspect_msg.message_id,
+            chat_id=chat_id,
+            message_id=getattr(inspect_msg, "message_id", None),
             video_id=video_id
         )
         return
@@ -190,33 +216,73 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
     await state.clear()
     await db.record_search(telegram_id=user_id, search_query=text, source="youtube_music")
 
-    status_msg = await message.answer(
-        f"🔎 *Searching YouTube Music for:* `{text}`...",
-        parse_mode="Markdown"
-    )
+    safe_text = html.escape(text)
+    try:
+        status_msg = await message.answer(
+            f"🔎 <b>Searching YouTube Music for:</b> <code>{safe_text}</code>...",
+            parse_mode="HTML"
+        )
+    except Exception:
+        status_msg = await message.answer(
+            f"🔎 Searching YouTube Music for: {text}...",
+            parse_mode=None
+        )
 
     results = await music_service.search_music(text, limit=5)
     if not results:
-        await status_msg.edit_text(
-            f"❌ *No matching music tracks found for:* `{text}`.\n\nPlease check spelling or try another title.",
-            parse_mode="Markdown"
-        )
+        try:
+            await status_msg.edit_text(
+                f"❌ <b>No matching music tracks found for:</b> <code>{safe_text}</code>.\n\nPlease check spelling or try another title.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            await status_msg.edit_text(
+                f"❌ No matching music tracks found for: {text}.\n\nPlease check spelling or try another title.",
+                parse_mode=None
+            )
         return
 
     result_lines = [
-        f"🎧 **YouTube Music Results:** `{text}`\n"
+        f"🎧 <b>YouTube Music Results:</b> <code>{safe_text}</code>\n"
     ]
     for idx, item in enumerate(results, start=1):
+        s_title = html.escape(item.get("title", "Unknown Title"))
+        s_artist = html.escape(item.get("artist", "Unknown Artist"))
+        s_dur = html.escape(item.get("duration_str", "00:00"))
         result_lines.append(
-            f"*{idx}.* **{item['title']}**\n"
-            f"   👤 *Artist:* {item['artist']} | ⏱ `{item['duration_str']}`"
+            f"<b>{idx}.</b> <b>{s_title}</b>\n"
+            f"   👤 <i>Artist:</i> {s_artist} | ⏱ <code>{s_dur}</code>"
         )
 
-    result_lines.append("\n👉 *Click a track below to choose format and quality:*")
+    result_lines.append("\n👉 <i>Click a track below to choose format and quality:</i>")
     full_text = "\n".join(result_lines)
 
-    await status_msg.edit_text(
-        text=full_text,
-        reply_markup=get_search_results_keyboard(results),
-        parse_mode="Markdown"
+    try:
+        await status_msg.edit_text(
+            text=full_text,
+            reply_markup=get_search_results_keyboard(results),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to edit ytmusic results with HTML: {e}. Falling back to plain text.")
+        plain_lines = [f"🎧 YouTube Music Results: {text}\n"]
+        for idx, item in enumerate(results, start=1):
+            plain_lines.append(
+                f"{idx}. {item.get('title', 'Unknown Title')}\n"
+                f"   Artist: {item.get('artist', 'Unknown Artist')} | Duration: {item.get('duration_str', '00:00')}"
+            )
+        plain_lines.append("\nClick a track below to choose format and quality:")
+        await status_msg.edit_text(
+            text="\n".join(plain_lines),
+            reply_markup=get_search_results_keyboard(results),
+            parse_mode=None
+        )
+
+    from utils.selection_session import selection_session_manager
+    chat_id = getattr(getattr(status_msg, "chat", None), "id", user_id)
+    await selection_session_manager.register_session(
+        bot=status_msg.bot,
+        user_id=user_id,
+        chat_id=chat_id,
+        message_id=getattr(status_msg, "message_id", None)
     )

@@ -80,7 +80,7 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
 
     if callback.message:
         try:
-            await callback.message.edit_text("🔍 *Estimating audio sizes...*", parse_mode="Markdown")
+            await callback.message.edit_text("🔍 <i>Estimating audio sizes...</i>", parse_mode="HTML")
         except Exception:
             pass
 

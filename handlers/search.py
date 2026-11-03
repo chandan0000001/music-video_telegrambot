@@ -150,44 +150,76 @@ async def execute_search(
         except Exception as e:
             logger.debug(f"Could not record search for user {user_id}: {e}")
 
+    safe_query = html.escape(query)
     if edit_message:
         status_msg = message
         try:
-            await status_msg.edit_text(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
+            await status_msg.edit_text(f"🔎 <b>Searching for:</b> <code>{safe_query}</code>...", parse_mode="HTML")
         except Exception:
-            status_msg = await message.answer(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
+            try:
+                status_msg = await message.answer(f"🔎 Searching for: {query}...", parse_mode=None)
+            except Exception:
+                status_msg = message
     else:
-        status_msg = await message.answer(f"🔎 *Searching for:* `{query}`...", parse_mode="Markdown")
+        try:
+            status_msg = await message.answer(f"🔎 <b>Searching for:</b> <code>{safe_query}</code>...", parse_mode="HTML")
+        except Exception:
+            status_msg = await message.answer(f"🔎 Searching for: {query}...", parse_mode=None)
 
     results = await music_service.search_music(query, limit=5)
     if not results:
-        await status_msg.edit_text(
-            f"❌ *No matching music tracks found for:* `{query}`.\n\nPlease check spelling or try another title.",
-            parse_mode="Markdown"
-        )
+        try:
+            await status_msg.edit_text(
+                f"❌ <b>No matching music tracks found for:</b> <code>{safe_query}</code>.\n\nPlease check spelling or try another title.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            await status_msg.edit_text(
+                f"❌ No matching music tracks found for: {query}.\n\nPlease check spelling or try another title.",
+                parse_mode=None
+            )
         return
 
-    result_lines = [f"🎵 **Search Results for:** `{query}`\n"]
+    result_lines = [f"🎵 <b>Search Results for:</b> <code>{safe_query}</code>\n"]
     for idx, item in enumerate(results, start=1):
+        s_title = html.escape(item.get("title", "Unknown Title"))
+        s_artist = html.escape(item.get("artist", "Unknown Artist"))
+        s_dur = html.escape(item.get("duration_str", "00:00"))
         result_lines.append(
-            f"*{idx}.* **{item['title']}**\n"
-            f"   👤 *Artist:* {item['artist']} | ⏱ `{item['duration_str']}`"
+            f"<b>{idx}.</b> <b>{s_title}</b>\n"
+            f"   👤 <i>Artist:</i> {s_artist} | ⏱ <code>{s_dur}</code>"
         )
 
-    result_lines.append("\n👉 *Click a track below to choose format and quality:*")
+    result_lines.append("\n👉 <i>Click a track below to choose format and quality:</i>")
     full_text = "\n".join(result_lines)
 
-    await status_msg.edit_text(
-        text=full_text,
-        reply_markup=get_search_results_keyboard(results),
-        parse_mode="Markdown"
-    )
+    try:
+        await status_msg.edit_text(
+            text=full_text,
+            reply_markup=get_search_results_keyboard(results),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to edit search results with HTML: {e}. Falling back to plain text.")
+        plain_lines = [f"🎵 Search Results for: {query}\n"]
+        for idx, item in enumerate(results, start=1):
+            plain_lines.append(
+                f"{idx}. {item.get('title', 'Unknown Title')}\n"
+                f"   Artist: {item.get('artist', 'Unknown Artist')} | Duration: {item.get('duration_str', '00:00')}"
+            )
+        plain_lines.append("\nClick a track below to choose format and quality:")
+        await status_msg.edit_text(
+            text="\n".join(plain_lines),
+            reply_markup=get_search_results_keyboard(results),
+            parse_mode=None
+        )
     from utils.selection_session import selection_session_manager
+    chat_id = getattr(getattr(status_msg, "chat", None), "id", user_id)
     await selection_session_manager.register_session(
         bot=status_msg.bot,
         user_id=user_id,
-        chat_id=status_msg.chat.id,
-        message_id=status_msg.message_id
+        chat_id=chat_id,
+        message_id=getattr(status_msg, "message_id", None)
     )
 
 

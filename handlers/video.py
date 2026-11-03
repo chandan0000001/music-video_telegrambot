@@ -38,7 +38,7 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         try:
-            await callback.message.edit_text("🔍 *Probing available video streams...*", parse_mode="Markdown")
+            await callback.message.edit_text("🔍 <i>Probing available video streams...</i>", parse_mode="HTML")
         except Exception:
             pass
 
@@ -47,13 +47,20 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
 
     if not success or not info:
         if callback.message:
+            safe_err = html.escape(err or "Unknown error.")
             try:
                 await callback.message.edit_text(
-                    f"❌ *Could not load video streams:*\n{err or 'Unknown error.'}",
-                    parse_mode="Markdown"
+                    f"❌ <b>Could not load video streams:</b>\n{safe_err}",
+                    parse_mode="HTML"
                 )
             except Exception:
-                pass
+                try:
+                    await callback.message.edit_text(
+                        f"❌ Could not load video streams:\n{err or 'Unknown error.'}",
+                        parse_mode=None
+                    )
+                except Exception:
+                    pass
         return
 
     resolutions = info.get("available_resolutions", [])
@@ -61,11 +68,17 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
         if callback.message:
             try:
                 await callback.message.edit_text(
-                    "❌ *No standard video resolutions found for this item.*",
-                    parse_mode="Markdown"
+                    "❌ <b>No standard video resolutions found for this item.</b>",
+                    parse_mode="HTML"
                 )
             except Exception:
-                pass
+                try:
+                    await callback.message.edit_text(
+                        "❌ No standard video resolutions found for this item.",
+                        parse_mode=None
+                    )
+                except Exception:
+                    pass
         return
 
     user = callback.from_user

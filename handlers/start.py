@@ -103,17 +103,35 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                 title = f"Track {video_id}"
                 duration = "N/A"
 
+            safe_title = html.escape(title)
+            safe_dur = html.escape(duration)
             card_text = (
-                f"🎯 **Selected Media:** {title}\n"
-                f"⏱ **Duration:** `{duration}`\n\n"
+                f"🎯 <b>Selected Media:</b> {safe_title}\n"
+                f"⏱ <b>Duration:</b> <code>{safe_dur}</code>\n\n"
                 "How would you like to download this media?\n\n"
-                "• 🎧 **Audio:** Convert to MP3 (128-320k), M4A, or WAV\n"
-                "• 🎬 **Video:** Download MP4 from 144p to 1080p HD"
+                "• 🎧 <b>Audio:</b> Convert to MP3 (128-320k), M4A, or WAV\n"
+                "• 🎬 <b>Video:</b> Download MP4 from 144p to 1080p HD"
             )
-            await message.answer(
-                text=card_text,
-                reply_markup=get_media_type_keyboard(video_id),
-                parse_mode="Markdown"
+            try:
+                card_msg = await message.answer(
+                    text=card_text,
+                    reply_markup=get_media_type_keyboard(video_id),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                card_msg = await message.answer(
+                    text=f"🎯 Selected Media: {title}\n⏱ Duration: {duration}\n\nSelect download type below:",
+                    reply_markup=get_media_type_keyboard(video_id),
+                    parse_mode=None
+                )
+            from utils.selection_session import selection_session_manager
+            chat_id = getattr(getattr(message, "chat", None), "id", user.id)
+            await selection_session_manager.register_session(
+                bot=message.bot,
+                user_id=user.id,
+                chat_id=chat_id,
+                message_id=getattr(card_msg, "message_id", None),
+                video_id=video_id
             )
             return
 
