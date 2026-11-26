@@ -130,15 +130,23 @@ class MediaService:
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
 
-        # 1. First hit: Own IP (direct unauthenticated visionos)
+        # 1. First hit: Own IP (direct unauthenticated fast check)
         clean_opts = {
             **self._get_common_ydl_opts(with_cookies=False),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "socket_timeout": 6 if is_yt else 15,
+            "socket_timeout": 3 if is_yt else 15,
+            "retries": 0 if is_yt else 10,
+            "extractor_retries": 0 if is_yt else 3,
             "check_formats": False,
         }
+        if is_yt:
+            clean_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android"]
+                }
+            }
         try:
             with yt_dlp.YoutubeDL(clean_opts) as ydl:
                 info = ydl.extract_info(url, download=False)

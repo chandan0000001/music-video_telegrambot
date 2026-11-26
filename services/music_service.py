@@ -60,16 +60,21 @@ class MusicService:
         results = []
 
         info = None
-        # Attempt 1: Direct Own IP
+        # Attempt 1: Direct Own IP (fast unauthenticated check)
         direct_opts = dict(ydl_opts)
-        direct_opts["socket_timeout"] = 6
+        direct_opts["socket_timeout"] = 3
+        direct_opts["retries"] = 0
+        direct_opts["extractor_retries"] = 0
+        direct_opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+        direct_opts.pop("cookiesfrombrowser", None)
+        direct_opts.pop("cookiefile", None)
         try:
             with yt_dlp.YoutubeDL(direct_opts) as ydl:
                 info = ydl.extract_info(search_query, download=False)
         except Exception as e:
             logger.warning(f"Own IP YouTube search failed for '{query}': {e}. Proceeding to round-robin proxy...")
 
-        # Attempt 2: Round-robin proxy fallback
+        # Attempt 2: Round-robin proxy fallback (authenticated with Chrome session)
         if not info or "entries" not in info:
             for attempt in range(3):
                 proxy = youtube_proxy_manager.get_next_proxy()
@@ -79,13 +84,6 @@ class MusicService:
                 proxy_opts = dict(ydl_opts)
                 proxy_opts["proxy"] = proxy
                 proxy_opts["socket_timeout"] = 12
-                proxy_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                    }
-                }
-                proxy_opts.pop("cookiesfrombrowser", None)
-                proxy_opts.pop("cookiefile", None)
                 try:
                     with yt_dlp.YoutubeDL(proxy_opts) as ydl:
                         info = ydl.extract_info(search_query, download=False)
