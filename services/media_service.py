@@ -377,6 +377,8 @@ class MediaService:
             fallback_opts = dict(ydl_opts)
             fallback_opts["proxy"] = proxy
             fallback_opts["socket_timeout"] = 25
+            # Pop extractor_args so player_client list doesn't cause yt-dlp to skip clients when cookies are active
+            fallback_opts.pop("extractor_args", None)
 
             # Attach authenticated Chrome session / cookiefile so proxy requests avoid bot challenges
             chrome_profile = Path.home() / ".config" / "google-chrome"
