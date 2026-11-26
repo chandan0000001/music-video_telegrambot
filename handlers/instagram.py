@@ -24,10 +24,12 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramEntityTooLarge
 
 from database import db
 from services.instagram_service import instagram_service
 from services.telegram_service import telegram_service
+from services.ffmpeg_service import ffmpeg_service
 from keyboards.main_menu import get_back_to_main_keyboard, get_instagram_menu_keyboard
 from utils.validators import (
     is_valid_instagram_url,
@@ -464,44 +466,125 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
                     parse_mode="Markdown"
                 )
             else:  # video / reel
-                await message.answer_video(
-                    video=tracked_file,
-                    caption=f"🎬 *Instagram {media_label} (Original HD)*",
-                    reply_markup=get_back_to_main_keyboard(),
-                    parse_mode="Markdown"
+                await up_reporter.stop(render_final=False)
+
+                duration = 0
+                width = 1080
+                height = 1920
+                probe = await ffmpeg_service.probe_media(f_path)
+                if probe:
+                    fmt = probe.get("format", {})
+                    try:
+                        duration = int(float(fmt.get("duration", 0)))
+                    except Exception:
+                        pass
+                    for st in probe.get("streams", []):
+                        if st.get("codec_type") == "video":
+                            width = int(st.get("width") or 1080)
+                            height = int(st.get("height") or 1920)
+                            break
+                thumb_path = f_path.parent / f"{f_path.stem}_thumb.jpg"
+                if not thumb_path.exists():
+                    await ffmpeg_service.extract_thumbnail(f_path, thumb_path)
+
+                sent = await telegram_service.send_video_file(
+                    bot=message.bot,
+                    chat_id=chat_id,
+                    file_path=f_path,
+                    title=f"Instagram {media_label} (Original HD)",
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    thumbnail_path=thumb_path if thumb_path.exists() else None,
+                    status_message=status_msg
                 )
+                if not sent:
+                    raise RuntimeError("Failed to deliver Instagram video via TelegramService")
         else:
             # Group into albums (Telegram limit: max 10 per media group)
             chunks = [downloaded[i:i + 10] for i in range(0, len(downloaded), 10)]
             for chunk_idx, chunk in enumerate(chunks):
-                media_group = []
+                has_large_video = any(
+                    it["type"] != "photo" and it["file_path"].stat().st_size > 48 * 1024 * 1024
+                    for it in chunk
+                )
+
+                if not has_large_video:
+                    media_group = []
+                    for idx, item in enumerate(chunk):
+                        f_path = item["file_path"]
+                        item_type = item["type"]
+                        tracked_file = TrackedFSInputFile(str(f_path), tracker=up_tracker)
+                        caption = (
+                            f"📸 *Instagram Carousel ({len(chunk)} item{'s' if len(chunk) > 1 else ''})*"
+                            if idx == 0 else None
+                        )
+
+                        if item_type == "photo":
+                            media_group.append(
+                                InputMediaPhoto(
+                                    media=tracked_file,
+                                    caption=caption,
+                                    parse_mode="Markdown"
+                                )
+                            )
+                        else:
+                            media_group.append(
+                                InputMediaVideo(
+                                    media=tracked_file,
+                                    caption=caption,
+                                    parse_mode="Markdown"
+                                )
+                            )
+
+                    try:
+                        await message.answer_media_group(media=media_group)
+                        continue
+                    except TelegramEntityTooLarge:
+                        logger.warning("Instagram media group exceeded size limit, delivering items individually via TelegramService...")
+
+                # Individual delivery fallback for chunks with large files or when media group rejected
                 for idx, item in enumerate(chunk):
                     f_path = item["file_path"]
                     item_type = item["type"]
                     tracked_file = TrackedFSInputFile(str(f_path), tracker=up_tracker)
-                    caption = (
-                        f"📸 *Instagram Carousel ({len(chunk)} item{'s' if len(chunk) > 1 else ''})*"
-                        if idx == 0 else None
-                    )
-
                     if item_type == "photo":
-                        media_group.append(
-                            InputMediaPhoto(
-                                media=tracked_file,
-                                caption=caption,
-                                parse_mode="Markdown"
-                            )
+                        await message.answer_photo(
+                            photo=tracked_file,
+                            caption=f"📸 *Instagram Item {idx+1}/{len(chunk)}*",
+                            parse_mode="Markdown"
                         )
-                    else:
-                        media_group.append(
-                            InputMediaVideo(
-                                media=tracked_file,
-                                caption=caption,
-                                parse_mode="Markdown"
-                            )
-                        )
+                    else:  # Large video/reel
+                        duration = 0
+                        width = 1080
+                        height = 1920
+                        probe = await ffmpeg_service.probe_media(f_path)
+                        if probe:
+                            fmt = probe.get("format", {})
+                            try:
+                                duration = int(float(fmt.get("duration", 0)))
+                            except Exception:
+                                pass
+                            for st in probe.get("streams", []):
+                                if st.get("codec_type") == "video":
+                                    width = int(st.get("width") or 1080)
+                                    height = int(st.get("height") or 1920)
+                                    break
+                        thumb_path = f_path.parent / f"{f_path.stem}_thumb.jpg"
+                        if not thumb_path.exists():
+                            await ffmpeg_service.extract_thumbnail(f_path, thumb_path)
 
-                await message.answer_media_group(media=media_group)
+                        await telegram_service.send_video_file(
+                            bot=message.bot,
+                            chat_id=chat_id,
+                            file_path=f_path,
+                            title=f"Instagram Item {idx+1}/{len(chunk)}",
+                            duration=duration,
+                            width=width,
+                            height=height,
+                            thumbnail_path=thumb_path if thumb_path.exists() else None,
+                            status_message=status_msg
+                        )
 
         # Record download in database
         await db.record_download(
