@@ -330,7 +330,8 @@ async def execute_video_download_pipeline(
             video_url=canonical_url,
             resolution=resolution,
             tracker=tracker,
-            status_callback=lambda text: telegram_service.update_status(status_msg, text)
+            status_callback=lambda text: telegram_service.update_status(status_msg, text),
+            video_title=media_title
         )
         await reporter.stop()
 

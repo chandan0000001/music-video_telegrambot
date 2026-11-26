@@ -562,7 +562,8 @@ class MediaService:
         resolution: str,
         job_dir: Optional[Path] = None,
         tracker: Optional[Any] = None,
-        status_callback: Optional[Any] = None
+        status_callback: Optional[Any] = None,
+        video_title: Optional[str] = None
     ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Path]:
         """
         Download and remux video to Telegram-compatible MP4 at specified resolution.
@@ -693,11 +694,13 @@ class MediaService:
         has_thumb = await ffmpeg_service.extract_thumbnail(target_file, thumb_path)
 
         # Get metadata
-        try:
-            raw_info = await asyncio.to_thread(self._sync_extract_info, video_url)
-            title = raw_info.get("title", "Video")
-        except Exception:
-            title = "Video"
+        title = video_title or "Video"
+        if not video_title:
+            try:
+                raw_info = await asyncio.to_thread(self._sync_extract_info, video_url)
+                title = raw_info.get("title", "Video")
+            except Exception:
+                title = "Video"
 
         result = {
             "file_path": target_file,
