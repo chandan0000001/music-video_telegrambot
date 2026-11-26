@@ -28,35 +28,77 @@ A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aio
 
 ### 1. User Interaction Flowchart
 
-```mermaid
-flowchart TD
-    User([Telegram User]) --> StartCmd["/start or Send Query / URL"]
-    StartCmd --> CheckBlocked{"Is User Blocked?"}
-    CheckBlocked -- Yes --> DenyMsg["🚫 Return Restricted Notice"]
-    CheckBlocked -- No --> UpdateUser["Register / Update User in SQLite"]
-    
-    UpdateUser --> RouteInput{"Input Type"}
-    
-    RouteInput -- "Text Query (Song Name)" --> MusicSearch["🔍 MusicService (yt-dlp thread pool)"]
-    MusicSearch --> Top5Results["Display Top 5 Matching Tracks"]
-    Top5Results --> UserSelectTrack["User clicks a track button"]
-    
-    RouteInput -- "YouTube Link" --> ValidateURL{"Strict YouTube Regex & SSRF Check"}
-    ValidateURL -- Invalid --> RejectURL["⚠️ Reject: YouTube links only"]
-    ValidateURL -- Valid --> UserSelectTrack
-    
-    UserSelectTrack --> MediaChoice{"Choose Media Type"}
-    MediaChoice -- "Audio" --> SelectAudioFmt["Choose Format (MP3, M4A, WAV)"]
-    SelectAudioFmt --> SelectBitrate["Choose Bitrate (128, 192, 320 kbps)"]
-    SelectBitrate --> MediaQueue["Acquire Worker Semaphore Slot"]
-    
-    MediaChoice -- "Video" --> ProbeRes["Inspect genuinely available resolutions (144p - 1080p)"]
-    ProbeRes --> SelectRes["Choose Resolution (e.g. 720p MP4)"]
-    SelectRes --> MediaQueue
-    
-    MediaQueue --> ProcessMedia["⚙️ FFmpeg Media Engine"]
-    ProcessMedia --> SendDelivery["Telegram Dispatch (sendAudio / sendVideo)"]
-    SendDelivery --> Cleanup["🧹 Automatically delete temp directory"]
+```d2
+direction: down
+
+User: Telegram User {
+  shape: person
+}
+
+StartCmd: "/start or Send Query / URL" {
+  shape: rectangle
+}
+
+CheckBlocked: "Is User Blocked?" {
+  shape: diamond
+}
+
+DenyMsg: "🚫 Return Restricted Notice" {
+  style.fill: "#ffebee"
+  style.stroke: "#e53935"
+}
+
+UpdateUser: "Register / Update User in SQLite"
+
+RouteInput: "Input Type?" {
+  shape: diamond
+}
+
+User -> StartCmd
+StartCmd -> CheckBlocked
+CheckBlocked -> DenyMsg: "Yes (Blocked)"
+CheckBlocked -> UpdateUser: "No (Active)"
+UpdateUser -> RouteInput
+
+# Audio / Song Search Flow
+MusicSearch: "🔍 MusicService (yt-dlp Search)"
+Top5Results: "Display Top 5 Matching Tracks"
+UserSelectTrack: "User Selects Track"
+
+RouteInput -> MusicSearch: "Text Query (Song Name)"
+MusicSearch -> Top5Results -> UserSelectTrack
+
+# Direct URL Flow
+ValidateURL: "Strict YouTube Regex & SSRF Check" {
+  shape: diamond
+}
+RejectURL: "⚠️ Reject: YouTube links only"
+
+RouteInput -> ValidateURL: "Direct URL"
+ValidateURL -> RejectURL: "Invalid URL"
+ValidateURL -> UserSelectTrack: "Valid URL"
+
+# Quality Selection
+MediaChoice: "Choose Media Type" {
+  shape: diamond
+}
+UserSelectTrack -> MediaChoice
+
+SelectAudio: "Choose Bitrate\n(⚡ 128k, ⚡ 192k, ⚡ 320k)"
+SelectVideo: "Choose Resolution\n(🎬 144p-720p Free | 🔒 1080p+ VIP)"
+
+MediaChoice -> SelectAudio: "Audio"
+MediaChoice -> SelectVideo: "Video"
+
+MediaQueue: "Worker Semaphore & Priority Queue"
+SelectAudio -> MediaQueue
+SelectVideo -> MediaQueue
+
+ProcessMedia: "⚙️ FFmpeg Remux / Hardware Transcode"
+SendDelivery: "🚀 Dispatch via Telegram Service (MTProto / Bot API)"
+Cleanup: "🧹 Auto-Delete Temp Job Directory (30m Max TTL)"
+
+MediaQueue -> ProcessMedia -> SendDelivery -> Cleanup
 ```
 
 ---
@@ -65,22 +107,58 @@ flowchart TD
 
 Telegram's standard cloud API enforces a **50 MB** upload limit for basic bots. To allow uploads up to **2000 MB (2 GB)** without errors or downgrades, this bot utilizes an intelligent **Smart Routing & Hardware-Accelerated Pipeline**:
 
-```mermaid
-flowchart TD
-    JobStart([New Media Job]) --> Download["⬇️ Optimized yt-dlp (8 parallel fragment streams) into temp/job_ID/"]
-    Download --> Remux["⚙️ FFmpeg remux / transcode (Intel VAAPI HW Accelerated)"]
-    Remux --> ProbeSize{"File Size > 48 MB?"}
-    
-    ProbeSize -- "No (<= 48 MB)" --> FastHTTP["🚀 Standard Telegram Bot API (Instant HTTP POST)"]
-    
-    ProbeSize -- "Yes (> 48 MB)" --> CheckMTProto{"MTProto Configured?"}
-    CheckMTProto -- "Yes" --> MTProto2GB["⚡ Native MTProto 2GB Engine (up to 2000 MB)"]
-    CheckMTProto -- "No" --> AutoChunk["📦 Lossless Zero-Reencode Chunking (44 MB chunks)"]
-    
-    FastHTTP --> DBStatus["Update database status to 'completed'"]
-    MTProto2GB --> DBStatus
-    AutoChunk --> DBStatus
-    DBStatus --> FinalClean["Delete temp/job_ID/ immediately"]
+```d2
+direction: down
+
+JobStart: "New Media Job" {
+  shape: circle
+}
+
+Download: "⬇️ yt-dlp Download Engine\n(8 parallel fragment streams into temp/job_ID/)"
+Remux: "⚙️ FFmpeg Remux / Transcode\n(Hardware Accelerated / Quality Target)"
+
+ProbeSize: "File Size > 48 MB?" {
+  shape: diamond
+}
+
+FastHTTP: "🚀 Standard Telegram Bot API\n(Instant HTTP POST for <= 48 MB)" {
+  style.fill: "#e8f5e9"
+  style.stroke: "#43a047"
+}
+
+CheckMTProto: "MTProto Configured?" {
+  shape: diamond
+}
+
+MTProto2GB: "⚡ Native MTProto 2GB Engine\n(Lossless fast direct upload up to 2000 MB)" {
+  style.fill: "#e3f2fd"
+  style.stroke: "#1e88e5"
+}
+
+AutoChunk: "📦 Lossless Zero-Reencode Splitter\n(Chunked into sequential <= 44 MB parts)" {
+  style.fill: "#fff3e0"
+  style.stroke: "#fb8c00"
+}
+
+DBStatus: "Update database status to 'completed'"
+FinalClean: "🧹 Immediate Disk Cleanup\n(temp/job_ID/ deleted, 0 bytes retained)" {
+  style.fill: "#f3e5f5"
+  style.stroke: "#8e24aa"
+}
+
+JobStart -> Download -> Remux -> ProbeSize
+
+ProbeSize -> FastHTTP: "No (<= 48 MB)"
+ProbeSize -> CheckMTProto: "Yes (> 48 MB)"
+
+CheckMTProto -> MTProto2GB: "Yes"
+CheckMTProto -> AutoChunk: "No (Fallback)"
+
+FastHTTP -> DBStatus
+MTProto2GB -> DBStatus
+AutoChunk -> DBStatus
+
+DBStatus -> FinalClean
 ```
 
 ---
@@ -104,8 +182,7 @@ The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**
 
 | Tier | Price (INR) | Validity | Daily Quota | Features & Perks |
 | :--- | :--- | :--- | :--- | :--- |
-| **Normal (Free)** | **₹0** | Lifetime | Unlimited | Standard `144p`–`480p` MP4 & all music formats (`128k`–`320k`) |
-| **Single 720p HD** | **₹19** | 1 Video | 1 Video | Direct 720p HD video unlock |
+| **Normal (Free)** | **₹0** | Lifetime | Unlimited | Standard `144p`–`720p` MP4 & all music formats (`128k`–`320k`) |
 | **Single 1080p HD** | **₹27** | 1 Video | 1 Video | Direct 1080p Full HD video unlock |
 | **⚡ Go Pass** | **₹35** | 7 Days | 20 Videos/day | High priority HD queue + 10 Concurrent Downloads |
 | **🚀 Pro Pass** | **₹100** | 30 Days | 45 Videos/day | Full HD 60fps + VIP Fast-Track Queue Priority |
@@ -116,32 +193,82 @@ The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**
 
 ### 5. Advanced Concurrency, VIP Priority & Anti-Spam Engine
 
-```mermaid
-flowchart TD
-    UserReq([User Request / Link]) --> CheckSpam{"Is User VIP / Admin?"}
-    CheckSpam -- "Yes (Paid or Admin)" --> BypassSpam["⚡ Anti-Spam Cooldown Bypassed"]
-    CheckSpam -- "No (Free User)" --> CooldownCheck{"Cooldown < 6s?"}
-    CooldownCheck -- "Yes (<6s)" --> SpamWarning["⚠️ Warning: Ladle, don't spam here!"]
-    CooldownCheck -- "3 violations in 30s" --> TempBan["🚫 10-Minute Temporary Ban"]
-    CooldownCheck -- "No" --> ConcurrentCheck
-    BypassSpam --> ConcurrentCheck
+```d2
+direction: down
 
-    ConcurrentCheck{"Active Concurrent Jobs?"}
-    ConcurrentCheck -- "Free User >= 3" --> DenyUser["⚠️ Concurrent Limit: Max 3 active downloads"]
-    ConcurrentCheck -- "Paid User >= 10" --> DenyUser
-    ConcurrentCheck -- "Allowed" --> GlobalCheck{"Server Slots Busy? (>= 8)"}
+UserReq: "User Request / Link" {
+  shape: circle
+}
 
-    GlobalCheck -- "Slots Open (< 8)" --> StartDownload["⬇️ Start Download Immediately"]
-    GlobalCheck -- "Busy (>= 8)" --> QueueCheck{"User Priority Tier?"}
-    
-    QueueCheck -- "Admin" --> AdminBypass["👑 Instant Queue Bypass"]
-    QueueCheck -- "Paid VIP" --> VIPQueue["⚡ Front of Queue (Ahead of Free Users)"]
-    QueueCheck -- "Free User" --> StandardQueue["👥 Standard FIFO Queue"]
-    
-    AdminBypass --> StartDownload
-    VIPQueue --> LiveUI["🔄 Telegram Live Counter: updates position every 1-2s"]
-    StandardQueue --> LiveUI
-    LiveUI --> SlotFrees["Slot Frees ➔ Auto-Launch Download with 0-100% Meter"]
+CheckSpam: "Is User VIP or Admin?" {
+  shape: diamond
+}
+
+BypassSpam: "⚡ Cooldown Bypassed\n(Instant execution)" {
+  style.fill: "#e8f5e9"
+  style.stroke: "#43a047"
+}
+
+CooldownCheck: "Cooldown < 6s?" {
+  shape: diamond
+}
+
+SpamWarning: "⚠️ Warning: Ladle, don't spam here!"
+TempBan: "🚫 10-Minute Temporary Ban\n(3 violations in 30s)" {
+  style.fill: "#ffebee"
+  style.stroke: "#e53935"
+}
+
+UserReq -> CheckSpam
+CheckSpam -> BypassSpam: "Yes (VIP / Admin)"
+CheckSpam -> CooldownCheck: "No (Free User)"
+
+CooldownCheck -> SpamWarning: "Yes (< 6s)"
+SpamWarning -> TempBan: "3 Violations"
+
+ConcurrentCheck: "Check Active Concurrent Jobs" {
+  shape: diamond
+}
+
+CooldownCheck -> ConcurrentCheck: "Passed (>= 6s)"
+BypassSpam -> ConcurrentCheck
+
+DenyConcurrent: "⚠️ Concurrency Limit Reached\n(Free: max 3 | VIP: max 10)"
+GlobalSlots: "Server Slots Busy? (>= 8 concurrent)" {
+  shape: diamond
+}
+
+ConcurrentCheck -> DenyConcurrent: "Limit Exceeded"
+ConcurrentCheck -> GlobalSlots: "Slots Permitted"
+
+StartImmediate: "⬇️ Start Download Immediately" {
+  style.fill: "#e8f5e9"
+  style.stroke: "#43a047"
+}
+
+QueueCheck: "User Priority Level?" {
+  shape: diamond
+}
+
+GlobalSlots -> StartImmediate: "Slots Open (< 8)"
+GlobalSlots -> QueueCheck: "Server Busy (>= 8)"
+
+AdminBypass: "👑 Instant Queue Bypass\n(Admin)"
+VIPQueue: "⚡ VIP Fast-Track Queue\n(Jumps directly to front of queue)"
+StandardQueue: "👥 Standard FIFO Queue\n(Free Users)"
+
+QueueCheck -> AdminBypass: "Admin"
+QueueCheck -> VIPQueue: "Paid VIP"
+QueueCheck -> StandardQueue: "Free User"
+
+AdminBypass -> StartImmediate
+
+LiveUI: "🔄 Telegram Live UI Meter\n(Updates queue position every 1.5s)"
+VIPQueue -> LiveUI
+StandardQueue -> LiveUI
+
+SlotFrees: "Slot Frees Up ➔ Launch Download with Progress Meter"
+LiveUI -> SlotFrees -> StartImmediate
 ```
 
 #### Key Enterprise Capabilities:
@@ -158,7 +285,7 @@ flowchart TD
    - Triggers friendly warnings: *"⚠️ Ladle, don't spam here! Otherwise you will be banned."*
    - Repeated abuse (3 violations within 30 seconds) triggers an automated **10-minute temporary ban**.
 5. **🧹 Automated Temp Storage Cleaner & Pre-Flight Disk Guard:**
-   - Background worker executes every 15 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
+   - Background worker executes every 5 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
    - Pre-flight storage check verifies available disk space before starting heavy media conversions to prevent out-of-disk crashes.
    - Live server storage diagnostics on the Admin Dashboard display exact available free space, percentage, and system disk usage.
 6. **📸 Instagram & 𝕏 X (Twitter) Multi-Media Downloaders:**

@@ -19,42 +19,55 @@ router = Router(name="start_router")
 
 
 def get_welcome_text(user_name: str = "Music Lover") -> str:
-    """Generate modern, clean welcome text with direct link guidance matching sample UI."""
+    """Generate modern, clean welcome text matching sample UI."""
     return (
-        f"👋 **Hey {user_name}!** Welcome to **Music & Video Bot**\n"
-        "⚡ *Download high quality music and videos instantly with original fidelity!*\n\n"
-        "🔗 **Send any kind of link directly:**\n"
-        "• 📸 **Instagram:** Reels, Posts, Carousels, Stories & Audio\n"
-        "• ▶️ **YouTube:** Videos, Shorts & YouTube Music\n"
-        "• 𝕏 **X (Twitter):** Videos, HD Photos & GIFs\n"
-        "• 🎵 **Song Search:** Type any song title or artist to search\n\n"
-        "👇 *Or use the quick menu below to get started:*"
+        "╔══════════════════════════════════════╗\n"
+        "         🔥 MUSIC & VIDEO BOT 🔥\n"
+        "╚══════════════════════════════════════╝\n\n"
+        f"💎 **Welcome, {user_name}!** 💎\n"
+        "🚀 *Your high-speed media bot is ready!*\n"
+        "──────────────────────────────────────\n"
+        "🔗 **Send any media link directly:**\n"
+        "• 📸 **Instagram:** Reels, Posts, Stories & Audio\n"
+        "• ▶️ **YouTube:** 144p - 720p HD Free (1080p+ VIP)\n"
+        "• 𝕏 **X (Twitter):** Original HD Videos, Photos & GIFs\n"
+        "• 🎵 **Song Search:** Type any track name or artist\n"
+        "──────────────────────────────────────\n"
+        "🔷 *Select any option below or send a link:* 👇\n"
+        "💡 *Fast · Instant · 2GB High-Speed Engine*"
     )
 
 
 WELCOME_TEXT = get_welcome_text("Music Lover")
 
 HELP_TEXT = (
-    "📖 **Bot Features & User Guide**\n\n"
+    "╔══════════════════════════════════════╗\n"
+    "             📖 USER GUIDE 📖\n"
+    "╚══════════════════════════════════════╝\n\n"
     "🎯 **Quick Ways to Download:**\n"
-    "• **Song Search:** Send any title or artist (e.g. `Blinding Lights`)\n"
-    "• **YouTube:** Send any YouTube or YouTube Music link\n"
-    "• **Instagram:** Send any Reel, Post, or Carousel link\n"
-    "• **X / Twitter:** Send any tweet link for original HD media\n\n"
+    "• 🎵 **Song Search:** Send any title or artist\n"
+    "• ▶️ **YouTube:** Send any YouTube or YT Music link\n"
+    "• 📸 **Instagram:** Send any Reel, Post, or Carousel link\n"
+    "• 𝕏 **X (Twitter):** Send any tweet link for original HD media\n"
+    "──────────────────────────────────────\n"
     "⚡ **Formats & Quality:**\n"
-    "• **Audio:** MP3 (128k, 192k, 320k), M4A (AAC), Lossless WAV\n"
-    "• **Video:** MP4 from 144p up to 1080p Full HD\n"
-    "• **Social Media:** Original HD Reels, Carousels, Photos & GIFs\n\n"
-    "💡 *Core Commands:* `/start` • `/ytmusic` • `/instagram` • `/twitter` • `/history` • `/privacy`"
+    "• 🎧 **Audio:** MP3 (128k, 192k, 320k), M4A, WAV\n"
+    "• 🎬 **Video:** 144p, 240p, 360p, 480p, 720p HD (Free)\n"
+    "• 💎 **Premium:** 1080p Full HD, 1440p, 4K (VIP Pass)\n"
+    "──────────────────────────────────────\n"
+    "💡 *Commands:* `/start` • `/ytmusic` • `/instagram` • `/twitter` • `/history` • `/privacy`"
 )
 
 ABOUT_TEXT = (
-    "ℹ️ **About This Bot**\n\n"
+    "╔══════════════════════════════════════╗\n"
+    "             ℹ️ ABOUT BOT ℹ️\n"
+    "╚══════════════════════════════════════╝\n\n"
     "• **Bot:** Music & Video Downloader (@songsuperzxbot)\n"
-    "• **Engine:** Python 3.11+, aiogram 3, yt-dlp & FFmpeg\n"
+    "• **Engine:** Python 3.12+, aiogram 3, yt-dlp & FFmpeg\n"
     "• **Developer:** @coder_chandan\n"
-    "• **Source Code:** Contact Admin (@coder_chandan)\n\n"
-    "🔒 *Privacy Guarantee: Temporary files are wiped immediately upon delivery.*"
+    "• **Source Code:** Contact Admin (@coder_chandan)\n"
+    "──────────────────────────────────────\n"
+    "🔒 *30-Min Auto-Drain: Temp files purged automatically.*"
 )
 
 

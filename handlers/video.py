@@ -95,11 +95,17 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     safe_duration = html.escape(info.get("duration_str", "00:00"))
 
     text = (
-        f"🎬 <b>Video Resolution Selection</b>\n\n"
-        f"<b>Title:</b> {safe_title}\n"
-        f"<b>Duration:</b> <code>{safe_duration}</code>\n\n"
+        "╔══════════════════════════════════════╗\n"
+        "     🎬 VIDEO RESOLUTION SELECTION 🎬\n"
+        "╚══════════════════════════════════════╝\n\n"
+        f"🎬 <b>Title:</b> {safe_title}\n"
+        f"⏱ <b>Duration:</b> <code>{safe_duration}</code>\n"
+        "──────────────────────────────────────\n"
+        "✨ <b>144p - 720p HD are 100% Free!</b>\n"
+        "⚡ <i>1080p Full HD &amp; 4K require VIP Pass.</i>\n"
+        "──────────────────────────────────────\n"
         f"{admin_banner}"
-        f"Select a genuinely available resolution below (low to high):"
+        "Select a genuinely available resolution below (low to high):"
     )
 
     if callback.message:
@@ -167,8 +173,8 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
     if not status_msg:
         return
 
-    # Check paywall for 720p and higher resolutions
-    if resolution in ("720p", "1080p", "1440p", "2160p"):
+    # Check paywall for 1080p and higher resolutions (720p is 100% Free)
+    if resolution in ("1080p", "1440p", "2160p"):
         is_admin = user_id in ADMIN_IDS
         sub = await db.get_user_subscription(user_id)
         has_active_sub = bool(sub and sub.get("is_active") and sub.get("today_remaining", 0) > 0)
@@ -180,31 +186,32 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
                 limit_num = sub.get("daily_limit", 0)
                 await status_msg.edit_text(
                     f"🎬 **Aaj ka quota khatam babu bhaiya! Pura internet aaj hi download karega kya? 😂**\n\n"
-                    f"You have used all **{limit_num} HD videos** for today on your {plan_name} plan.\n\n"
+                    f"You have used all **{limit_num} VIP videos** for today on your {plan_name} plan.\n\n"
                     f"💡 *Midnight (12:00 AM) ko quota reset hoga!*\n"
-                    f"Standard qualities (144p - 480p) aur music downloads abhi bhi completely free hain!",
+                    f"Standard qualities (144p - 720p HD) aur music downloads abhi bhi completely free hain!",
                     parse_mode="Markdown"
                 )
                 asyncio.create_task(vanish_status_message(status_msg, delay=90.0))
                 return
 
-            price = PRICE_SINGLE_720P if resolution == "720p" else PRICE_SINGLE_1080P
+            price = PRICE_SINGLE_1080P
             go_price = SUBSCRIPTION_PLANS.get("go", {}).get("price", 35)
             pro_price = SUBSCRIPTION_PLANS.get("pro", {}).get("price", 100)
             ultra_price = SUBSCRIPTION_PLANS.get("ultra", {}).get("price", 299)
             max_price = SUBSCRIPTION_PLANS.get("max", {}).get("price", 799)
             paywall_text = (
-                f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n"
-                f"   💎 **PREMIUM VIDEO ACCESS ({resolution})** 💎\n"
-                f"🔒 ━━━━━━━━━━━━━━━━━━━ 🔒\n\n"
-                f"Standard qualities (`144p` - `480p`) & music are **100% Free (Normal Tier)**.\n"
+                "╔══════════════════════════════════════╗\n"
+                f"   💎 PREMIUM VIDEO ACCESS ({resolution}) 💎\n"
+                "╚══════════════════════════════════════╝\n\n"
+                "✨ Standard qualities (`144p` - `720p HD`) & music are **100% Free**.\n"
                 f"To unlock **{resolution} Full HD**, choose an access pass below:\n\n"
                 f"⚡ **Single Video:** `₹{price}` (Unlock this video only)\n"
                 f"⚡ **Go Pass:** `₹{go_price} / 7 Days` (20 HD videos/day)\n"
                 f"🚀 **Pro Pass:** `₹{pro_price} / 30 Days` (45 HD videos/day)\n"
                 f"⚡ **Ultra Pass:** `₹{ultra_price} / 90 Days` (80 HD videos/day)\n"
                 f"👑 **Max VIP:** `₹{max_price} / 365 Days` (150 HD videos/day + 2GB Bandwidth)\n\n"
-                f"👇 *Tap a button below to get your instant UPI QR code:*"
+                "──────────────────────────────────────\n"
+                "👇 *Tap a button below to get your instant UPI QR code:*"
             )
             await status_msg.edit_text(
                 text=paywall_text,

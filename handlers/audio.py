@@ -90,12 +90,15 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
     approx_sizes = info.get("approx_audio_sizes", {}) if (success and info) else {}
 
     text = (
-        f"🎧 **Audio Quality Selection ({selected_format.upper()})**\n\n"
-        f"Select the desired bitrate for conversion:\n"
-        f"• **128 kbps:** Fast download, standard sound\n"
-        f"• **192 kbps:** Balanced, crisp fidelity\n"
-        f"• **320 kbps:** Maximum studio bitrate\n\n"
-        f"*Note: Bitrate conversions reflect genuine source parameters.*"
+        "╔══════════════════════════════════════╗\n"
+        f"      🎧 AUDIO QUALITY ({selected_format.upper()}) 🎧\n"
+        "╚══════════════════════════════════════╝\n\n"
+        "Select the desired bitrate for conversion:\n"
+        "• ⚡ **128 kbps:** Fast download, standard sound\n"
+        "• ⚡ **192 kbps:** Balanced, crisp fidelity\n"
+        "• ⚡ **320 kbps:** Maximum studio bitrate\n"
+        "──────────────────────────────────────\n"
+        "💡 *Bitrate conversions reflect genuine source parameters.*"
     )
 
     if callback.message:

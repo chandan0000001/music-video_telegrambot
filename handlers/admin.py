@@ -97,7 +97,9 @@ async def render_admin_dashboard_text() -> str:
     yt_cookie_status = f"✅ Active ({cookie_f.stat().st_size / 1024:.1f} KB)" if (cookie_f and cookie_f.exists()) else "⚪ None"
 
     return (
-        "🛡️ <b>Administrator Control Dashboard</b>\n\n"
+        "╔══════════════════════════════════════╗\n"
+        "       🛡️ <b>ADMIN DASHBOARD</b> 🛡️\n"
+        "╚══════════════════════════════════════╝\n\n"
         f"👥 <b>Total Registered Users:</b> <code>{stats['total_users']}</code>\n"
         f"🆕 <b>New Users Today:</b> <code>{stats['new_users_today']}</code>\n"
         f"🔍 <b>Total Searches Performed:</b> <code>{stats['total_searches']}</code>\n"
@@ -109,6 +111,7 @@ async def render_admin_dashboard_text() -> str:
         f"  • <b>YouTube Cookies:</b> <code>{yt_cookie_status}</code>\n\n"
         f"🔥 <b>Top Searched Songs:</b>\n{top_searches_str}\n\n"
         f"👤 <b>Recently Joined Users:</b>\n{recent_users_str}\n\n"
+        "────────────────────────────\n"
         "⚡ <i>Use the buttons below or commands for detailed operations.</i>"
     )
 

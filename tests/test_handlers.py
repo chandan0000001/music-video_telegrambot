@@ -93,7 +93,7 @@ async def test_scenario_12_and_13_admin_command():
 
     await cmd_admin(admin_msg, mock_state)
     admin_msg.answer.assert_awaited_once()
-    assert "Administrator Control Dashboard" in admin_msg.answer.call_args[1]["text"]
+    assert "ADMIN DASHBOARD" in admin_msg.answer.call_args[1]["text"]
 
 
 def test_main_menu_keyboard_has_ytmusic():
@@ -120,7 +120,7 @@ def test_welcome_text_personalization():
     from handlers.start import get_welcome_text
     text = get_welcome_text("Chandan")
     assert "Chandan" in text
-    assert "Music & Video Bot" in text
+    assert "MUSIC & VIDEO BOT" in text.upper()
     assert "YouTube" in text
     assert "X (Twitter)" in text
 
@@ -142,11 +142,11 @@ async def test_ytmusic_command_prompts_hub():
     await cmd_ytmusic(msg, mock_state)
     mock_state.set_state.assert_awaited_once_with(UserStates.waiting_for_ytmusic)
     msg.answer.assert_awaited_once()
-    assert "YouTube Music" in msg.answer.call_args[1]["text"]
+    assert "YOUTUBE MUSIC" in msg.answer.call_args[1]["text"].upper()
 
 
 def test_video_quality_keyboard_badges():
-    """Verify video keyboard marks 144p-480p Free and 720p+ with premium price."""
+    """Verify video keyboard marks 144p-720p Free and 1080p+ with premium price."""
     from keyboards.quality_keyboard import get_video_quality_keyboard, get_paywall_keyboard
     kb = get_video_quality_keyboard("test_vid", ["144p", "360p", "480p", "720p", "1080p"])
     
@@ -154,7 +154,7 @@ def test_video_quality_keyboard_badges():
     assert any("144p (Free)" in t for t in button_texts)
     assert any("360p (Free)" in t for t in button_texts)
     assert any("480p (Free)" in t for t in button_texts)
-    assert any("720p (₹19)" in t for t in button_texts)
+    assert any("720p (Free)" in t for t in button_texts)
     assert any("1080p (₹27)" in t for t in button_texts)
 
     # Admin view: NO money amounts or prices shown!
@@ -169,13 +169,13 @@ def test_video_quality_keyboard_badges():
     assert not any("₹" in t for t in sub_btn_texts), "Subscriber buttons must not show price tags!"
     assert any("VIP Pass" in t for t in sub_btn_texts)
 
-    pay_kb = get_paywall_keyboard("test_vid", "720p")
+    pay_kb = get_paywall_keyboard("test_vid", "1080p")
     pay_callbacks = [btn.callback_data for row in pay_kb.inline_keyboard for btn in row if btn.callback_data]
-    assert any("pay:single:test_vid:720p" in c for c in pay_callbacks)
-    assert any("pay:go:test_vid:720p" in c for c in pay_callbacks)
-    assert any("pay:pro:test_vid:720p" in c for c in pay_callbacks)
-    assert any("pay:ultra:test_vid:720p" in c for c in pay_callbacks)
-    assert any("pay:max:test_vid:720p" in c for c in pay_callbacks)
+    assert any("pay:single:test_vid:1080p" in c for c in pay_callbacks)
+    assert any("pay:go:test_vid:1080p" in c for c in pay_callbacks)
+    assert any("pay:pro:test_vid:1080p" in c for c in pay_callbacks)
+    assert any("pay:ultra:test_vid:1080p" in c for c in pay_callbacks)
+    assert any("pay:max:test_vid:1080p" in c for c in pay_callbacks)
 
 
 def test_payment_pricing_and_qr_generation():
@@ -534,7 +534,7 @@ async def test_cancel_phrases_clear_state_and_return_menu():
         await handle_user_text(mock_msg, mock_state)
         mock_state.clear.assert_awaited()
         mock_msg.answer.assert_awaited_once()
-        assert "Welcome to **Music & Video Bot**" in mock_msg.answer.call_args[1]["text"]
+        assert "MUSIC & VIDEO BOT" in mock_msg.answer.call_args[1]["text"].upper()
 
 
 @pytest.mark.asyncio

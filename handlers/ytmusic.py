@@ -21,9 +21,12 @@ logger = logging.getLogger(__name__)
 router = Router(name="ytmusic_router")
 
 YTMUSIC_HUB_TEXT = (
-    "▶️ **YouTube Music Studio**\n"
-    "*1-Tap Studio Audio (320 kbps MP3 & M4A)*\n\n"
+    "╔══════════════════════════════════════╗\n"
+    "    ▶️ **YOUTUBE MUSIC STUDIO** ▶️\n"
+    "╚══════════════════════════════════════╝\n\n"
+    "🎧 *1-Tap Studio Audio (320 kbps MP3 & M4A)*\n\n"
     "Send any `music.youtube.com` track link or song name to download.\n\n"
+    "────────────────────────────\n"
     "👉 *Paste link or send song name below:*"
 )
 

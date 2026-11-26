@@ -15,7 +15,7 @@ from config import TEMP_DIR
 logger = logging.getLogger(__name__)
 
 STALE_FILE_MAX_AGE_SECONDS = 30 * 60  # 30 minutes
-CLEANUP_INTERVAL_SECONDS = 15 * 60     # run every 15 minutes
+CLEANUP_INTERVAL_SECONDS = 5 * 60     # run every 5 minutes (guarantees strict 30-min purge)
 
 
 def get_disk_usage_stats(target_dir: Optional[Path] = None) -> Dict[str, Any]:

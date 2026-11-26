@@ -55,14 +55,18 @@ logger = logging.getLogger(__name__)
 router = Router(name="instagram_router")
 
 INSTAGRAM_HUB_TEXT = (
-    "📸 **Instagram Downloader**\n"
-    "*HD Reels, Posts, Carousels, Stories, Highlights, Audio & Profile DP*\n\n"
+    "╔══════════════════════════════════════╗\n"
+    "       📸 INSTAGRAM DOWNLOADER 📸\n"
+    "╚══════════════════════════════════════╝\n\n"
+    "⚡ **HD Reels, Posts, Carousels, Stories & Audio**\n"
+    "──────────────────────────────────────\n"
     "Supported options:\n"
-    "• **Reels & Posts:** Send any Reel, Video, or Photo link\n"
-    "• **Carousels:** Full albums with all original photos & videos (no item limits)\n"
-    "• **Music & Audio:** Send any Instagram Audio or Reel music link\n"
-    "• **Stories & Highlights:** Send any active story or highlight link\n"
-    "• **Profile DP & Bio:** Send profile link or `@username` (both public & private accounts supported)\n\n"
+    "• 🎬 **Reels & Posts:** Send any Reel, Video, or Photo link\n"
+    "• 📸 **Carousels:** Full albums with all original photos & videos\n"
+    "• 🎵 **Music & Audio:** Send any Instagram Audio or Reel music link\n"
+    "• ⏱ **Stories & Highlights:** Send any active story or highlight link\n"
+    "• 👤 **Profile DP & Bio:** Send profile link or `@username`\n"
+    "──────────────────────────────────────\n"
     "👉 *Paste your Instagram link or @username below:*"
 )
 
