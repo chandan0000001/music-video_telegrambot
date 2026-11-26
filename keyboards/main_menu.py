@@ -87,6 +87,8 @@ HOME_ACTIONS = {
     "𝕏 X": "twitter",
     "𝕏 X/Twitter": "twitter",
     "🎵 SEARCH MUSIC": "search",
+    "🎵 SEARCH SONG": "search",
+    "☰ MORE": "more",
     "▶️ YOUTUBE MUSIC": "ytmusic",
     "📸 INSTAGRAM": "instagram",
     "𝕏 X / TWITTER": "twitter",
@@ -95,29 +97,40 @@ HOME_ACTIONS = {
     "🎟 REDEEM COUPON": "coupon",
     "📜 HISTORY": "history",
     "❔ HELP": "help",
-    "🏠 MAIN MENU": "start",
+    "🏠 MAIN MENU": "main",
     "⚙️ ADMIN": "admin",
 }
 
 
-def get_home_reply_keyboard(is_admin: bool = False):
+def _reply_keyboard(rows, placeholder):
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-    rows = [
-        ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X/Twitter"],
-        ["🎵 SEARCH MUSIC"],
-        ["🎁 INVITE & EARN", "🎟 REDEEM COUPON"],
-        ["📜 HISTORY", "❔ HELP"],
-        ["🏠 MAIN MENU"],
-    ]
-    if is_admin:
-        rows.append(["⚙️ ADMIN"])
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=label) for label in row] for row in rows],
         resize_keyboard=True,
         is_persistent=True,
         one_time_keyboard=False,
-        input_field_placeholder="Choose an option or paste a media link…",
+        input_field_placeholder=placeholder,
     )
+
+
+def get_home_reply_keyboard(is_admin: bool = False):
+    """Keep the primary menu to two rows for every user."""
+    return _reply_keyboard([
+        ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X/Twitter"],
+        ["🎵 SEARCH SONG", "☰ MORE"],
+    ], "Choose a platform or search for a song…")
+
+
+def get_more_reply_keyboard(is_admin: bool = False):
+    """Secondary actions with an always-visible route back home."""
+    rows = [
+        ["🎁 INVITE & EARN", "🎟 REDEEM COUPON"],
+        ["📜 HISTORY", "❔ HELP"],
+    ]
+    if is_admin:
+        rows.append(["⚙️ ADMIN"])
+    rows.append(["🏠 MAIN MENU"])
+    return _reply_keyboard(rows, "Choose an option or return to the main menu…")
 
 
 def get_youtube_hub_keyboard() -> InlineKeyboardMarkup:

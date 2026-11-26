@@ -31,13 +31,18 @@ Send `/start` for a framed welcome card and a persistent keyboard below the mess
 | Row | Buttons |
 | --- | --- |
 | Platforms | ▶️ YOUTUBE · 📸 INSTAGRAM · 𝕏 X/Twitter |
-| Search | 🎵 SEARCH MUSIC |
+| Discover | 🎵 SEARCH SONG · ☰ MORE |
+
+Tap **☰ MORE** to replace the keyboard with these secondary options:
+
+| Row | Buttons |
+| --- | --- |
 | Rewards | 🎁 INVITE & EARN · 🎟 REDEEM COUPON |
 | Utilities | 📜 HISTORY · ❔ HELP |
-| Home | 🏠 MAIN MENU |
 | Admin only | ⚙️ ADMIN |
+| Back | 🏠 MAIN MENU |
 
-**YouTube** opens **Music & Audio** and **Video & Shorts** choices. Instagram and X open their existing download flows. The other buttons retain their functions. Old music/video buttons remain recognized for chats with a cached keyboard; send `/start` to refresh it. Telegram controls keyboard colors and dimensions through the user's client and theme.
+**YouTube** opens **Music & Audio** and **Video & Shorts** choices. Instagram and X open their existing download flows. **Main Menu** returns to the two-row platform keyboard. The other buttons retain their functions. Old music/video buttons remain recognized for chats with a cached keyboard; send `/start` to refresh it. Telegram controls keyboard colors and dimensions through the user's client and theme.
 
 ## 🏗️ Architecture & Workflow
 

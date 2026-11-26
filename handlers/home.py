@@ -4,13 +4,15 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from keyboards.main_menu import HOME_ACTIONS, get_back_to_main_keyboard, get_youtube_hub_keyboard
 from handlers.states import UserStates
+from config import ADMIN_IDS
+from keyboards.main_menu import get_home_reply_keyboard, get_more_reply_keyboard
 
 router = Router(name="home_keyboard_router")
 
 
 @router.message(F.text.in_(HOME_ACTIONS))
 async def handle_home_button(message: Message, state: FSMContext) -> None:
-    from handlers.start import cmd_start, cmd_help
+    from handlers.start import cmd_start, cmd_help, MAIN_MENU_TEXT
     from handlers.search import cmd_search
     from handlers.ytmusic import cmd_ytmusic
     from handlers.instagram import cmd_instagram
@@ -33,7 +35,17 @@ async def handle_home_button(message: Message, state: FSMContext) -> None:
         "coupon": cmd_redeem_coupon, "admin": cmd_admin,
     }
     plain_handlers = {"referral": cmd_referral, "history": cmd_history, "help": cmd_help}
-    if action == "youtube":
+    if action == "more":
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        await message.answer(
+            "☰ <b>MORE</b>\n\nRewards, your history and help—all in one place.\nChoose an option below, or return to the main menu.",
+            parse_mode="HTML", reply_markup=get_more_reply_keyboard(is_admin),
+        )
+    elif action == "main":
+        await message.answer(
+            MAIN_MENU_TEXT, parse_mode="HTML", reply_markup=get_home_reply_keyboard(),
+        )
+    elif action == "youtube":
         await message.answer(
             "▶️ <b>YOUTUBE</b>\n\nChoose music and audio, or video and Shorts.\nYou can also paste a YouTube link directly.",
             parse_mode="HTML", reply_markup=get_youtube_hub_keyboard(),
