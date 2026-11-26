@@ -503,17 +503,23 @@ class MediaService:
         height_val = int(resolution.replace("p", ""))
         width_val = STANDARD_TIER_WIDTHS.get(height_val, int(height_val * 16 / 9))
 
+        TIERS = [144, 240, 360, 480, 720, 1080, 1440, 2160]
+        prev_h = 0
+        for t in TIERS:
+            if t < height_val:
+                prev_h = t
+        prev_w = STANDARD_TIER_WIDTHS.get(prev_h, 0)
+
         download_template = str(job_dir / "input_media.%(ext)s")
-        # Select best video matching either height or width constraint (supporting widescreen cinema).
-        # Prioritize standard H.264 (avc1) for 100% universal compatibility across all Telegram iOS/Android clients,
-        # falling back to AV1/VP9 when H.264 is not supplied by YouTube.
+        # Tier-accurate selector:
+        # Prioritize video matching the EXACT requested tier range (height > prev_h and <= height_val)
+        # or width range (width > prev_w and <= width_val for ultrawide cinema videos).
+        # This guarantees 4K (2160p), 1440p, 1080p are NEVER downgraded to 360p or lower codecs!
         format_selector = (
-            f"bestvideo[height<={height_val}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo[width<={width_val}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo[height<={height_val}][vcodec^=avc1]+bestaudio/"
-            f"bestvideo[width<={width_val}][vcodec^=avc1]+bestaudio/"
-            f"bestvideo[height<={height_val}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo[width<={width_val}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={height_val}][height>{prev_h}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={height_val}][height>{prev_h}]+bestaudio/"
+            f"bestvideo[width<={width_val}][width>{prev_w}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[width<={width_val}][width>{prev_w}]+bestaudio/"
             f"bestvideo[height<={height_val}]+bestaudio/"
             f"bestvideo[width<={width_val}]+bestaudio/"
             f"bv*[height<={height_val}]+ba/"
