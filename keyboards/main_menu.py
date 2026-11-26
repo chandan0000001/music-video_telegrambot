@@ -85,6 +85,7 @@ def get_session_expired_keyboard() -> InlineKeyboardMarkup:
 HOME_ACTIONS = {
     "▶️ YOUTUBE": "youtube",
     "𝕏 X": "twitter",
+    "𝕏 X/Twitter": "twitter",
     "🎵 SEARCH MUSIC": "search",
     "▶️ YOUTUBE MUSIC": "ytmusic",
     "📸 INSTAGRAM": "instagram",
@@ -102,7 +103,7 @@ HOME_ACTIONS = {
 def get_home_reply_keyboard(is_admin: bool = False):
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
     rows = [
-        ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X"],
+        ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X/Twitter"],
         ["🎵 SEARCH MUSIC"],
         ["🎁 INVITE & EARN", "🎟 REDEEM COUPON"],
         ["📜 HISTORY", "❔ HELP"],

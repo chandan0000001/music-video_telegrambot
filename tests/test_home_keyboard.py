@@ -9,7 +9,7 @@ from keyboards.main_menu import get_home_reply_keyboard, HOME_ACTIONS
 
 def test_persistent_keyboard_layout():
     keyboard = get_home_reply_keyboard()
-    assert [b.text for b in keyboard.keyboard[0]] == ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X"]
+    assert [b.text for b in keyboard.keyboard[0]] == ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X/Twitter"]
     assert keyboard.is_persistent and not keyboard.one_time_keyboard
     assert [len(row) for row in keyboard.keyboard] == [3, 1, 2, 2, 1]
     assert all(button.text in HOME_ACTIONS for row in keyboard.keyboard for button in row)

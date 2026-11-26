@@ -30,7 +30,7 @@ Send `/start` for a framed welcome card and a persistent keyboard below the mess
 
 | Row | Buttons |
 | --- | --- |
-| Platforms | ▶️ YOUTUBE · 📸 INSTAGRAM · 𝕏 X |
+| Platforms | ▶️ YOUTUBE · 📸 INSTAGRAM · 𝕏 X/Twitter |
 | Search | 🎵 SEARCH MUSIC |
 | Rewards | 🎁 INVITE & EARN · 🎟 REDEEM COUPON |
 | Utilities | 📜 HISTORY · ❔ HELP |
