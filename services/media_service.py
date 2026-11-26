@@ -73,6 +73,11 @@ class MediaService:
         from config import get_cookie_file, YTDLP_PROXY
         opts: Dict[str, Any] = {
             "remote_components": ["ejs:github"],
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "web"]
+                }
+            },
         }
         node_bin = shutil.which("node") or shutil.which("nodejs")
         if node_bin:
@@ -282,19 +287,23 @@ class MediaService:
         return True, info, None
 
     def _sync_download(self, ydl_opts: Dict[str, Any], url: str) -> None:
-        """Synchronous yt-dlp download invocation with fallback on bot challenge or missing formats."""
+        """Synchronous yt-dlp download invocation with fallback on bot challenge, 403, or missing formats."""
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
             err_msg = str(e).lower()
-            if "not a bot" in err_msg or "sign in" in err_msg or "requested format is not available" in err_msg:
+            if any(k in err_msg for k in ("not a bot", "sign in", "requested format is not available", "format is not available", "403", "forbidden")):
                 logger.warning(f"Download challenge/format issue detected for {url} ({e}). Retrying with flexible player client and fallback format...")
+                orig_fmt = str(ydl_opts.get("format", ""))
                 fallback_opts = dict(ydl_opts)
-                fallback_opts["format"] = "bestvideo+bestaudio/best"
+                if "bestvideo" in orig_fmt:
+                    fallback_opts["format"] = "bestvideo+bestaudio/best/bv*+ba/b"
+                else:
+                    fallback_opts["format"] = "bestaudio/best/b"
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["tv", "web", "ios", "mweb", "android"]
+                        "player_client": ["android", "ios", "mweb", "web"]
                     }
                 }
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
@@ -336,11 +345,11 @@ class MediaService:
         job_dir = job_dir or self._get_job_dir()
         output_format = output_format.lower()
 
-        # yt-dlp options for best audio
+        # yt-dlp options for best audio with universal fallback
         download_template = str(job_dir / "input_audio.%(ext)s")
         ydl_opts: Dict[str, Any] = {
             **self._get_common_ydl_opts(),
-            "format": "bestaudio/best",
+            "format": "bestaudio/best/b",
             "outtmpl": download_template,
             "quiet": True,
             "no_warnings": True,
