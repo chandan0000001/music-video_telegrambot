@@ -603,12 +603,36 @@ class Database:
         now = datetime.now(timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
 
-        plan_key = plan_tier.lower().replace("sub_", "")
-        plan_info = SUBSCRIPTION_PLANS.get(plan_key, SUBSCRIPTION_PLANS["go"])
+        # Flexible normalization supporting 'max', 'MAX VIP', 'sub_max', 'vip', 'weekly', etc.
+        plan_raw = str(plan_tier).lower().replace("sub_", "").strip()
+        if "max" in plan_raw or "vip" in plan_raw:
+            plan_key = "max"
+            plan_info = SUBSCRIPTION_PLANS["max"]
+        elif "ultra" in plan_raw:
+            plan_key = "ultra"
+            plan_info = SUBSCRIPTION_PLANS["ultra"]
+        elif "pro" in plan_raw:
+            plan_key = "pro"
+            plan_info = SUBSCRIPTION_PLANS["pro"]
+        elif "weekly" in plan_raw:
+            plan_key = "weekly"
+            plan_info = SUBSCRIPTION_PLANS["go"]
+        elif "monthly" in plan_raw:
+            plan_key = "monthly"
+            plan_info = SUBSCRIPTION_PLANS["pro"]
+        elif "go" in plan_raw:
+            plan_key = "go"
+            plan_info = SUBSCRIPTION_PLANS["go"]
+        else:
+            plan_key = plan_raw
+            plan_info = SUBSCRIPTION_PLANS.get(plan_key, SUBSCRIPTION_PLANS["go"])
 
         days = custom_days if (custom_days and custom_days > 0) else plan_info["days"]
         daily_limit = plan_info["daily_limit"]
         expiry_date = now + timedelta(days=days)
+
+        # Ensure user exists in users table first to prevent FOREIGN KEY constraint error
+        await self.add_or_update_user(telegram_id, username=None, first_name=None)
 
         async with self._get_connection() as conn:
             # Extend existing active subscription if still valid in the future
@@ -697,9 +721,13 @@ class Database:
 
             sub = dict(row)
             try:
-                exp_dt = datetime.fromisoformat(sub["expiry_date"].replace(" ", "T")).replace(tzinfo=timezone.utc)
-            except Exception:
-                exp_dt = now
+                exp_clean = str(sub["expiry_date"]).replace("Z", "+00:00").replace(" ", "T")
+                exp_dt = datetime.fromisoformat(exp_clean)
+                if exp_dt.tzinfo is None:
+                    exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            except Exception as e:
+                logger.error(f"Error parsing subscription expiry date for user {telegram_id}: {e}")
+                exp_dt = now + timedelta(days=365)  # Grace period: do not falsely expire valid subscriptions
 
             if exp_dt < now:
                 return {
