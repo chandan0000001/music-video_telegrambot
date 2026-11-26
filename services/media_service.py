@@ -312,18 +312,13 @@ class MediaService:
         except Exception as e:
             err_msg = str(e).lower()
             if any(k in err_msg for k in ("not a bot", "sign in", "requested format is not available", "format is not available", "403", "forbidden")):
-                logger.warning(f"Download challenge/format issue detected for {url} ({e}). Retrying with flexible player client and fallback format...")
-                orig_fmt = str(ydl_opts.get("format", ""))
+                logger.warning(f"Download challenge/format issue detected for {url} ({e}). Retrying with authenticated browser session while strictly preserving requested resolution tier...")
                 fallback_opts = dict(ydl_opts)
-                if "bestvideo" in orig_fmt:
-                    fallback_opts["format"] = "bestvideo+bestaudio/best/bv*+ba/b"
-                else:
-                    fallback_opts["format"] = "bestaudio/best/b"
-                fallback_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                    }
-                }
+                # CRITICAL: Preserve the requested format selector (e.g. height<=2160) so it never downgrades to 360p!
+                if "format" in ydl_opts:
+                    fallback_opts["format"] = ydl_opts["format"]
+
+                # Attach authenticated session to resolve datacenter bot challenges
                 chrome_profile = Path.home() / ".config" / "google-chrome"
                 if not chrome_profile.exists():
                     chrome_profile = Path("/home/ubuntu/.config/google-chrome")
@@ -334,6 +329,7 @@ class MediaService:
                     cookie_file = get_cookie_file()
                     if cookie_file and "cookiefile" not in fallback_opts:
                         fallback_opts["cookiefile"] = str(cookie_file)
+
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
                     fallback_ydl.download([url])
             else:
@@ -373,10 +369,13 @@ class MediaService:
         job_dir = job_dir or self._get_job_dir()
         output_format = output_format.lower()
 
+        # On AWS EC2 server, hook directly into Chrome browser profile to prevent datacenter IP bot challenges
+        use_cookies = Path("/home/ubuntu/.config/google-chrome").exists()
+
         # yt-dlp options for best audio with universal fallback
         download_template = str(job_dir / "input_audio.%(ext)s")
         ydl_opts: Dict[str, Any] = {
-            **self._get_common_ydl_opts(),
+            **self._get_common_ydl_opts(with_cookies=use_cookies),
             "format": "bestaudio/best/b",
             "outtmpl": download_template,
             "quiet": True,
@@ -521,8 +520,11 @@ class MediaService:
             f"bv*+ba/b"
         )
 
+        # On AWS EC2 server, hook directly into Chrome browser profile to prevent datacenter IP bot challenges
+        use_cookies = Path("/home/ubuntu/.config/google-chrome").exists()
+
         ydl_opts: Dict[str, Any] = {
-            **self._get_common_ydl_opts(),
+            **self._get_common_ydl_opts(with_cookies=use_cookies),
             "format": format_selector,
             "outtmpl": download_template,
             "quiet": True,
