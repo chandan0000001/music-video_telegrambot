@@ -171,17 +171,12 @@ class MediaService:
                 break
             logger.info(f"Extracting YouTube metadata via round-robin proxy (attempt {attempt + 1}/4)...")
             proxy_opts = {
-                **self._get_common_ydl_opts(with_cookies=False, proxy=proxy),
+                **self._get_common_ydl_opts(with_cookies=True, proxy=proxy),
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
                 "socket_timeout": 12,
                 "check_formats": False,
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                    }
-                }
             }
             try:
                 with yt_dlp.YoutubeDL(proxy_opts) as ydl:
@@ -374,14 +369,18 @@ class MediaService:
             fallback_opts = dict(ydl_opts)
             fallback_opts["proxy"] = proxy
             fallback_opts["socket_timeout"] = 25
-            fallback_opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                }
-            }
-            # Remove browser cookies so Google account SABR experiment doesn't block streams
-            fallback_opts.pop("cookiesfrombrowser", None)
-            fallback_opts.pop("cookiefile", None)
+
+            # Attach authenticated Chrome session / cookiefile so proxy requests avoid bot challenges
+            chrome_profile = Path.home() / ".config" / "google-chrome"
+            if not chrome_profile.exists():
+                chrome_profile = Path("/home/ubuntu/.config/google-chrome")
+            if chrome_profile.exists():
+                fallback_opts["cookiesfrombrowser"] = ("chrome",)
+            else:
+                from config import get_cookie_file
+                cookie_file = get_cookie_file()
+                if cookie_file:
+                    fallback_opts["cookiefile"] = str(cookie_file)
 
             # CRITICAL: Strictly preserve format selector (e.g. height<=2160)
             if "format" in ydl_opts:
