@@ -110,18 +110,21 @@ class MediaService:
             "no_warnings": True,
             "skip_download": True,
             "socket_timeout": 20,
+            "check_formats": False,
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
         except Exception as e:
             err_msg = str(e).lower()
-            if any(k in err_msg for k in ("not a bot", "sign in", "confirm your age", "age-restricted", "inappropriate")):
-                logger.warning(f"Bot challenge or age-restriction detected for {url}. Retrying with Android/TV player client fallback...")
+            if any(k in err_msg for k in ("not a bot", "sign in", "confirm your age", "age-restricted", "inappropriate", "requested format is not available", "format is not available")):
+                logger.warning(f"Challenge or format issue detected during extract for {url}: {e}. Retrying with flexible player clients and unconstrained format...")
                 fallback_opts = dict(ydl_opts)
+                fallback_opts["format"] = "all"
+                fallback_opts["check_formats"] = False
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["android", "tv", "ios", "web"]
+                        "player_client": ["android", "tv", "ios", "mweb", "web"]
                     }
                 }
                 try:
@@ -477,8 +480,8 @@ class MediaService:
             f"bestvideo[width<={width_val}][ext=mp4]+bestaudio[ext=m4a]/"
             f"bestvideo[height<={height_val}]+bestaudio/"
             f"bestvideo[width<={width_val}]+bestaudio/"
-            f"bestvideo+bestaudio/"
-            f"best[height<={height_val}]/best"
+            f"bv*[height<={height_val}]+ba/"
+            f"bv*+ba/b"
         )
 
         ydl_opts: Dict[str, Any] = {
