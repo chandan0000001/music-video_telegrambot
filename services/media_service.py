@@ -279,18 +279,19 @@ class MediaService:
         return True, info, None
 
     def _sync_download(self, ydl_opts: Dict[str, Any], url: str) -> None:
-        """Synchronous yt-dlp download invocation with fallback on bot challenge."""
+        """Synchronous yt-dlp download invocation with fallback on bot challenge or missing formats."""
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
             err_msg = str(e).lower()
-            if "not a bot" in err_msg or "sign in" in err_msg:
-                logger.warning(f"Bot challenge detected during download for {url}. Retrying with mobile player client fallback...")
+            if "not a bot" in err_msg or "sign in" in err_msg or "requested format is not available" in err_msg:
+                logger.warning(f"Download challenge/format issue detected for {url} ({e}). Retrying with flexible player client and fallback format...")
                 fallback_opts = dict(ydl_opts)
+                fallback_opts["format"] = "bestvideo+bestaudio/best"
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["tv", "web", "ios"]
+                        "player_client": ["tv", "web", "ios", "mweb", "android"]
                     }
                 }
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
@@ -476,6 +477,7 @@ class MediaService:
             f"bestvideo[width<={width_val}][ext=mp4]+bestaudio[ext=m4a]/"
             f"bestvideo[height<={height_val}]+bestaudio/"
             f"bestvideo[width<={width_val}]+bestaudio/"
+            f"bestvideo+bestaudio/"
             f"best[height<={height_val}]/best"
         )
 
