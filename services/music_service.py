@@ -45,7 +45,14 @@ class MusicService:
         }
         if YTDLP_PROXY:
             ydl_opts["proxy"] = YTDLP_PROXY
-        if cookie_file:
+
+        chrome_profile = Path.home() / ".config" / "google-chrome"
+        if not chrome_profile.exists():
+            chrome_profile = Path("/home/ubuntu/.config/google-chrome")
+
+        if chrome_profile.exists():
+            ydl_opts["cookiesfrombrowser"] = ("chrome",)
+        elif cookie_file:
             ydl_opts["cookiefile"] = str(cookie_file)
 
         search_query = f"ytsearch{limit}:{query}"

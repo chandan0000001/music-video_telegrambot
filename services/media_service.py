@@ -69,30 +69,44 @@ class MediaService:
         except Exception as e:
             logger.warning(f"Unexpected error removing temp dir {job_dir}: {e}")
 
-    def _get_common_ydl_opts(self, with_cookies: bool = False) -> Dict[str, Any]:
+    def _get_common_ydl_opts(self, with_cookies: bool = True) -> Dict[str, Any]:
         """Base options for yt-dlp metadata and downloads.
-        By default, cookies are NOT passed to YouTube requests because yt-dlp
-        automatically skips unauthenticated high-performance clients (visionos, android, ios)
-        when auth cookies are present, causing SABR/format errors on datacenter IPs.
+        Automatically utilizes live Chrome browser session if available,
+        otherwise falls back to cookies.txt or high-performance visionos client.
         """
         from config import get_cookie_file, YTDLP_PROXY
         opts: Dict[str, Any] = {
             "remote_components": ["ejs:github"],
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                }
-            },
         }
         node_bin = shutil.which("node") or shutil.which("nodejs")
         if node_bin:
             opts["js_runtimes"] = {"node": {"path": node_bin}}
         if YTDLP_PROXY:
             opts["proxy"] = YTDLP_PROXY
+
         if with_cookies:
-            cookie_file = get_cookie_file()
-            if cookie_file:
-                opts["cookiefile"] = str(cookie_file)
+            chrome_profile = Path.home() / ".config" / "google-chrome"
+            if not chrome_profile.exists():
+                chrome_profile = Path("/home/ubuntu/.config/google-chrome")
+
+            if chrome_profile.exists():
+                opts["cookiesfrombrowser"] = ("chrome",)
+            else:
+                cookie_file = get_cookie_file()
+                if cookie_file:
+                    opts["cookiefile"] = str(cookie_file)
+                else:
+                    opts["extractor_args"] = {
+                        "youtube": {
+                            "player_client": ["visionos", "android", "ios", "mweb", "web"]
+                        }
+                    }
+        else:
+            opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["visionos", "android", "ios", "mweb", "web"]
+                }
+            }
         return opts
 
     def _apply_turbo_downloader(self, opts: Dict[str, Any]) -> None:
