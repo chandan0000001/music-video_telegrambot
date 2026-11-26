@@ -123,17 +123,33 @@ class MediaService:
 
     def _sync_extract_info(self, url: str) -> Dict[str, Any]:
         """Extract metadata and analyze available video and audio formats.
-        Uses dual-tier strategy:
-        1. Clean unauthenticated visionos client (gives 144p to 4K 2160p without SABR account locking).
-        2. Authenticated Chrome profile fallback if bot challenge / datacenter IP block is encountered.
+        Uses environment-aware strategy:
+        - On AWS EC2 server: Runs authenticated Chrome session FIRST (takes ~2s, avoids 20s datacenter timeout).
+        - On Local machine: Runs clean unauthenticated visionos client FIRST (takes ~1s, prevents SABR account lock).
         """
-        # Tier 1: Clean unauthenticated
+        is_aws_server = Path("/home/ubuntu/.config/google-chrome").exists()
+        if is_aws_server:
+            auth_opts = {
+                **self._get_common_ydl_opts(with_cookies=True),
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "socket_timeout": 15,
+                "check_formats": False,
+            }
+            try:
+                with yt_dlp.YoutubeDL(auth_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            except Exception as e:
+                logger.warning(f"Authenticated extraction on AWS encountered issue for {url}: {e}. Retrying unauthenticated...")
+
+        # For local development or as secondary fallback
         clean_opts = {
             **self._get_common_ydl_opts(with_cookies=False),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "socket_timeout": 20,
+            "socket_timeout": 8,
             "check_formats": False,
         }
         try:
@@ -145,13 +161,12 @@ class MediaService:
         except Exception as e:
             logger.warning(f"Unauthenticated extraction encountered challenge for {url}: {e}. Falling back to authenticated browser session...")
 
-        # Tier 2: Authenticated session fallback (bypasses datacenter bot blocks on AWS)
         auth_opts = {
             **self._get_common_ydl_opts(with_cookies=True),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "socket_timeout": 20,
+            "socket_timeout": 15,
             "check_formats": False,
         }
         with yt_dlp.YoutubeDL(auth_opts) as ydl:
@@ -171,11 +186,11 @@ class MediaService:
         try:
             raw_info = await asyncio.wait_for(
                 asyncio.to_thread(self._sync_extract_info, canonical_url),
-                timeout=25.0
+                timeout=45.0
             )
         except asyncio.TimeoutError:
-            logger.error(f"Extraction timed out after 25s for {canonical_url}")
-            return False, None, "⏱ <b>Request Timed Out:</b> YouTube took too long to respond (>25s). Please try again or hit /start."
+            logger.error(f"Extraction timed out after 45s for {canonical_url}")
+            return False, None, "⏱ <b>Request Timed Out:</b> YouTube took too long to respond (>45s). Please try again or hit /start."
         except Exception as e:
             logger.error(f"Failed to extract info for {canonical_url}: {e}")
             classified = classify_media_restriction(str(e))
