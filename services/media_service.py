@@ -69,8 +69,12 @@ class MediaService:
         except Exception as e:
             logger.warning(f"Unexpected error removing temp dir {job_dir}: {e}")
 
-    def _get_common_ydl_opts(self) -> Dict[str, Any]:
-        """Base options for yt-dlp metadata and downloads."""
+    def _get_common_ydl_opts(self, with_cookies: bool = False) -> Dict[str, Any]:
+        """Base options for yt-dlp metadata and downloads.
+        By default, cookies are NOT passed to YouTube requests because yt-dlp
+        automatically skips unauthenticated high-performance clients (visionos, android, ios)
+        when auth cookies are present, causing SABR/format errors on datacenter IPs.
+        """
         from config import get_cookie_file, YTDLP_PROXY
         opts: Dict[str, Any] = {
             "remote_components": ["ejs:github"],
@@ -85,9 +89,10 @@ class MediaService:
             opts["js_runtimes"] = {"node": {"path": node_bin}}
         if YTDLP_PROXY:
             opts["proxy"] = YTDLP_PROXY
-        cookie_file = get_cookie_file()
-        if cookie_file:
-            opts["cookiefile"] = str(cookie_file)
+        if with_cookies:
+            cookie_file = get_cookie_file()
+            if cookie_file:
+                opts["cookiefile"] = str(cookie_file)
         return opts
 
     def _apply_turbo_downloader(self, opts: Dict[str, Any]) -> None:
@@ -307,6 +312,10 @@ class MediaService:
                         "player_client": ["visionos", "android", "ios", "mweb", "web"]
                     }
                 }
+                from config import get_cookie_file
+                cookie_file = get_cookie_file()
+                if cookie_file and "cookiefile" not in fallback_opts:
+                    fallback_opts["cookiefile"] = str(cookie_file)
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
                     fallback_ydl.download([url])
             else:
