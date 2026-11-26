@@ -333,7 +333,7 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         await message.answer(
             text=get_welcome_text(user_name),
             reply_markup=get_main_menu_keyboard(user.id if user else 0),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 

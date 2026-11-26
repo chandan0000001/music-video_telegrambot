@@ -180,14 +180,15 @@ class ThrottlingMiddleware(BaseMiddleware):
             user_id = event.from_user.id if event.from_user else None
             target_message = event.message if isinstance(event.message, Message) else None
 
-            # Skip throttling for inline menu navigation callbacks to allow natural browsing
-            cb_data = (event.data or "")
-            if any(cb_data.startswith(prefix) for prefix in (
-                "menu:", "opt_", "fmt_", "page:", "vdl:", "adl:", "back", "cancel", "coupon:", "plan:", "dosearch:", "sel:"
-            )):
-                return await handler(event, data)
-
         if user_id:
+            from database import db
+            if await db.is_user_blocked(user_id):
+                if isinstance(event, CallbackQuery):
+                    await event.answer("Your access is restricted.", show_alert=True)
+                elif target_message:
+                    await target_message.answer("Your access is restricted.")
+                return None
+
             # Administrators have zero rate limits
             if user_id in ADMIN_IDS:
                 return await handler(event, data)

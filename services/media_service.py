@@ -347,7 +347,7 @@ class MediaService:
             "retries": 10,
             "fragment_retries": 10,
             "file_access_retries": 5,
-            "nocheckcertificate": True,
+            "nocheckcertificate": False,
         }
         if tracker and hasattr(tracker, "ytdlp_hook"):
             ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]
@@ -493,7 +493,7 @@ class MediaService:
             "retries": 10,
             "fragment_retries": 10,
             "file_access_retries": 5,
-            "nocheckcertificate": True,
+            "nocheckcertificate": False,
         }
         if tracker and hasattr(tracker, "ytdlp_hook"):
             ydl_opts["progress_hooks"] = [tracker.ytdlp_hook]

@@ -98,6 +98,12 @@ class PaymentService:
         if order["status"] == "paid":
             return True, "✅ Order has already been paid and activated."
 
+        if order["status"] != "pending":
+            return False, "This order is no longer pending."
+        if await db.increment_order_attempts(order_id) > 5:
+            await db.mark_order_expired(order_id)
+            return False, "Verification attempt limit reached. Create a new order."
+
         # Pre-check: Has this UTR been used in another order?
         if await db.is_utr_already_used(utr_clean, exclude_order_id=order_id):
             return False, "❌ Fraud Alert: This UTR has already been claimed by another transaction."

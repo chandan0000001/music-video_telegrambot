@@ -140,8 +140,8 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
 
     # Register Middlewares
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware())
+    dp.message.outer_middleware(ThrottlingMiddleware())
+    dp.callback_query.outer_middleware(ThrottlingMiddleware())
 
     # Register Handlers
     root_router = setup_routers()

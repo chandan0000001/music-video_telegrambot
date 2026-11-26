@@ -13,11 +13,11 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="▶️ YouTube Music", callback_data="menu:ytmusic"),
         ],
         [
-            InlineKeyboardButton(text="𝕏 X (Twitter) Downloader", callback_data="menu:twitter"),
-            InlineKeyboardButton(text="📸 Instagram Downloader", callback_data="menu:instagram"),
+            InlineKeyboardButton(text="𝕏 X / Twitter", callback_data="menu:twitter"),
+            InlineKeyboardButton(text="📸 Instagram", callback_data="menu:instagram"),
         ],
         [
-            InlineKeyboardButton(text="▶️ YouTube Video Downloader", callback_data="menu:video"),
+            InlineKeyboardButton(text="🎬 YouTube Video", callback_data="menu:video"),
         ],
         [
             InlineKeyboardButton(text="🎁 Invite & Earn VIP", callback_data="menu:referral"),
@@ -25,18 +25,20 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
-            InlineKeyboardButton(text="⚡ Features & Help", callback_data="menu:help"),
+            InlineKeyboardButton(text="❔ Help", callback_data="menu:help"),
         ]
     ]
 
+    buttons.append([InlineKeyboardButton(text="🔒 Privacy", callback_data="menu:privacy")])
+
     if is_admin:
         buttons.append([
-            InlineKeyboardButton(text="👤 Developer ↗", url="https://t.me/coder_chandan"),
-            InlineKeyboardButton(text="⚙️ Admin Dashboard 🛡️", callback_data="admin:dashboard")
+            InlineKeyboardButton(text="💬 Support", url="https://t.me/coder_chandan"),
+            InlineKeyboardButton(text="⚙️ Admin", callback_data="admin:dashboard")
         ])
     else:
         buttons.append([
-            InlineKeyboardButton(text="👤 Developer ↗", url="https://t.me/coder_chandan")
+            InlineKeyboardButton(text="💬 Support", url="https://t.me/coder_chandan")
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -62,7 +64,7 @@ def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="menu:main")
+                InlineKeyboardButton(text="‹ Main menu", callback_data="menu:main")
             ]
         ]
     )
@@ -78,3 +80,48 @@ def get_session_expired_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+
+# Telegram reply keyboards live below the composer, like a native control panel.
+HOME_ACTIONS = {
+    "▶️ YOUTUBE": "youtube",
+    "𝕏 X": "twitter",
+    "🎵 SEARCH MUSIC": "search",
+    "▶️ YOUTUBE MUSIC": "ytmusic",
+    "📸 INSTAGRAM": "instagram",
+    "𝕏 X / TWITTER": "twitter",
+    "🎬 YOUTUBE VIDEO": "video",
+    "🎁 INVITE & EARN": "referral",
+    "🎟 REDEEM COUPON": "coupon",
+    "📜 HISTORY": "history",
+    "❔ HELP": "help",
+    "🏠 MAIN MENU": "start",
+    "⚙️ ADMIN": "admin",
+}
+
+
+def get_home_reply_keyboard(is_admin: bool = False):
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    rows = [
+        ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X"],
+        ["🎵 SEARCH MUSIC"],
+        ["🎁 INVITE & EARN", "🎟 REDEEM COUPON"],
+        ["📜 HISTORY", "❔ HELP"],
+        ["🏠 MAIN MENU"],
+    ]
+    if is_admin:
+        rows.append(["⚙️ ADMIN"])
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=label) for label in row] for row in rows],
+        resize_keyboard=True,
+        is_persistent=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Choose an option or paste a media link…",
+    )
+
+
+def get_youtube_hub_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎧 Music & Audio", callback_data="menu:ytmusic"),
+         InlineKeyboardButton(text="🎬 Video & Shorts", callback_data="menu:video")],
+        [InlineKeyboardButton(text="‹ Main menu", callback_data="menu:main")],
+    ])

@@ -165,6 +165,9 @@ async def cb_prompt_utr_submission(callback: CallbackQuery, state: FSMContext) -
 
     order_id = callback.data.split(":")[1]
     order = await db.get_order(order_id)
+    if not order or order.get("telegram_id") != callback.from_user.id:
+        await callback.answer("This order is unavailable for your account.", show_alert=True)
+        return
     if not order or db.is_order_expired(order):
         await callback.answer("❌ This order has expired. Please select a plan again.", show_alert=True)
         return
@@ -197,10 +200,13 @@ async def cb_prompt_utr_submission(callback: CallbackQuery, state: FSMContext) -
 @router.callback_query(F.data.startswith("cancel_order:"))
 async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
     """Cancel pending payment order and cleanly return back to video options or main menu."""
-    await state.clear()
     parts = callback.data.split(":")
     order_id = parts[1] if len(parts) > 1 else ""
     order = await db.get_order(order_id) if order_id else None
+    if not order or order.get("telegram_id") != callback.from_user.id:
+        await callback.answer("This order is unavailable for your account.", show_alert=True)
+        return
+    await state.clear()
 
     # Cancel pending order in database (HIGH-5)
     if order and order.get("status") == "pending":
@@ -259,16 +265,16 @@ async def cb_cancel_order(callback: CallbackQuery, state: FSMContext) -> None:
         first_name = (user.first_name or "Music Lover") if user else "Music Lover"
         welcome = get_welcome_text(first_name)
         await callback.message.answer(
-            text=f"❌ *Order cancelled.*\n\n{welcome}",
+            text=f"Order cancelled.\n\n{welcome}",
             reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     await callback.answer("Order cancelled.")
 
 
 @router.message(UserStates.waiting_for_utr)
 async def handle_utr_input(message: Message, state: FSMContext) -> None:
-    """Handle 12-digit UTR text sent by user and run automated Gmail verification."""
+    """Handle 12-digit UTR text sent by user and request payment review."""
     text = (message.text or "").strip()
     if not text.isdigit() or len(text) != 12:
         await send_vanishing_message(
@@ -289,7 +295,7 @@ async def handle_utr_input(message: Message, state: FSMContext) -> None:
         return
 
     order = await db.get_order(order_id)
-    if not order:
+    if not order or not message.from_user or order.get("telegram_id") != message.from_user.id:
         await state.clear()
         await message.answer("❌ Order record not found.")
         return
@@ -304,27 +310,12 @@ async def handle_utr_input(message: Message, state: FSMContext) -> None:
         )
         return
 
-    # HIGH-2: Brute-force protection on UTR submission (limit to 5 attempts)
-    attempts = data.get("utr_attempts", 0) + 1
-    await state.update_data(utr_attempts=attempts)
-    db_attempts = await db.increment_order_attempts(order_id)
-    if attempts > 5 or db_attempts > 5:
-        await state.clear()
-        await db.mark_order_expired(order_id)
-        await message.answer(
-            "❌ **Too Many Attempts**\n\n"
-            "This payment order has reached the maximum allowed verification attempts (5).\n"
-            "The order has been cancelled for security. Please create a new order.",
-            parse_mode="Markdown"
-        )
-        return
-
     checking_msg = await message.answer(
-        f"⏳ *Verifying UTR* `{text}` *with Google Pay / Bank records...*",
+        f"⏳ *Verifying UTR* `{text}` *for payment review...*",
         parse_mode="Markdown"
     )
 
-    # Automated check via Gmail IMAP
+    # Validate order and request payment review
     verified, msg = await payment_service.verify_order_utr(order_id, text)
 
     user = message.from_user
@@ -345,11 +336,11 @@ async def handle_utr_input(message: Message, state: FSMContext) -> None:
         # Dispatch video fulfillment or subscription activation
         await fulfill_paid_order(message, order)
     else:
-        # Not found in Gmail yet (bank notification delay)
+        # Payment requires independent administrator verification
         await checking_msg.edit_text(
             f"⏳ **Verification Pending**\n\n"
-            f"UTR `{text}` was received, but the bank/Google Pay email has not arrived in the inbox yet.\n\n"
-            f"👉 Banks sometimes take 15–30 seconds to deliver alerts. Tap **🔄 Check Again** below, or contact admin if you need immediate assistance.",
+            f"UTR `{text}` was received and requires administrator review.\n\n"
+            f"An administrator must confirm the payment before access is activated. Tap **🔄 Check Again** to check approval status.",
             reply_markup=get_utr_check_again_keyboard(order_id, text),
             parse_mode="Markdown"
         )
@@ -362,10 +353,16 @@ async def handle_utr_input(message: Message, state: FSMContext) -> None:
 async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
     """User tapped 'Check Again' button."""
     parts = callback.data.split(":")
+    if len(parts) != 3 or not parts[2].isascii() or not parts[2].isdigit() or len(parts[2]) != 12:
+        await callback.answer("Invalid payment request.", show_alert=True)
+        return
     order_id = parts[1]
     utr = parts[2]
 
     order = await db.get_order(order_id)
+    if not order or order.get("telegram_id") != callback.from_user.id:
+        await callback.answer("This order is unavailable for your account.", show_alert=True)
+        return
     if not order:
         await callback.answer("Order not found.", show_alert=True)
         return
@@ -394,7 +391,7 @@ async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
 
     if callback.message:
         await callback.message.edit_text(
-            f"🔄 *Re-checking Gmail for UTR* `{utr}`...",
+            f"🔄 *Checking approval for UTR* `{utr}`...",
             parse_mode="Markdown"
         )
 
@@ -416,12 +413,12 @@ async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
             await notify_admin_payment_proof(callback.bot, order, utr, user_name, user_id, auto_verified=True)
             await fulfill_paid_order(callback.message, order)
     else:
-        await callback.answer("Still pending. Please wait 15 seconds.", show_alert=True)
+        await callback.answer("Awaiting administrator approval.", show_alert=True)
         if callback.message:
             await callback.message.edit_text(
                 f"⏳ **Verification Pending**\n\n"
-                f"UTR `{utr}` has not arrived in the Gmail alerts yet.\n"
-                f"Please tap **🔄 Check Again** in 15 seconds, tap **✏️ Re-enter UTR** to correct any typos, or contact admin.",
+                f"UTR `{utr}` is awaiting administrator approval.\n"
+                f"An administrator must confirm payment. Check again after approval, or re-enter the UTR to correct a typo.",
                 reply_markup=get_utr_check_again_keyboard(order_id, utr),
                 parse_mode="Markdown"
             )
@@ -546,7 +543,7 @@ async def alert_admin_unverified_payment(bot, order: dict, utr: str, user_name: 
         f"⚠️ ━━━━━━━━━━━━━━━━━━━ ⚠️\n"
         f"   ⏳ **PAYMENT PENDING GMAIL VERIFICATION**\n"
         f"⚠️ ━━━━━━━━━━━━━━━━━━━ ⚠️\n\n"
-        f"A user submitted a UTR, but it has not reached Gmail yet.\n\n"
+        f"A user submitted a UTR. Verify the actual credit in your bank or payment provider before approving.\n\n"
         f"• **User:** @{user_name} (`{user_id}`)\n"
         f"• **Order ID:** `{order_id}`\n"
         f"• **Plan:** {plan_desc}\n"

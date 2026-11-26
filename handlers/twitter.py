@@ -400,7 +400,7 @@ async def handle_twitter_waiting_input(message: Message, state: FSMContext) -> N
         await message.answer(
             text=get_welcome_text(user_name),
             reply_markup=get_main_menu_keyboard(message.from_user.id if message.from_user else 0),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 

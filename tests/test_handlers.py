@@ -120,9 +120,9 @@ def test_welcome_text_personalization():
     from handlers.start import get_welcome_text
     text = get_welcome_text("Chandan")
     assert "Chandan" in text
-    assert "MUSIC & VIDEO BOT" in text.upper()
+    assert "Music &amp; Video" in text
     assert "YouTube" in text
-    assert "X (Twitter)" in text
+    assert "Instagram or X" in text
 
 
 @pytest.mark.asyncio
@@ -534,7 +534,8 @@ async def test_cancel_phrases_clear_state_and_return_menu():
         await handle_user_text(mock_msg, mock_state)
         mock_state.clear.assert_awaited()
         mock_msg.answer.assert_awaited_once()
-        assert "MUSIC & VIDEO BOT" in mock_msg.answer.call_args[1]["text"].upper()
+        assert "Music &amp; Video" in mock_msg.answer.call_args[1]["text"]
+        assert mock_msg.answer.call_args[1]["parse_mode"] == "HTML"
 
 
 @pytest.mark.asyncio

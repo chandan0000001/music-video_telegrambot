@@ -1,12 +1,12 @@
 # 🎵 Telegram Music & Video Downloader Bot
 
-> **Bot Name:** Music & Video Downloader ([@songsuperzxbot](https://t.me/songsuperzxbot))  
-> **Developer:** Chandan ([@coder_chandan](https://t.me/coder_chandan))  
-> **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)  
-> **Production Status:** 🟢 **Live on AWS EC2 (Mumbai `ap-south-1`) — 24/7 Always-On**  
+> **Bot Name:** Music & Video Downloader ([@songsuperzxbot](https://t.me/songsuperzxbot))
+> **Developer:** Chandan ([@coder_chandan](https://t.me/coder_chandan))
+> **Repository:** [chandan0000001/music-video_telegrambot](https://github.com/chandan0000001/music-video_telegrambot)
+> **Runtime:** Local polling supported; optional AWS/systemd deployment instructions below. Hosting uptime depends on the running deployment.
 > **HD Demo Video:** [Watch Demo Video (1080p 60fps MP4)](https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4)
 
-A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
+An asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
 
 ---
 
@@ -24,81 +24,45 @@ A production-grade, asynchronous Telegram bot built with **Python 3.11+**, **aio
 
 ---
 
+## Main menu and navigation
+
+Send `/start` for a framed welcome card and a persistent keyboard below the message box:
+
+| Row | Buttons |
+| --- | --- |
+| Platforms | ▶️ YOUTUBE · 📸 INSTAGRAM · 𝕏 X |
+| Search | 🎵 SEARCH MUSIC |
+| Rewards | 🎁 INVITE & EARN · 🎟 REDEEM COUPON |
+| Utilities | 📜 HISTORY · ❔ HELP |
+| Home | 🏠 MAIN MENU |
+| Admin only | ⚙️ ADMIN |
+
+**YouTube** opens **Music & Audio** and **Video & Shorts** choices. Instagram and X open their existing download flows. The other buttons retain their functions. Old music/video buttons remain recognized for chats with a cached keyboard; send `/start` to refresh it. Telegram controls keyboard colors and dimensions through the user's client and theme.
+
 ## 🏗️ Architecture & Workflow
+
+Diagrams below use Mermaid code fences for rendering in GitHub’s README view. In a source editor or raw file view, the diagram source is shown.
 
 ### 1. User Interaction Flowchart
 
-```d2
-direction: down
-
-User: Telegram User {
-  shape: person
-}
-
-StartCmd: "/start or Send Query / URL" {
-  shape: rectangle
-}
-
-CheckBlocked: "Is User Blocked?" {
-  shape: diamond
-}
-
-DenyMsg: "🚫 Return Restricted Notice" {
-  style.fill: "#ffebee"
-  style.stroke: "#e53935"
-}
-
-UpdateUser: "Register / Update User in SQLite"
-
-RouteInput: "Input Type?" {
-  shape: diamond
-}
-
-User -> StartCmd
-StartCmd -> CheckBlocked
-CheckBlocked -> DenyMsg: "Yes (Blocked)"
-CheckBlocked -> UpdateUser: "No (Active)"
-UpdateUser -> RouteInput
-
-# Audio / Song Search Flow
-MusicSearch: "🔍 MusicService (yt-dlp Search)"
-Top5Results: "Display Top 5 Matching Tracks"
-UserSelectTrack: "User Selects Track"
-
-RouteInput -> MusicSearch: "Text Query (Song Name)"
-MusicSearch -> Top5Results -> UserSelectTrack
-
-# Direct URL Flow
-ValidateURL: "Strict YouTube Regex & SSRF Check" {
-  shape: diamond
-}
-RejectURL: "⚠️ Reject: YouTube links only"
-
-RouteInput -> ValidateURL: "Direct URL"
-ValidateURL -> RejectURL: "Invalid URL"
-ValidateURL -> UserSelectTrack: "Valid URL"
-
-# Quality Selection
-MediaChoice: "Choose Media Type" {
-  shape: diamond
-}
-UserSelectTrack -> MediaChoice
-
-SelectAudio: "Choose Bitrate\n(⚡ 128k, ⚡ 192k, ⚡ 320k)"
-SelectVideo: "Choose Resolution\n(🎬 144p-720p Free | 🔒 1080p+ VIP)"
-
-MediaChoice -> SelectAudio: "Audio"
-MediaChoice -> SelectVideo: "Video"
-
-MediaQueue: "Worker Semaphore & Priority Queue"
-SelectAudio -> MediaQueue
-SelectVideo -> MediaQueue
-
-ProcessMedia: "⚙️ FFmpeg Remux / Hardware Transcode"
-SendDelivery: "🚀 Dispatch via Telegram Service (MTProto / Bot API)"
-Cleanup: "🧹 Auto-Delete Temp Job Directory (30m Max TTL)"
-
-MediaQueue -> ProcessMedia -> SendDelivery -> Cleanup
+```mermaid
+flowchart TD
+    User[Telegram user] --> Access{Blocked or rate limited?}
+    Access -->|Yes| Deny[Show access notice]
+    Access -->|No| Input{Command, button or link?}
+    Input -->|Start| Home[Welcome card and persistent keyboard]
+    Home --> Platforms[YouTube / Instagram / X]
+    Home --> Search[Search Music]
+    Input -->|Song title| Search
+    Input -->|Link| Validate[Validate supported URL]
+    Platforms --> Validate
+    Search --> Results[Select a search result]
+    Results --> Choice[Choose audio or video and quality]
+    Validate --> Choice
+    Choice --> Queue[Download queue]
+    Queue --> Process[Download and process media]
+    Process --> Deliver[Deliver through Telegram]
+    Deliver --> Cleanup[Clean temporary files]
 ```
 
 ---
@@ -107,58 +71,20 @@ MediaQueue -> ProcessMedia -> SendDelivery -> Cleanup
 
 Telegram's standard cloud API enforces a **50 MB** upload limit for basic bots. To allow uploads up to **2000 MB (2 GB)** without errors or downgrades, this bot utilizes an intelligent **Smart Routing & Hardware-Accelerated Pipeline**:
 
-```d2
-direction: down
-
-JobStart: "New Media Job" {
-  shape: circle
-}
-
-Download: "⬇️ yt-dlp Download Engine\n(8 parallel fragment streams into temp/job_ID/)"
-Remux: "⚙️ FFmpeg Remux / Transcode\n(Hardware Accelerated / Quality Target)"
-
-ProbeSize: "File Size > 48 MB?" {
-  shape: diamond
-}
-
-FastHTTP: "🚀 Standard Telegram Bot API\n(Instant HTTP POST for <= 48 MB)" {
-  style.fill: "#e8f5e9"
-  style.stroke: "#43a047"
-}
-
-CheckMTProto: "MTProto Configured?" {
-  shape: diamond
-}
-
-MTProto2GB: "⚡ Native MTProto 2GB Engine\n(Lossless fast direct upload up to 2000 MB)" {
-  style.fill: "#e3f2fd"
-  style.stroke: "#1e88e5"
-}
-
-AutoChunk: "📦 Lossless Zero-Reencode Splitter\n(Chunked into sequential <= 44 MB parts)" {
-  style.fill: "#fff3e0"
-  style.stroke: "#fb8c00"
-}
-
-DBStatus: "Update database status to 'completed'"
-FinalClean: "🧹 Immediate Disk Cleanup\n(temp/job_ID/ deleted, 0 bytes retained)" {
-  style.fill: "#f3e5f5"
-  style.stroke: "#8e24aa"
-}
-
-JobStart -> Download -> Remux -> ProbeSize
-
-ProbeSize -> FastHTTP: "No (<= 48 MB)"
-ProbeSize -> CheckMTProto: "Yes (> 48 MB)"
-
-CheckMTProto -> MTProto2GB: "Yes"
-CheckMTProto -> AutoChunk: "No (Fallback)"
-
-FastHTTP -> DBStatus
-MTProto2GB -> DBStatus
-AutoChunk -> DBStatus
-
-DBStatus -> FinalClean
+```mermaid
+flowchart TD
+    Job[New media job] --> Download[Download to temporary job folder]
+    Download --> Process[FFmpeg remux or transcode]
+    Process --> Size{Fits configured Bot API limit?}
+    Size -->|Yes| BotAPI[Upload through Bot API]
+    Size -->|No| MT{MTProto available?}
+    MT -->|Yes| Direct[Attempt direct MTProto upload]
+    MT -->|No| Split[Split into smaller parts]
+    Direct -->|Fallback required| Split
+    Split --> BotAPI
+    Direct -->|Delivered| Record[Record result]
+    BotAPI --> Record
+    Record --> Cleanup[Clean temporary job files]
 ```
 
 ---
@@ -193,82 +119,22 @@ The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**
 
 ### 5. Advanced Concurrency, VIP Priority & Anti-Spam Engine
 
-```d2
-direction: down
-
-UserReq: "User Request / Link" {
-  shape: circle
-}
-
-CheckSpam: "Is User VIP or Admin?" {
-  shape: diamond
-}
-
-BypassSpam: "⚡ Cooldown Bypassed\n(Instant execution)" {
-  style.fill: "#e8f5e9"
-  style.stroke: "#43a047"
-}
-
-CooldownCheck: "Cooldown < 6s?" {
-  shape: diamond
-}
-
-SpamWarning: "⚠️ Warning: Ladle, don't spam here!"
-TempBan: "🚫 10-Minute Temporary Ban\n(3 violations in 30s)" {
-  style.fill: "#ffebee"
-  style.stroke: "#e53935"
-}
-
-UserReq -> CheckSpam
-CheckSpam -> BypassSpam: "Yes (VIP / Admin)"
-CheckSpam -> CooldownCheck: "No (Free User)"
-
-CooldownCheck -> SpamWarning: "Yes (< 6s)"
-SpamWarning -> TempBan: "3 Violations"
-
-ConcurrentCheck: "Check Active Concurrent Jobs" {
-  shape: diamond
-}
-
-CooldownCheck -> ConcurrentCheck: "Passed (>= 6s)"
-BypassSpam -> ConcurrentCheck
-
-DenyConcurrent: "⚠️ Concurrency Limit Reached\n(Free: max 3 | VIP: max 10)"
-GlobalSlots: "Server Slots Busy? (>= 8 concurrent)" {
-  shape: diamond
-}
-
-ConcurrentCheck -> DenyConcurrent: "Limit Exceeded"
-ConcurrentCheck -> GlobalSlots: "Slots Permitted"
-
-StartImmediate: "⬇️ Start Download Immediately" {
-  style.fill: "#e8f5e9"
-  style.stroke: "#43a047"
-}
-
-QueueCheck: "User Priority Level?" {
-  shape: diamond
-}
-
-GlobalSlots -> StartImmediate: "Slots Open (< 8)"
-GlobalSlots -> QueueCheck: "Server Busy (>= 8)"
-
-AdminBypass: "👑 Instant Queue Bypass\n(Admin)"
-VIPQueue: "⚡ VIP Fast-Track Queue\n(Jumps directly to front of queue)"
-StandardQueue: "👥 Standard FIFO Queue\n(Free Users)"
-
-QueueCheck -> AdminBypass: "Admin"
-QueueCheck -> VIPQueue: "Paid VIP"
-QueueCheck -> StandardQueue: "Free User"
-
-AdminBypass -> StartImmediate
-
-LiveUI: "🔄 Telegram Live UI Meter\n(Updates queue position every 1.5s)"
-VIPQueue -> LiveUI
-StandardQueue -> LiveUI
-
-SlotFrees: "Slot Frees Up ➔ Launch Download with Progress Meter"
-LiveUI -> SlotFrees -> StartImmediate
+```mermaid
+flowchart TD
+    Request[User request] --> Rate[Blocked-user check and request throttling]
+    Rate --> Eligible{Admin or VIP?}
+    Eligible -->|Yes| Jobs[Check per-user job limit]
+    Eligible -->|No| Cooldown{Link cooldown passed?}
+    Cooldown -->|No| Warning[Warn and track violations]
+    Warning --> Repeated{Repeated violations?}
+    Repeated -->|Yes| Ban[Temporary restriction]
+    Cooldown -->|Yes| Jobs
+    Jobs --> Capacity{Capacity available?}
+    Capacity -->|User limit exceeded| Deny[Show concurrency notice]
+    Capacity -->|Global slots available| Start[Start download]
+    Capacity -->|Server busy| Priority[Apply queue priority]
+    Priority --> Queue[Wait with position updates]
+    Queue -->|Slot released| Start
 ```
 
 #### Key Enterprise Capabilities:
@@ -277,7 +143,7 @@ LiveUI -> SlotFrees -> StartImmediate
    - **Paid Plan Subscribers (`Go`, `Pro`, `Ultra`, `Max`):** Jump straight to the **front of the queue** ahead of free users (`VIP Fast-Track`), allowed up to **10 concurrent downloads**, and completely immune to the 6-second link cooldown.
    - **Free Users:** Standard FIFO queue, limited to **3 concurrent downloads**.
 2. **⚡ Global Concurrency Safety (8 Downloads / 8 Uploads):**
-   - The entire AWS EC2 instance strictly caps active operations to **8 downloads** and **8 uploads**, safeguarding network bandwidth and RAM.
+   - The queue manager caps active operations to **8 downloads** and **8 uploads**, safeguarding network bandwidth and RAM.
 3. **🔄 Real-Time Dynamic Queue UI:**
    - When slots are full, waiting users receive a dynamic Telegram status message that automatically updates every **1.5 seconds** showing their current `#1, #2, #3...` position and estimated wait time until a slot frees up.
 4. **🛡️ 6-Second Link Spam Guard:**
@@ -299,7 +165,7 @@ LiveUI -> SlotFrees -> StartImmediate
      - **Instagram Cookie & Session Support:** Set `INSTAGRAM_SESSION_ID` in `.env` or place `cookies.txt` / `instagram_cookies.txt` in the root folder to completely bypass Instagram datacenter login walls and rate limits.
      - **Private Account Graceful Handling:** For private profiles, fetches full HD profile pictures and public bio data while cleanly notifying users that posts/stories remain private.
    - **X (Twitter):** Original raw photos (`?name=orig`), HD MP4 videos, looping GIFs, and multi-media albums.
-   - **Clean Sub-Menu Navigation:** Every sub-section (Instagram, X, YouTube Music, Search, Audio, Video, Help) displays a dedicated, uncluttered `[ 🔙 Back to Main Menu ]` button.
+   - **Clean Sub-Menu Navigation:** Every sub-section (Instagram, X, YouTube Music, Search, Audio, Video, Help) displays a dedicated, uncluttered `[ ‹ Main menu ]` button.
    - Both feature live 0% to 100% download and upload progress meters with speed, ETA, and size metrics.
 7. **🎬 YouTube Live & Premiere Ended VODs vs Active Broadcasts:**
    - **Completed Broadcasts Allowed:** Live streams that have ended (`was_live`) and concluded premiere videos are fully unlocked for standard audio and video downloading.
@@ -589,11 +455,11 @@ Upon launching, the bot output will confirm:
 4. Click any track to choose **🎧 Audio** or **🎬 Video**.
 
 ### Dedicated YouTube Music Studio Downloader
-- **Hub & Commands:** Use `/ytmusic`, `/music`, or click **🔴 YouTube Music Downloader** from the main menu.
+- **Hub & Commands:** Use `/ytmusic`, `/music`, or choose **▶️ YOUTUBE → 🎧 Music & Audio** from the main menu.
 - **Dedicated Hub Interface:** Provides a streamlined environment tailored for music audiophiles.
 - **Instant 1-Tap Fast Download:** Paste any YouTube Music track (`music.youtube.com`), and download directly in `320 kbps MP3`, `192 kbps MP3`, `128 kbps MP3`, `M4A (AAC)`, or `Lossless WAV`.
 - **Search Music:** You can also type any track title inside the YouTube Music Studio to search and download high-fidelity audio streams.
-- **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.
+- **URL Validation:** This YouTube flow accepts supported YouTube links. Initial URL checks are not a substitute for connection-time SSRF protection; see the security review.
 
 ### Dedicated X (Twitter) Media Downloader
 - **Hub & Commands:** Use `/twitter`, `/x`, or click **🐦 X (Twitter) Downloader** from the main navigation menu.
@@ -606,7 +472,7 @@ Upon launching, the bot output will confirm:
 
 ### Direct YouTube & YouTube Music Link Processing
 1. Paste any valid YouTube or YouTube Music link (e.g. `https://music.youtube.com/watch?v=...`, `https://www.youtube.com/watch?v=...`, `https://youtu.be/...`, or YouTube Shorts).
-2. **Strict Security Validation:** Untrusted, malicious, or non-YouTube domains (SSRF attempts, private IPs, Spotify, Instagram) are strictly blocked.
+2. **URL Validation:** This YouTube flow accepts supported YouTube links. Initial URL checks are not a substitute for connection-time SSRF protection; see the security review.
 3. **1-Tap YouTube Music Fast Download:** When a YouTube Music track is pasted, the bot automatically presents instant 1-tap bitrate buttons (`320 kbps MP3`, `192 kbps`, `128 kbps`, `M4A`, `WAV`) so downloading starts without navigation friction.
 4. For standard YouTube links, the bot inspects available streams and lets you choose between Audio or Video.
 
@@ -622,8 +488,8 @@ Upon launching, the bot output will confirm:
   - **Intel VAAPI / QuickSync Acceleration:** Encodings run at ~10x speed using hardware GPU render nodes (`/dev/dri/renderD128`) with zero CPU stress.
   - **Smart Routing & 2 GB Uploads:** Videos and songs up to **2000 MB** deliver directly without compression degradation when MTProto is configured. Files under 48 MB route via high-speed HTTP Bot API.
 
-### Automated UPI Payment Pipeline & Subscription Tiers (Normal, Go, Pro, Ultra, Max)
-The bot includes a **100% automated, zero-fee payment pipeline** using Google Pay / Universal UPI and Gmail IMAP verification:
+### Admin-Reviewed UPI Payments & Subscription Tiers (Normal, Go, Pro, Ultra, Max)
+The bot generates UPI QR codes and accepts UTR submissions. **An administrator must independently confirm the actual bank/provider credit before approving an order.** Gmail email text is not accepted as payment proof:
 - **Free Video & Audio (Normal Tier):** All music searches, MP3 (128k–320k), M4A, WAV audio downloads, and video resolutions from `144p` to `480p` are **100% Free** for all users.
 - **Single Video Unlocks:**
   - ⚡ **Single 720p Video:** `₹19` (Downloads this video only)
@@ -636,9 +502,9 @@ The bot includes a **100% automated, zero-fee payment pipeline** using Google Pa
   - 👑 **Max VIP Pass:** `₹799 / 365 Days (1 Full Year):` 150 HD/4K videos/day + dedicated 2GB MTProto bandwidth + VIP badge
 - **10-Minute Dynamic QR Code Validity:** Dynamic QR codes automatically expire after 10 minutes to prevent stale or conflicting payments.
 - **Universal UPI App Compatibility:** Accepts payments from **Google Pay, PhonePe, Paytm, FamPay, BHIM, CRED, Amazon Pay, and all Bank UPI apps**.
-- **100% Automated 12-Digit UTR Verification:** User submits the 12-digit transaction ID; the bot queries Gmail IMAP server-side in ~0.3s to match the credit receipt without any manual admin approval needed.
+- **12-Digit UTR Submission:** References are checked for format and reuse. Submission and recheck share a five-attempt verification budget; email-only automatic approval is disabled.
 - **Permanent Admin Proof Receipts:** Every successful payment automatically forwards a full transaction receipt to the administrator with Order ID, User ID, Username, Plan, Amount, UTR, and timestamp for permanent dispute proof.
-- **Fail-Safe Manual Verification Guide:** If a bank alert email is delayed, the bot provides the administrator with step-by-step instructions on how to check GPay history and a 1-tap `[ ✅ Force Approve ]` button.
+- **Administrator Review:** Check the actual payment amount, recipient and reference in bank/provider records before using the approval button. User-submitted text alone is not proof.
 - **Clean Order Cancellation & Back Navigation:** Tapping **`❌ Cancel Order`** on the QR payment screen or during UTR input cleanly deletes the QR code photo, marks the order cancelled in SQLite, and seamlessly returns the user back to the video resolution choices for that video (or to the interactive Main Menu).
 
 ### In-Flight Download Cancellation
@@ -646,7 +512,7 @@ The bot includes a **100% automated, zero-fee payment pipeline** using Google Pa
 - Clicking the button instantly terminates ongoing `yt-dlp` stream downloads and kills `ffmpeg` subprocesses on the server, purging all temporary data and releasing the worker slot immediately.
 
 ### User History
-- Send `/history` or click **📜 My History** to see your recent search queries and download statuses.
+- Send `/history` or tap **📜 HISTORY** to see your recent search queries and download statuses.
 
 ---
 
@@ -688,36 +554,15 @@ From the `/admin` dashboard, click:
 
 ---
 
-## ☁️ Production Deployment on AWS EC2 (Mumbai `ap-south-1`)
+## ☁️ Optional server deployment
 
-The bot is deployed in active production on **Amazon Web Services (AWS)** in the Asia Pacific (Mumbai) region:
+The bot can run locally or on a server. This README does not establish the status of a remote AWS deployment. Configure the systemd service below if you want a server-managed process, then verify it with the commands in this section. Run only one polling instance per bot token.
 
-### 1. Server Architecture & Specifications
-- **Cloud Provider:** Amazon Web Services (AWS EC2)
-- **Instance Type:** `c7i-flex.large` (2 vCPU, 3.7 GB RAM, High-Compute)
-- **Region & Zone:** Asia Pacific (`ap-south-1a`, Mumbai)
-- **Public Networking:** Dedicated Elastic IPv4 (`13.207.136.231`)
-- **Storage:** 50 GB High-Speed NVMe SSD (`gp3`)
-- **Operating System:** Ubuntu Linux LTS (`ubuntu@ip-172-31-42-169`)
+Keep the production SQLite database and credentials separate from test data. Set `DATABASE_PATH` to a disposable path when running tests. Back up your database before migrating a deployment.
 
-### 2. 24/7 Always-On Daemon (`systemd`)
-The bot operates completely independently of any local machine. You can shut down your personal laptop, disconnect from Wi-Fi, or travel—the bot continues running 24/7/365 uninterrupted.
-- **Service Configuration:** `/etc/systemd/system/musicbot.service`
-- **Auto-Boot:** Automatically initializes on server boot (`multi-user.target`)
-- **Auto-Recovery:** Crashes or memory pressure automatically trigger instant auto-restarts (`Restart=always`, `RestartSec=5`)
-- **Process Isolation:** Clean signal handling with `SIGINT` and 20-second graceful job drain
+YouTube availability depends on the source, installed extractor version and authentication requirements. Cookies and JavaScript runtime configuration do not guarantee that every download will succeed. Never commit cookies or credentials.
 
-### 3. YouTube Anti-Bot & Signature Cipher Solution
-YouTube aggressively blocks datacenter IP ranges (AWS, GCP, Azure, Oracle) with bot challenges (`Sign in to confirm you're not a bot`). This deployment incorporates a dual-layer bypass architecture:
-1. **Deno EJS JavaScript Challenge Solver:** Modern YouTube extraction requires solving dynamic JavaScript signature ciphers. System-wide **Deno** (`/usr/local/bin/deno`) enables `yt-dlp` to solve JavaScript challenges locally via `--remote-components ejs:github`.
-2. **Native AWS-IP Session Cookies:** Rather than exporting cookies from a home residential IP (which Google immediately revokes upon detecting an AWS datacenter IP), Google Chrome was launched directly on the AWS server using **SSH X11 GUI Forwarding** (`ssh -Y aws`). Logging into Google from AWS produced **100% native AWS-IP-bound cookies** stored at `/home/ubuntu/music_bot/cookies.txt`, eliminating bot challenges and token rotation issues.
-
-### 4. Clean Production Database State
-- Deployed with a fresh, optimized **SQLite 3 (WAL mode)** database on AWS.
-- All previous local development and test user data have been discarded to guarantee a clean slate for real production users.
-- Production PRAGMAs: 64 MB memory cache (`cache_size = -64000`), 256 MB memory-mapped I/O (`mmap_size = 268435456`), `synchronous = NORMAL`, and multi-column composite indexes on orders, downloads, and search logs.
-
-### 5. Server Management & Monitoring Cheat Sheet
+### Server management after installing the system service
 ```bash
 # Check 24/7 service status
 sudo systemctl status musicbot.service
@@ -850,18 +695,18 @@ Stop-Process -Name "python"
 
 ## 🛡️ Security Architecture & Audit Hardening
 
-Following a comprehensive static analysis and penetration review, the bot incorporates enterprise-grade security controls:
+Current controls include:
 
-- **Strict Payment & UTR Verification (`CRIT-1`):** Gmail IMAP verification extracts monetary amounts using regular expressions and matches against `expected_amount` within ±₹1.00 tolerance. Rejects debit/outward transaction notifications and validates merchant VPA.
-- **Atomic UTR Claims & TOCTOU Double-Spend Prevention (`CRIT-2`):** Redemptions run inside atomic SQLite transactions (`BEGIN IMMEDIATE`) with database-level uniqueness enforcement, eliminating concurrency race conditions.
-- **Admin Identity Isolation (`CRIT-3`):** No hardcoded administrative IDs in source control. Configured exclusively via deployment environment variables.
-- **Enforced TLS Certificate Validation (`CRIT-4`):** All external API and media extraction sessions enforce full TLS handshake validation (`ssl=True`) to eliminate MITM session hijacking risks.
-- **FFmpeg Argument & Flag Injection Prevention (`HIGH-1`):** External metadata (titles, artists) undergoes rigorous sanitization—stripping leading dashes, null bytes, and control characters.
-- **Brute-Force Lockout Defense (`HIGH-2`):** Orders enforce a strict 5-attempt ceiling across both memory state and SQLite persistence, auto-expiring exhausted orders.
-- **DNS-Resolving SSRF & Cloud Metadata Filter (`HIGH-3`):** `is_safe_url` resolves hostnames via DNS, blocking private LAN subnets, loopbacks, decimal/octal tricks, IPv4-mapped IPv6, and AWS IMDS endpoints (`169.254.169.254`, `169.254.170.2`, `fd00:ec2::254`).
-- **Encapsulated Data Access Layer (`HIGH-5`):** Elimination of direct internal DB handle calls from presentation handlers; dedicated `cancel_order` and `reject_order` transactions.
-- **Non-Root Docker Hardening (`LOW-3`):** Docker containers execute as an unprivileged system user (`botuser`), mitigating container breakout risks.
-- **High-Throughput Sharded Rate Limiting (`PERF-4`):** Sliding-window rate limiters use fine-grained per-user locking to eliminate global lock contention bottlenecks.
+- **Payment ownership:** Submission, cancellation and recheck verify the acting user's order ownership.
+- **Payment review:** Email-only approval is disabled. An administrator verifies bank/provider credit; verification attempts are counted in SQLite.
+- **Atomic claims:** The automated payment service's UTR claim helper uses a SQLite transaction. Manual approval and repeated fulfillment still require further review.
+- **Access controls:** Message and callback middleware checks blocked users and throttles requests, including download/search/coupon callbacks. Admin handlers check configured IDs.
+- **TLS:** Media extraction uses certificate verification.
+- **Input handling:** Welcome names are HTML-escaped; FFmpeg uses argument lists and sanitized metadata.
+- **URL validation:** Initial URL checks reject many private-network targets. Connection-time DNS/redirect protection is still a review item; this is not complete SSRF protection.
+- **Deployment:** Keep credentials out of Git and restrict local `.env` permissions. The Docker image runs as an unprivileged user.
+
+See the security review at the end for remaining work. No claim of a complete penetration test or vulnerability-free deployment is made.
 
 ---
 
@@ -922,6 +767,28 @@ tests/test_validators.py ..........                                      [100%]
 ### Q: How can I change the rate limit?
 **A:** Edit `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW` in `config.py`.
 
-### Q: Why am I seeing ~$4 USD cost on my AWS account?
-**A:** On AWS EC2 (Mumbai `ap-south-1`), a **50 GB gp3 EBS root volume** costs `$0.08` per GB-month:
-`50 GB * $0.08 = $4.00 / month` flat storage cost regardless of usage. Additionally, outbound network traffic to Telegram is charged at `$0.09/GB` after the free allowance. Our strict pre-flight gatekeeper and spam guards protect your server from unnecessary bandwidth and compute charges.
+### Q: How do I check hosting costs?
+**A:** Review your cloud provider's billing breakdown for compute, storage, public IP addresses and outbound traffic. Rates and allowances depend on your region and account; this repository does not specify a fixed monthly bill.
+
+### Security review — 26 November 2026
+
+The current hardening changes enforce order ownership for payment submission,
+recheck and cancellation; share a five-attempt verification budget across entry
+points; throttle download/search/coupon callbacks; check blocked users before
+message and callback handlers; and restore TLS certificate verification in
+media extraction. Home-screen names are HTML-escaped and navigation uses the
+same HTML rendering mode.
+
+**Payment behavior:** email text is no longer accepted as proof of payment.
+The old checker did not authenticate the sender and could approve missing or
+ambiguous amounts. UTR submissions now require the existing administrator
+approval workflow. Administrators must verify the actual bank/provider credit;
+a user's UTR or submitted message alone is not proof. Automatic approval should
+only return after implementing authenticated payment-provider events with
+amount, currency, merchant, order binding and replay checks.
+
+**Remaining review areas:** this is not a guarantee of complete security.
+Outbound media URLs and redirects still need connection-time SSRF protection
+and download byte limits across all providers. Review payment fulfillment
+idempotency, per-user in-memory cache bounds, dependency advisories, and
+credential/log handling separately before exposing the bot more broadly.

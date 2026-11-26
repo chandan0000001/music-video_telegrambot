@@ -8,6 +8,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
+from config import ADMIN_IDS
 from database import db
 from services.music_service import music_service
 from services.media_service import media_service
@@ -122,8 +123,8 @@ async def process_ytmusic_input(message: Message, text: str, state: FSMContext) 
         from keyboards.main_menu import get_main_menu_keyboard
         await message.answer(
             text=get_welcome_text(user_name),
-            reply_markup=get_main_menu_keyboard(user_id),
-            parse_mode="Markdown"
+            reply_markup=get_main_menu_keyboard(is_admin=user_id in ADMIN_IDS),
+            parse_mode="HTML"
         )
         return
 

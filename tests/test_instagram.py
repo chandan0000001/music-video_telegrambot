@@ -122,7 +122,7 @@ def test_universal_clean_sub_menu_keyboards():
         assert len(rows) == 1
         assert len(rows[0]) == 1
         button = rows[0][0]
-        assert button.text == "🔙 Back to Main Menu"
+        assert button.text == "‹ Main menu"
         assert button.callback_data == "menu:main"
 
 

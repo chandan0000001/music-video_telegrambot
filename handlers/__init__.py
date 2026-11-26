@@ -1,6 +1,7 @@
 """Handlers package combining all feature routers."""
 from aiogram import Router
 
+from handlers.home import router as home_router
 from handlers.start import router as start_router
 from handlers.ytmusic import router as ytmusic_router
 from handlers.twitter import router as twitter_router
@@ -19,6 +20,7 @@ from handlers.inline import router as inline_router
 def setup_routers() -> Router:
     """Combine and order all feature routers under main root router."""
     root_router = Router(name="root_router")
+    root_router.include_router(home_router)
     root_router.include_router(admin_router)
     root_router.include_router(inline_router)
     root_router.include_router(start_router)

@@ -638,7 +638,7 @@ async def handle_instagram_waiting_input(message: Message, state: FSMContext) ->
         await message.answer(
             text=get_welcome_text(user_name),
             reply_markup=get_main_menu_keyboard(message.from_user.id if message.from_user else 0),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 

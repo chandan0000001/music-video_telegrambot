@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 
 from config import ADMIN_IDS
 from database import db
-from keyboards.main_menu import get_main_menu_keyboard, get_back_to_main_keyboard
+from keyboards.main_menu import get_main_menu_keyboard, get_back_to_main_keyboard, get_home_reply_keyboard
 from keyboards.search_keyboard import get_media_type_keyboard
 from services.media_service import media_service
 
@@ -19,23 +19,27 @@ router = Router(name="start_router")
 
 
 def get_welcome_text(user_name: str = "Music Lover") -> str:
-    """Generate modern, clean welcome text matching sample UI."""
+    """Framed welcome card inspired by the native Telegram menu reference."""
     return (
-        "╔══════════════════════════════════════╗\n"
-        "         🔥 MUSIC & VIDEO BOT 🔥\n"
-        "╚══════════════════════════════════════╝\n\n"
-        f"💎 **Welcome, {user_name}!** 💎\n"
-        "🚀 *Your high-speed media bot is ready!*\n"
-        "──────────────────────────────────────\n"
-        "🔗 **Send any media link directly:**\n"
-        "• 📸 **Instagram:** Reels, Posts, Stories & Audio\n"
-        "• ▶️ **YouTube:** 144p - 720p HD Free (1080p+ VIP)\n"
-        "• 𝕏 **X (Twitter):** Original HD Videos, Photos & GIFs\n"
-        "• 🎵 **Song Search:** Type any track name or artist\n"
-        "──────────────────────────────────────\n"
-        "🔷 *Select any option below or send a link:* 👇\n"
-        "💡 *Fast · Instant · 2GB High-Speed Engine*"
+        "<b>╔══════════════════════╗</b>\n"
+        "    🔥 <b>Music &amp; Video</b> 🔥\n"
+        "<b>╚══════════════════════╝</b>\n\n"
+        "👨‍💻 Developer · @coder_chandan\n"
+        "🎧 Music · Videos · Reels\n"
+        "🔗 YouTube, Instagram or X\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💎 Welcome, <b>{html.escape(user_name)}</b>! 💎\n"
+        "🚀 <i>Your media bot is ready.</i>"
     )
+
+
+MAIN_MENU_TEXT = (
+    "<b>╔══════════════════╗</b>\n"
+    "      ⚡ <b>MAIN MENU</b> ⚡\n"
+    "<b>╚══════════════════╝</b>\n\n"
+    "🔹 Select an option below 👇\n"
+    "💡 <i>Or paste a link to get started.</i>"
+)
 
 
 WELCOME_TEXT = get_welcome_text("Music Lover")
@@ -107,7 +111,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     # Case 1: Download Deep Link from Inline Query (@songsuperzxbot)
     if payload.startswith("dl_"):
         video_id = payload[3:].strip()
-        if video_id:
+        from utils.validators import YOUTUBE_ID_PATTERN
+        if YOUTUBE_ID_PATTERN.fullmatch(video_id):
             try:
                 info_success, info, _ = await media_service.get_media_info(f"https://www.youtube.com/watch?v={video_id}")
                 title = info.get("title", f"Track {video_id}") if (info_success and info) else f"Track {video_id}"
@@ -157,7 +162,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             if inviter_id != user.id:
                 success, total_refs, milestone_unlocked = await db.record_referral(inviter_id, user.id)
                 if success:
-                    welcome_prefix = "🎁 *Welcome! You joined using a friend's invite link.*\n\n"
+                    welcome_prefix = "🎁 Welcome! You joined using a friend's invite link.\n\n"
                     # Notify inviter of friend join / VIP milestone
                     try:
                         if milestone_unlocked:
@@ -189,8 +194,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     await message.answer(
         text=welcome_prefix + get_welcome_text(first_name),
-        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-        parse_mode="Markdown"
+        parse_mode="HTML"
+    )
+    await message.answer(
+        MAIN_MENU_TEXT, reply_markup=get_home_reply_keyboard(is_admin), parse_mode="HTML"
     )
 
 
@@ -270,35 +277,11 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     selection_session_manager.clear_session(user_id)
     first_name = (callback.from_user.first_name or "Music Lover") if callback.from_user else "Music Lover"
     is_admin = user_id in ADMIN_IDS
-    welcome = get_welcome_text(first_name)
-
-    try:
-        if callback.message:
-            if callback.message.photo:
-                try:
-                    await callback.message.delete()
-                except Exception:
-                    pass
-                await callback.message.answer(
-                    text=welcome,
-                    reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                    parse_mode="Markdown"
-                )
-            else:
-                try:
-                    await callback.message.edit_text(
-                        text=welcome,
-                        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    await callback.message.answer(
-                        text=welcome,
-                        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                        parse_mode="Markdown"
-                    )
-    finally:
-        await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            MAIN_MENU_TEXT, reply_markup=get_home_reply_keyboard(is_admin), parse_mode="HTML"
+        )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:help")
@@ -351,22 +334,22 @@ async def cb_cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
             except Exception:
                 pass
             await callback.message.answer(
-                text=f"❌ *Action cancelled.*\n\n{welcome}",
+                text=f"Action cancelled.\n\n{welcome}",
                 reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         else:
             try:
                 await callback.message.edit_text(
-                    text=f"❌ *Action cancelled.*\n\n{welcome}",
+                    text=f"Action cancelled.\n\n{welcome}",
                     reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
             except Exception:
                 await callback.message.answer(
-                    text=f"❌ *Action cancelled.*\n\n{welcome}",
+                    text=f"Action cancelled.\n\n{welcome}",
                     reply_markup=get_main_menu_keyboard(is_admin=is_admin),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
     await callback.answer("Cancelled")
 
