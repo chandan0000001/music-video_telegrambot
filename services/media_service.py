@@ -69,10 +69,10 @@ class MediaService:
         except Exception as e:
             logger.warning(f"Unexpected error removing temp dir {job_dir}: {e}")
 
-    def _get_common_ydl_opts(self, with_cookies: bool = True) -> Dict[str, Any]:
+    def _get_common_ydl_opts(self, with_cookies: bool = False) -> Dict[str, Any]:
         """Base options for yt-dlp metadata and downloads.
-        Automatically utilizes live Chrome browser session if available,
-        otherwise falls back to cookies.txt or high-performance visionos client.
+        By default uses high-performance unauthenticated extraction (visionos)
+        to prevent Google account SABR streaming experiments from hiding 1080p/1440p/4K tiers.
         """
         from config import get_cookie_file, YTDLP_PROXY
         opts: Dict[str, Any] = {
@@ -95,12 +95,6 @@ class MediaService:
                 cookie_file = get_cookie_file()
                 if cookie_file:
                     opts["cookiefile"] = str(cookie_file)
-                else:
-                    opts["extractor_args"] = {
-                        "youtube": {
-                            "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                        }
-                    }
         else:
             opts["extractor_args"] = {
                 "youtube": {
@@ -128,9 +122,14 @@ class MediaService:
                 }
 
     def _sync_extract_info(self, url: str) -> Dict[str, Any]:
-        """Extract metadata and analyze available video and audio formats."""
-        ydl_opts = {
-            **self._get_common_ydl_opts(),
+        """Extract metadata and analyze available video and audio formats.
+        Uses dual-tier strategy:
+        1. Clean unauthenticated visionos client (gives 144p to 4K 2160p without SABR account locking).
+        2. Authenticated Chrome profile fallback if bot challenge / datacenter IP block is encountered.
+        """
+        # Tier 1: Clean unauthenticated
+        clean_opts = {
+            **self._get_common_ydl_opts(with_cookies=False),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
@@ -138,26 +137,25 @@ class MediaService:
             "check_formats": False,
         }
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
+            with yt_dlp.YoutubeDL(clean_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
+                if len(fmts) > 1:
+                    return info
         except Exception as e:
-            err_msg = str(e).lower()
-            if any(k in err_msg for k in ("not a bot", "sign in", "confirm your age", "age-restricted", "inappropriate", "requested format is not available", "format is not available")):
-                logger.warning(f"Challenge or format issue detected during extract for {url}: {e}. Retrying with flexible player clients and unconstrained format...")
-                fallback_opts = dict(ydl_opts)
-                fallback_opts["format"] = "all"
-                fallback_opts["check_formats"] = False
-                fallback_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                    }
-                }
-                try:
-                    with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
-                        return fallback_ydl.extract_info(url, download=False)
-                except Exception:
-                    pass
-            raise
+            logger.warning(f"Unauthenticated extraction encountered challenge for {url}: {e}. Falling back to authenticated browser session...")
+
+        # Tier 2: Authenticated session fallback (bypasses datacenter bot blocks on AWS)
+        auth_opts = {
+            **self._get_common_ydl_opts(with_cookies=True),
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "socket_timeout": 20,
+            "check_formats": False,
+        }
+        with yt_dlp.YoutubeDL(auth_opts) as ydl:
+            return ydl.extract_info(url, download=False)
 
     async def get_media_info(self, url_or_id: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
         """
@@ -326,10 +324,16 @@ class MediaService:
                         "player_client": ["visionos", "android", "ios", "mweb", "web"]
                     }
                 }
-                from config import get_cookie_file
-                cookie_file = get_cookie_file()
-                if cookie_file and "cookiefile" not in fallback_opts:
-                    fallback_opts["cookiefile"] = str(cookie_file)
+                chrome_profile = Path.home() / ".config" / "google-chrome"
+                if not chrome_profile.exists():
+                    chrome_profile = Path("/home/ubuntu/.config/google-chrome")
+                if chrome_profile.exists() and "cookiesfrombrowser" not in fallback_opts:
+                    fallback_opts["cookiesfrombrowser"] = ("chrome",)
+                else:
+                    from config import get_cookie_file
+                    cookie_file = get_cookie_file()
+                    if cookie_file and "cookiefile" not in fallback_opts:
+                        fallback_opts["cookiefile"] = str(cookie_file)
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
                     fallback_ydl.download([url])
             else:
