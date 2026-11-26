@@ -7,7 +7,7 @@ Tests Scenarios:
 13. Normal user attempts /admin.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.types import Message, CallbackQuery, User, Chat
 
 from config import ADMIN_IDS
@@ -673,6 +673,89 @@ async def test_about_text_removes_github_link():
     from handlers.start import ABOUT_TEXT
     assert "https://github.com" not in ABOUT_TEXT
     assert "Contact Admin" in ABOUT_TEXT
+
+
+def test_audio_quality_buttons_remove_mb_size():
+    """Verify audio quality buttons show clean bitrate without (~X.X MB) size approximations."""
+    from keyboards.quality_keyboard import get_audio_quality_keyboard
+    kb = get_audio_quality_keyboard("test_vid", "mp3", {"128": "2.4 MB", "192": "3.6 MB", "320": "6.0 MB"})
+    button_texts = [row[0].text for row in kb.inline_keyboard[:3]]
+    assert button_texts == ["⚡ 128 kbps", "⚡ 192 kbps", "⚡ 320 kbps"]
+    for text in button_texts:
+        assert "MB" not in text
+        assert "(~" not in text
+
+
+@pytest.mark.asyncio
+async def test_admin_broadcast_media_under_30mb_calls_copy_message():
+    """Verify admin media broadcasts under 30MB use native copy_message with zero local storage."""
+    from handlers.admin import process_broadcast_text
+    from database import db
+
+    mock_msg = MagicMock()
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="Admin")
+    mock_msg.chat = MagicMock(id=123456)
+    mock_msg.message_id = 999
+    mock_msg.caption = "Important update!"
+    mock_msg.text = None
+
+    # Attach mock video under 30MB (15 MB)
+    mock_video = MagicMock()
+    mock_video.file_size = 15 * 1024 * 1024
+    mock_msg.video = mock_video
+    mock_msg.audio = None
+    mock_msg.photo = None
+    mock_msg.document = None
+    mock_msg.voice = None
+    mock_msg.animation = None
+
+    mock_msg.answer = AsyncMock(return_value=AsyncMock())
+    mock_msg.bot = MagicMock()
+    mock_msg.bot.copy_message = AsyncMock()
+
+    mock_state = MagicMock()
+    mock_state.clear = AsyncMock()
+
+    with patch("handlers.admin.is_admin", return_value=True), \
+         patch.object(db, "get_all_users", AsyncMock(return_value=[{"telegram_id": 111, "is_blocked": 0}, {"telegram_id": 222, "is_blocked": 0}])):
+        await process_broadcast_text(mock_msg, mock_state)
+
+        assert mock_msg.bot.copy_message.call_count == 2
+        mock_msg.bot.copy_message.assert_any_call(chat_id=111, from_chat_id=123456, message_id=999)
+        mock_msg.bot.copy_message.assert_any_call(chat_id=222, from_chat_id=123456, message_id=999)
+
+
+@pytest.mark.asyncio
+async def test_admin_broadcast_media_exceeds_30mb_rejected():
+    """Verify admin media broadcasts over 30MB are rejected with clear error."""
+    from handlers.admin import process_broadcast_text
+
+    mock_msg = MagicMock()
+    mock_msg.from_user = User(id=123456, is_bot=False, first_name="Admin")
+    mock_msg.caption = "Heavy video"
+    mock_msg.text = None
+
+    # Attach mock video exceeding 30MB (35 MB)
+    mock_video = MagicMock()
+    mock_video.file_size = 35 * 1024 * 1024
+    mock_msg.video = mock_video
+    mock_msg.audio = None
+    mock_msg.photo = None
+    mock_msg.document = None
+    mock_msg.voice = None
+    mock_msg.animation = None
+
+    mock_msg.answer = AsyncMock()
+    mock_state = MagicMock()
+    mock_state.clear = AsyncMock()
+
+    with patch("handlers.admin.is_admin", return_value=True):
+        await process_broadcast_text(mock_msg, mock_state)
+
+        mock_msg.answer.assert_awaited_once()
+        assert "Too Large" in mock_msg.answer.call_args[0][0]
+        assert "30 MB" in mock_msg.answer.call_args[0][0]
+
 
 
 

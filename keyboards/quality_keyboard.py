@@ -35,8 +35,7 @@ def get_audio_quality_keyboard(
 
     bitrates = ["128", "192", "320"]
     for br in bitrates:
-        size_label = f" (~{approx_sizes.get(br)})" if br in approx_sizes else ""
-        text = f"⚡ {br} kbps{size_label}"
+        text = f"⚡ {br} kbps"
         buttons.append([
             InlineKeyboardButton(
                 text=text,

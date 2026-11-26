@@ -478,7 +478,7 @@ async def process_user_lookup_id(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "admin:broadcast")
 async def cb_admin_broadcast(callback: CallbackQuery, state: FSMContext) -> None:
-    """Prompt admin to enter broadcast text."""
+    """Prompt admin to enter broadcast text or media."""
     user = callback.from_user
     if not user or not is_admin(user.id):
         await callback.answer("Access Denied.", show_alert=True)
@@ -488,7 +488,8 @@ async def cb_admin_broadcast(callback: CallbackQuery, state: FSMContext) -> None
     if callback.message:
         await callback.message.answer(
             "📢 <b>Broadcast Mode</b>\n\n"
-            "Please send the message you wish to broadcast to all registered users.\n\n"
+            "Please send the text message, photo, video, or audio (MP3) you wish to broadcast to all registered users.\n\n"
+            "⚠️ <i>Media files must be under 30 MB.</i>\n\n"
             "Type <code>/admin</code> to cancel.",
             parse_mode="HTML"
         )
@@ -507,45 +508,90 @@ async def cmd_broadcast(message: Message, state: FSMContext) -> None:
     if not broadcast_content:
         await state.set_state(AdminStates.waiting_for_broadcast_text)
         await message.answer(
-            "📢 <i>Please send the message text you wish to broadcast to all users:</i>",
+            "📢 <i>Please send the message, photo, video, or MP3 audio (under 30 MB) you wish to broadcast:</i>",
             parse_mode="HTML"
         )
         return
 
-    await execute_broadcast(message, broadcast_content, state)
+    await execute_broadcast(message, broadcast_content, state, is_media=False)
+
+
+MAX_BROADCAST_LENGTH = 1000
+MAX_BROADCAST_MEDIA_BYTES = 30 * 1024 * 1024  # 30 MB maximum size limit
 
 
 @router.message(AdminStates.waiting_for_broadcast_text)
 async def process_broadcast_text(message: Message, state: FSMContext) -> None:
-    """Handle broadcast message content from admin."""
-    content = (message.text or "").strip()
-    await execute_broadcast(message, content, state)
+    """Handle broadcast message content (text, photo, video, audio, etc.) from admin."""
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        await state.clear()
+        return
+
+    # Check media size if message contains media
+    media_size = 0
+    media_type_label = None
+
+    if message.video:
+        media_size = message.video.file_size or 0
+        media_type_label = "Video"
+    elif message.audio:
+        media_size = message.audio.file_size or 0
+        media_type_label = "Audio (MP3)"
+    elif message.document:
+        media_size = message.document.file_size or 0
+        media_type_label = "Document"
+    elif message.voice:
+        media_size = message.voice.file_size or 0
+        media_type_label = "Voice message"
+    elif message.animation:
+        media_size = message.animation.file_size or 0
+        media_type_label = "Animation"
+    elif message.photo:
+        media_size = message.photo[-1].file_size or 0
+        media_type_label = "Photo"
+
+    if media_size > MAX_BROADCAST_MEDIA_BYTES:
+        size_mb = media_size / (1024 * 1024)
+        await message.answer(
+            f"❌ <b>Broadcast {media_type_label} Too Large</b>\n\n"
+            f"File size is <code>{size_mb:.1f} MB</code>. Maximum allowed for broadcast is <b>30 MB</b>.\n"
+            f"<i>Please compress the file or choose one under 30 MB to prevent server load.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    caption = message.caption or message.text or ""
+    if len(caption) > MAX_BROADCAST_LENGTH:
+        await message.answer(
+            f"❌ <b>Broadcast Message Too Long</b>\n\n"
+            f"Maximum allowed text length is <code>{MAX_BROADCAST_LENGTH}</code> characters (received {len(caption)}).",
+            parse_mode="HTML"
+        )
+        return
+
+    is_media = bool(message.photo or message.video or message.audio or message.document or message.voice or message.animation)
+
+    if not caption and not is_media:
+        await message.answer("❌ Broadcast message or media cannot be empty.", parse_mode="HTML")
+        return
+
+    await execute_broadcast(message, caption, state, is_media=is_media)
 
 
-MAX_BROADCAST_LENGTH = 1000
-
-
-async def execute_broadcast(message: Message, content: str, state: FSMContext) -> None:
-    """Deliver broadcast message to all non-blocked registered users."""
+async def execute_broadcast(
+    message: Message,
+    content: str,
+    state: FSMContext,
+    is_media: bool = False
+) -> None:
+    """Deliver broadcast message or media to all non-blocked registered users."""
     await state.clear()
     user = message.from_user
     if not user or not is_admin(user.id):
         return
 
-    # MED-6: Broadcast size limit and empty check
-    if not content:
-        await message.answer("❌ Broadcast message cannot be empty.", parse_mode="HTML")
-        return
-
-    if len(content) > MAX_BROADCAST_LENGTH:
-        await message.answer(
-            f"❌ <b>Broadcast Message Too Long</b>\n\n"
-            f"Maximum allowed length is <code>{MAX_BROADCAST_LENGTH}</code> characters (received {len(content)}).",
-            parse_mode="HTML"
-        )
-        return
-
-    status_msg = await message.answer("📢 <i>Initiating broadcast...</i>", parse_mode="HTML")
+    status_msg = await message.answer("📢 <i>Initiating broadcast to all registered users...</i>", parse_mode="HTML")
 
     users_list = await db.get_all_users(limit=10000, offset=0)
     sent_count = 0
@@ -557,11 +603,19 @@ async def execute_broadcast(message: Message, content: str, state: FSMContext) -
         if u.get("is_blocked"):
             continue
         try:
-            await message.bot.send_message(
-                chat_id=u["telegram_id"],
-                text=f"📢 <b>Announcement from Admin:</b>\n\n{escaped_content}",
-                parse_mode="HTML"
-            )
+            if is_media:
+                # Native Telegram cloud copy: ZERO bytes stored on AWS SSD and ZERO DB storage!
+                await message.bot.copy_message(
+                    chat_id=u["telegram_id"],
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
+            else:
+                await message.bot.send_message(
+                    chat_id=u["telegram_id"],
+                    text=f"📢 <b>Announcement from Admin:</b>\n\n{escaped_content}",
+                    parse_mode="HTML"
+                )
             sent_count += 1
             await asyncio.sleep(0.05)  # Respect Telegram flood limits
         except Exception as e:
