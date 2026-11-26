@@ -75,7 +75,7 @@ class MediaService:
             "remote_components": ["ejs:github"],
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "ios", "mweb", "web"]
+                    "player_client": ["visionos", "android", "ios", "mweb", "web"]
                 }
             },
         }
@@ -129,7 +129,7 @@ class MediaService:
                 fallback_opts["check_formats"] = False
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["android", "tv", "ios", "mweb", "web"]
+                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
                     }
                 }
                 try:
@@ -303,7 +303,7 @@ class MediaService:
                     fallback_opts["format"] = "bestaudio/best/b"
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["android", "ios", "mweb", "web"]
+                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
                     }
                 }
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
