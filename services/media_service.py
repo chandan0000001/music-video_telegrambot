@@ -22,6 +22,7 @@ from config import (
     SUPPORTED_VIDEO_RESOLUTIONS
 )
 from services.ffmpeg_service import ffmpeg_service
+from services.proxy_manager import youtube_proxy_manager
 from utils.validators import (
     extract_youtube_id,
     sanitize_filename,
@@ -69,11 +70,8 @@ class MediaService:
         except Exception as e:
             logger.warning(f"Unexpected error removing temp dir {job_dir}: {e}")
 
-    def _get_common_ydl_opts(self, with_cookies: bool = False) -> Dict[str, Any]:
-        """Base options for yt-dlp metadata and downloads.
-        By default uses high-performance unauthenticated extraction (visionos)
-        to prevent Google account SABR streaming experiments from hiding 1080p/1440p/4K tiers.
-        """
+    def _get_common_ydl_opts(self, with_cookies: bool = False, proxy: Optional[str] = None) -> Dict[str, Any]:
+        """Base options for yt-dlp metadata and downloads."""
         from config import get_cookie_file, YTDLP_PROXY
         opts: Dict[str, Any] = {
             "remote_components": ["ejs:github"],
@@ -81,7 +79,9 @@ class MediaService:
         node_bin = shutil.which("node") or shutil.which("nodejs")
         if node_bin:
             opts["js_runtimes"] = {"node": {"path": node_bin}}
-        if YTDLP_PROXY:
+        if proxy:
+            opts["proxy"] = proxy
+        elif YTDLP_PROXY:
             opts["proxy"] = YTDLP_PROXY
 
         if with_cookies:
@@ -123,54 +123,79 @@ class MediaService:
 
     def _sync_extract_info(self, url: str) -> Dict[str, Any]:
         """Extract metadata and analyze available video and audio formats.
-        Uses environment-aware strategy:
-        - On AWS EC2 server: Runs authenticated Chrome session FIRST (takes ~2s, avoids 20s datacenter timeout).
-        - On Local machine: Runs clean unauthenticated visionos client FIRST (takes ~1s, prevents SABR account lock).
+        Direct-first with round-robin proxy fallback:
+        1. First hit: Own IP (direct, socket_timeout=6s to fail fast if blocked).
+        2. If Own IP fails (403, bot challenge, format not available, timeout) and it's YouTube:
+           Proceed to YouTube round-robin proxy!
         """
-        is_aws_server = Path("/home/ubuntu/.config/google-chrome").exists()
-        if is_aws_server:
-            auth_opts = {
-                **self._get_common_ydl_opts(with_cookies=True),
-                "quiet": True,
-                "no_warnings": True,
-                "skip_download": True,
-                "socket_timeout": 15,
-                "check_formats": False,
-            }
-            try:
-                with yt_dlp.YoutubeDL(auth_opts) as ydl:
-                    return ydl.extract_info(url, download=False)
-            except Exception as e:
-                logger.warning(f"Authenticated extraction on AWS encountered issue for {url}: {e}. Retrying unauthenticated...")
+        is_yt = youtube_proxy_manager.is_youtube_url(url)
 
-        # For local development or as secondary fallback
+        # 1. First hit: Own IP (direct unauthenticated visionos)
         clean_opts = {
             **self._get_common_ydl_opts(with_cookies=False),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "socket_timeout": 8,
+            "socket_timeout": 6 if is_yt else 15,
             "check_formats": False,
         }
         try:
             with yt_dlp.YoutubeDL(clean_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
-                if len(fmts) > 1:
+                if len(fmts) > 0 or not is_yt:
                     return info
         except Exception as e:
-            logger.warning(f"Unauthenticated extraction encountered challenge for {url}: {e}. Falling back to authenticated browser session...")
+            if not is_yt:
+                # If not YouTube, fallback to cookies if present, but never use YouTube proxies
+                auth_opts = {
+                    **self._get_common_ydl_opts(with_cookies=True),
+                    "quiet": True,
+                    "no_warnings": True,
+                    "skip_download": True,
+                    "socket_timeout": 15,
+                    "check_formats": False,
+                }
+                with yt_dlp.YoutubeDL(auth_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            logger.warning(
+                f"Own IP extraction encountered challenge/block for YouTube {url}: {e}. "
+                f"Proceeding to round-robin proxy pool..."
+            )
 
-        auth_opts = {
-            **self._get_common_ydl_opts(with_cookies=True),
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "socket_timeout": 15,
-            "check_formats": False,
-        }
-        with yt_dlp.YoutubeDL(auth_opts) as ydl:
-            return ydl.extract_info(url, download=False)
+        # 2. Proceed to Round-Robin YouTube Proxies (strictly isolated to YouTube)
+        last_error = None
+        for attempt in range(4):
+            proxy = youtube_proxy_manager.get_next_proxy()
+            if not proxy:
+                break
+            logger.info(f"Extracting YouTube metadata via round-robin proxy (attempt {attempt + 1}/4)...")
+            proxy_opts = {
+                **self._get_common_ydl_opts(with_cookies=False, proxy=proxy),
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "socket_timeout": 12,
+                "check_formats": False,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
+                    }
+                }
+            }
+            try:
+                with yt_dlp.YoutubeDL(proxy_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
+                    if len(fmts) > 0:
+                        return info
+            except Exception as pe:
+                last_error = pe
+                logger.warning(f"Proxy extraction failed via {proxy}: {pe}. Rotating to next proxy...")
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Could not retrieve media formats via Own IP or YouTube proxy pool.")
 
     async def get_media_info(self, url_or_id: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
         """
@@ -320,35 +345,59 @@ class MediaService:
         return True, info, None
 
     def _sync_download(self, ydl_opts: Dict[str, Any], url: str) -> None:
-        """Synchronous yt-dlp download invocation with fallback on bot challenge, 403, or missing formats."""
+        """Synchronous yt-dlp download invocation.
+        Direct-first with round-robin proxy fallback for YouTube:
+        1. Attempt download with Own IP.
+        2. If Own IP fails (403, bot challenge, format not available, timeout) and it's YouTube:
+           Proceed to YouTube round-robin proxy while strictly preserving requested resolution tier!
+        """
+        is_yt = youtube_proxy_manager.is_youtube_url(url)
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
+                return
         except Exception as e:
-            err_msg = str(e).lower()
-            if any(k in err_msg for k in ("not a bot", "sign in", "requested format is not available", "format is not available", "403", "forbidden")):
-                logger.warning(f"Download challenge/format issue detected for {url} ({e}). Retrying with authenticated browser session while strictly preserving requested resolution tier...")
-                fallback_opts = dict(ydl_opts)
-                # CRITICAL: Preserve the requested format selector (e.g. height<=2160) so it never downgrades to 360p!
-                if "format" in ydl_opts:
-                    fallback_opts["format"] = ydl_opts["format"]
+            if not is_yt or not youtube_proxy_manager.is_retryable_error(e):
+                raise
+            logger.warning(
+                f"Own IP download failed for YouTube {url} ({e}). "
+                f"Proceeding to round-robin proxy while strictly preserving requested format selector..."
+            )
 
-                # Attach authenticated session to resolve datacenter bot challenges
-                chrome_profile = Path.home() / ".config" / "google-chrome"
-                if not chrome_profile.exists():
-                    chrome_profile = Path("/home/ubuntu/.config/google-chrome")
-                if chrome_profile.exists() and "cookiesfrombrowser" not in fallback_opts:
-                    fallback_opts["cookiesfrombrowser"] = ("chrome",)
-                else:
-                    from config import get_cookie_file
-                    cookie_file = get_cookie_file()
-                    if cookie_file and "cookiefile" not in fallback_opts:
-                        fallback_opts["cookiefile"] = str(cookie_file)
+        # Retry with round-robin proxies (strictly isolated to YouTube)
+        last_dl_error = None
+        for attempt in range(4):
+            proxy = youtube_proxy_manager.get_next_proxy()
+            if not proxy:
+                break
+            logger.info(f"Retrying YouTube download via round-robin proxy (attempt {attempt + 1}/4)...")
+            fallback_opts = dict(ydl_opts)
+            fallback_opts["proxy"] = proxy
+            fallback_opts["socket_timeout"] = 25
+            fallback_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["visionos", "android", "ios", "mweb", "web"]
+                }
+            }
+            # Remove browser cookies so Google account SABR experiment doesn't block streams
+            fallback_opts.pop("cookiesfrombrowser", None)
+            fallback_opts.pop("cookiefile", None)
 
+            # CRITICAL: Strictly preserve format selector (e.g. height<=2160)
+            if "format" in ydl_opts:
+                fallback_opts["format"] = ydl_opts["format"]
+
+            try:
                 with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
                     fallback_ydl.download([url])
-            else:
-                raise
+                    return
+            except Exception as pe:
+                last_dl_error = pe
+                logger.warning(f"Download via proxy failed: {pe}. Rotating to next proxy...")
+
+        if last_dl_error:
+            raise last_dl_error
+        raise RuntimeError("All download attempts (Own IP and Proxies) failed.")
 
     async def download_thumbnail(self, thumbnail_url: str, dest_path: Path) -> bool:
         """Download remote thumbnail image to local file."""
@@ -384,13 +433,10 @@ class MediaService:
         job_dir = job_dir or self._get_job_dir()
         output_format = output_format.lower()
 
-        # On AWS EC2 server, hook directly into Chrome browser profile to prevent datacenter IP bot challenges
-        use_cookies = Path("/home/ubuntu/.config/google-chrome").exists()
-
         # yt-dlp options for best audio with universal fallback
         download_template = str(job_dir / "input_audio.%(ext)s")
         ydl_opts: Dict[str, Any] = {
-            **self._get_common_ydl_opts(with_cookies=use_cookies),
+            **self._get_common_ydl_opts(with_cookies=False),
             "format": "bestaudio/best/b",
             "outtmpl": download_template,
             "quiet": True,
@@ -538,14 +584,11 @@ class MediaService:
             f"bestvideo[height<={height_val}]+bestaudio/"
             f"bestvideo[width<={width_val}]+bestaudio/"
             f"bv*[height<={height_val}]+ba/"
-            f"bv*+ba/b"
+            f"b[height<={height_val}]"
         )
 
-        # On AWS EC2 server, hook directly into Chrome browser profile to prevent datacenter IP bot challenges
-        use_cookies = Path("/home/ubuntu/.config/google-chrome").exists()
-
         ydl_opts: Dict[str, Any] = {
-            **self._get_common_ydl_opts(with_cookies=use_cookies),
+            **self._get_common_ydl_opts(with_cookies=False),
             "format": format_selector,
             "outtmpl": download_template,
             "quiet": True,

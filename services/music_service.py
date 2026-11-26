@@ -8,6 +8,7 @@ from typing import Optional, Any
 import yt_dlp
 
 from utils.validators import sanitize_filename
+from services.proxy_manager import youtube_proxy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -58,55 +59,69 @@ class MusicService:
         search_query = f"ytsearch{limit}:{query}"
         results = []
 
+        info = None
+        # Attempt 1: Direct Own IP
+        direct_opts = dict(ydl_opts)
+        direct_opts["socket_timeout"] = 6
         try:
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(search_query, download=False)
-            except Exception as e:
-                err_msg = str(e).lower()
-                if "not a bot" in err_msg or "sign in" in err_msg:
-                    fallback_opts = dict(ydl_opts)
-                    fallback_opts["extractor_args"] = {
-                        "youtube": {
-                            "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                        }
-                    }
-                    with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-                        info = ydl.extract_info(search_query, download=False)
-                else:
-                    raise
-
-            if not info or "entries" not in info:
-                return []
-
-            for entry in info["entries"]:
-                if not entry:
-                    continue
-                video_id = entry.get("id")
-                if not video_id:
-                    continue
-
-                raw_duration = entry.get("duration")
-                thumbnails = entry.get("thumbnails", [])
-                thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
-
-                title = entry.get("title", "Unknown Title")
-                artist = entry.get("uploader") or entry.get("channel") or "Unknown Artist"
-
-                results.append({
-                    "id": video_id,
-                    "title": title,
-                    "artist": artist,
-                    "duration": raw_duration,
-                    "duration_str": format_duration(raw_duration),
-                    "thumbnail": thumbnail_url,
-                    "url": f"https://www.youtube.com/watch?v={video_id}"
-                })
-
-            return results
+            with yt_dlp.YoutubeDL(direct_opts) as ydl:
+                info = ydl.extract_info(search_query, download=False)
         except Exception as e:
-            logger.error(f"Search error for query '{query}': {e}")
+            logger.warning(f"Own IP YouTube search failed for '{query}': {e}. Proceeding to round-robin proxy...")
+
+        # Attempt 2: Round-robin proxy fallback
+        if not info or "entries" not in info:
+            for attempt in range(3):
+                proxy = youtube_proxy_manager.get_next_proxy()
+                if not proxy:
+                    break
+                logger.info(f"Retrying YouTube search via round-robin proxy {proxy} (attempt {attempt + 1}/3)...")
+                proxy_opts = dict(ydl_opts)
+                proxy_opts["proxy"] = proxy
+                proxy_opts["socket_timeout"] = 12
+                proxy_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["visionos", "android", "ios", "mweb", "web"]
+                    }
+                }
+                proxy_opts.pop("cookiesfrombrowser", None)
+                proxy_opts.pop("cookiefile", None)
+                try:
+                    with yt_dlp.YoutubeDL(proxy_opts) as ydl:
+                        info = ydl.extract_info(search_query, download=False)
+                        if info and "entries" in info:
+                            break
+                except Exception as pe:
+                    logger.warning(f"Proxy search attempt failed: {pe}. Rotating to next proxy...")
+
+        if not info or "entries" not in info:
             return []
+
+        for entry in info["entries"]:
+            if not entry:
+                continue
+            video_id = entry.get("id")
+            if not video_id:
+                continue
+
+            raw_duration = entry.get("duration")
+            thumbnails = entry.get("thumbnails", [])
+            thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
+
+            title = entry.get("title", "Unknown Title")
+            artist = entry.get("uploader") or entry.get("channel") or "Unknown Artist"
+
+            results.append({
+                "id": video_id,
+                "title": title,
+                "artist": artist,
+                "duration": raw_duration,
+                "duration_str": format_duration(raw_duration),
+                "thumbnail": thumbnail_url,
+                "url": f"https://www.youtube.com/watch?v={video_id}"
+            })
+
+        return results
 
     async def search_music(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Non-blocking music search with thread delegation."""
