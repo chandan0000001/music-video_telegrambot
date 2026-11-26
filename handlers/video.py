@@ -66,7 +66,7 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     resolutions = info.get("available_resolutions", [])
     if not resolutions:
         logger.warning(f"No specific resolutions detected by extractor for {canonical_url}. Falling back to standard universal tiers.")
-        resolutions = ["144p", "240p", "360p", "480p", "720p", "1080p"]
+        resolutions = ["144p", "240p", "360p", "480p", "720p", "1080p", "1440p", "2160p"]
 
     user = callback.from_user
     user_id = user.id if user else 0

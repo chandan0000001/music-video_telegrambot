@@ -185,7 +185,7 @@ SUPPORTED_VIDEO_FORMATS: list[str] = [
     f.strip().upper() for f in os.getenv("SUPPORTED_VIDEO_FORMATS", "MP4").split(",") if f.strip()
 ]
 SUPPORTED_VIDEO_RESOLUTIONS: list[str] = [
-    r.strip() for r in os.getenv("SUPPORTED_VIDEO_RESOLUTIONS", "144p,240p,360p,480p,720p,1080p,1440p").split(",") if r.strip()
+    r.strip() for r in os.getenv("SUPPORTED_VIDEO_RESOLUTIONS", "144p,240p,360p,480p,720p,1080p,1440p,2160p").split(",") if r.strip()
 ]
 
 # Subprocess Timeout (in seconds, e.g. 1800 = 30 minutes for long videos)

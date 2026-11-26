@@ -40,7 +40,8 @@ STANDARD_TIER_WIDTHS: Dict[int, int] = {
     480: 854,
     720: 1280,
     1080: 1920,
-    1440: 2560
+    1440: 2560,
+    2160: 3840
 }
 
 
@@ -255,7 +256,7 @@ class MediaService:
         # If no standard matched but video formats exist, add available heights directly
         if not available_resolutions and available_heights:
             sorted_h = sorted(list(available_heights))
-            available_resolutions = [f"{h}p" for h in sorted_h if h <= 1440]
+            available_resolutions = [f"{h}p" for h in sorted_h if h <= 2160]
 
         # Ensure low-to-high order
         available_resolutions.sort(key=lambda x: int(x.replace("p", "")))
