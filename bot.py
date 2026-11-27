@@ -4,7 +4,6 @@ Main entrypoint executing long polling on local Linux environment.
 """
 import sys
 import asyncio
-import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -108,8 +107,10 @@ async def on_startup(bot: Bot) -> None:
 async def on_shutdown(bot: Bot) -> None:
     """Graceful shutdown: close bot session and cleanup."""
     logger.info("Shutting down bot and closing network sessions...")
-    await mtproto_service.stop()
-    await bot.session.close()
+    try:
+        await mtproto_service.stop()
+    finally:
+        await bot.session.close()
     logger.info("Bot stopped cleanly.")
 
 
@@ -162,8 +163,9 @@ async def main() -> None:
         )
     except (KeyboardInterrupt, SystemExit):
         logger.info("Execution interrupted by user.")
-    except Exception as e:
-        logger.critical(f"Critical execution error: {e}")
+    except Exception:
+        logger.exception("Critical execution error")
+        raise
     finally:
         await on_shutdown(bot)
 

@@ -8,6 +8,13 @@ import base64
 from pathlib import Path
 from typing import Optional
 
+def _safe_int(env_val: Optional[str], default: int) -> int:
+    """Safely parse integer from environment variable, falling back gracefully on format error."""
+    try:
+        return int(env_val.strip()) if env_val else default
+    except (ValueError, AttributeError):
+        return default
+
 # Base Paths
 BASE_DIR: Path = Path(__file__).resolve().parent
 
@@ -177,7 +184,7 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Media Processing & Limits
 # Configured via MAX_UPLOAD_SIZE_MB from environment (.env). Default: 2000 MB (2 GB).
-MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "2000"))
+MAX_UPLOAD_SIZE_MB: int = max(1, _safe_int(os.getenv("MAX_UPLOAD_SIZE_MB"), 2000))
 MAX_UPLOAD_SIZE_BYTES: int = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 # Optional: Global Proxy for yt-dlp
@@ -185,37 +192,29 @@ YTDLP_PROXY: Optional[str] = os.getenv("YTDLP_PROXY")
 
 # YouTube-Dedicated Proxy Pool (isolated strictly to YouTube operations)
 # Populated from YOUTUBE_PROXIES in .env or proxies.txt
-DEFAULT_YOUTUBE_PROXIES: List[str] = []
+DEFAULT_YOUTUBE_PROXIES: list[str] = []
 _raw_yt_proxies = os.getenv("YOUTUBE_PROXIES", "")
 if _raw_yt_proxies.strip():
-    YOUTUBE_PROXIES: List[str] = [p.strip() for p in _raw_yt_proxies.split(",") if p.strip()]
+    YOUTUBE_PROXIES: list[str] = [p.strip() for p in _raw_yt_proxies.split(",") if p.strip()]
 else:
     # Also attempt loading from proxies.txt if present
     _proxies_file = BASE_DIR / "proxies.txt"
     if _proxies_file.exists():
         try:
             with open(_proxies_file, "r", encoding="utf-8") as _pf:
-                YOUTUBE_PROXIES: List[str] = [line.strip() for line in _pf if line.strip() and not line.strip().startswith("#")]
+                YOUTUBE_PROXIES: list[str] = [line.strip() for line in _pf if line.strip() and not line.strip().startswith("#")]
         except Exception:
-            YOUTUBE_PROXIES: List[str] = []
+            YOUTUBE_PROXIES: list[str] = []
     else:
-        YOUTUBE_PROXIES: List[str] = DEFAULT_YOUTUBE_PROXIES
+        YOUTUBE_PROXIES: list[str] = DEFAULT_YOUTUBE_PROXIES
 
 # Maximum allowed duration for media processing (in seconds, e.g., 14400 = 4 hours, 0 = unlimited)
-MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "14400"))
+MAX_DURATION_SECONDS: int = max(0, _safe_int(os.getenv("MAX_DURATION_SECONDS"), 14400))
 
 # Concurrency & Worker Limits
-MAX_CONCURRENT_DOWNLOADS: int = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "3"))
+MAX_CONCURRENT_DOWNLOADS: int = max(1, _safe_int(os.getenv("MAX_CONCURRENT_DOWNLOADS"), 3))
 
 # Rate Limiting (Per-user)
-def _safe_int(env_val: Optional[str], default: int) -> int:
-    """Safely parse integer from environment variable, falling back gracefully on format error."""
-    try:
-        return int(env_val.strip()) if env_val else default
-    except (ValueError, AttributeError):
-        return default
-
-
 RATE_LIMIT_REQUESTS: int = _safe_int(os.getenv("RATE_LIMIT_REQUESTS"), 5)
 RATE_LIMIT_WINDOW: int = _safe_int(os.getenv("RATE_LIMIT_WINDOW"), 10)
 

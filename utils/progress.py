@@ -7,7 +7,7 @@ import html
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, Any
 import aiofiles
 from aiogram import Bot
 from aiogram.types import FSInputFile, Message, InlineKeyboardMarkup

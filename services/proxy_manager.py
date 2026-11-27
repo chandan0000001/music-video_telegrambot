@@ -11,7 +11,6 @@ Strictly isolated:
 
 import threading
 import logging
-import json
 from pathlib import Path
 from typing import Optional, List, Set
 from urllib.parse import urlparse
@@ -30,7 +29,7 @@ class YouTubeProxyManager:
         self._index = 0
         self._exhausted: Set[str] = set()
 
-        initial = list(proxies) if proxies else self._discover_proxies()
+        initial = list(proxies) if proxies is not None else self._discover_proxies()
         self._proxies: List[str] = [p.strip() for p in initial if p and p.strip()]
 
     def _discover_proxies(self) -> List[str]:
@@ -57,33 +56,8 @@ class YouTubeProxyManager:
                 except Exception as e:
                     logger.warning(f"Could not read {p_file}: {e}")
 
-        # 2. Check for Free_Proxy_List.json or custom JSON files
-        json_candidates = [
-            Path("Free_Proxy_List.json"),
-            Path("/home/chandan/Downloads/Free_Proxy_List.json"),
-            Path("/home/chandan/music_bot/Free_Proxy_List.json"),
-            Path("/home/ubuntu/music_bot/Free_Proxy_List.json"),
-        ]
-        for j_file in json_candidates:
-            if j_file.exists():
-                try:
-                    with open(j_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if isinstance(data, list):
-                            for item in data:
-                                if isinstance(item, dict) and "ip" in item and "port" in item:
-                                    # Prefer elite / anonymous proxies
-                                    anon = item.get("anonymityLevel", "")
-                                    proto = item.get("protocols", ["http"])[0]
-                                    ip = item.get("ip")
-                                    port = item.get("port")
-                                    collected.append(f"{proto}://{ip}:{port}")
-                    if collected:
-                        logger.info(f"Loaded {len(collected)} proxies from JSON {j_file}")
-                        return collected
-                except Exception as e:
-                    logger.warning(f"Could not read {j_file}: {e}")
-
+        # Never auto-import free proxy lists from Downloads: they may be stale
+        # and must not receive browser cookies or authenticated requests.
         # 3. Fallback to DEFAULT_YOUTUBE_PROXIES
         return list(DEFAULT_YOUTUBE_PROXIES)
 

@@ -2,6 +2,7 @@
 Video Download and FFmpeg Remuxing Handler
 """
 import html
+from typing import Optional
 import asyncio
 import logging
 from aiogram import Router, F
@@ -9,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 
 from config import ADMIN_IDS, PRICE_SINGLE_720P, PRICE_SINGLE_1080P, SUBSCRIPTION_PLANS
 from database import db
+from utils.callback_data import parse_callback
 from services.media_service import media_service
 from services.telegram_service import telegram_service
 from keyboards.quality_keyboard import (
@@ -30,7 +32,10 @@ router = Router(name="video_router")
 @router.callback_query(F.data.startswith("opt_video:"))
 async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     """Inspect and present available video resolutions from low to high."""
-    video_id = callback.data.split(":")[1]
+    parts = await parse_callback(callback, "opt_video", 2)
+    if parts is None:
+        return
+    video_id = parts[1]
     from utils.selection_session import selection_session_manager
     if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
@@ -141,7 +146,9 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("vdl:"))
 async def cb_start_video_download(callback: CallbackQuery) -> None:
     """Check permissions, subscription quota, or trigger paywall."""
-    parts = callback.data.split(":")
+    parts = await parse_callback(callback, "vdl", 3)
+    if parts is None:
+        return
     video_id = parts[1]
     resolution = parts[2]
 

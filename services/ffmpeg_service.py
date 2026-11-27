@@ -29,6 +29,7 @@ class FFmpegService:
         # LOW-1: Truncate and sanitize debug log to prevent leaking full filesystem structure
         target_name = Path(cmd[-1]).name if cmd else "unknown"
         logger.debug(f"Executing FFmpeg/FFprobe: {cmd[0] if cmd else ''} [{len(cmd)-1} args] -> {target_name}")
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -45,18 +46,22 @@ class FFmpegService:
 
             return True, out_str or err_str
         except asyncio.TimeoutError:
-            logger.error(f"Command timed out after {timeout} seconds: {' '.join(cmd)}")
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            logger.error("Media process timed out after %s seconds", timeout)
+            if proc is not None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.communicate()
             return False, f"Process timed out after {timeout} seconds"
         except asyncio.CancelledError:
             logger.info("FFmpeg command cancelled; terminating subprocess immediately...")
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            if proc is not None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.communicate()
             raise
         except Exception as e:
             logger.exception(f"Unexpected error executing command: {e}")

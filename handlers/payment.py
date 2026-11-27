@@ -18,6 +18,7 @@ from config import (
     SUPPORTED_VIDEO_RESOLUTIONS,
 )
 from database import db
+from utils.callback_data import parse_callback
 from services.payment_service import payment_service
 from services.media_service import media_service
 from keyboards.quality_keyboard import (
@@ -53,7 +54,9 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
     if not await selection_session_manager.enforce_session_validity(callback):
         return
 
-    parts = callback.data.split(":")
+    parts = await parse_callback(callback, "pay", (3, 4))
+    if parts is None:
+        return
     plan_type = parts[1]        # 'single', 'go', 'pro', 'ultra', 'max'
     raw_video_id = parts[2]
     raw_quality = parts[3] if len(parts) > 3 else "720p"
@@ -163,7 +166,10 @@ async def cb_prompt_utr_submission(callback: CallbackQuery, state: FSMContext) -
     if not await selection_session_manager.enforce_session_validity(callback):
         return
 
-    order_id = callback.data.split(":")[1]
+    parts = await parse_callback(callback, "submit_utr", 2)
+    if parts is None:
+        return
+    order_id = parts[1]
     order = await db.get_order(order_id)
     if not order or order.get("telegram_id") != callback.from_user.id:
         await callback.answer("This order is unavailable for your account.", show_alert=True)
@@ -432,7 +438,9 @@ async def cb_admin_force_approve(callback: CallbackQuery) -> None:
         await callback.answer("Unauthorized.", show_alert=True)
         return
 
-    parts = callback.data.split(":")
+    parts = await parse_callback(callback, "admin_approve", 3)
+    if parts is None:
+        return
     order_id = parts[1]
     utr = parts[2]
 
@@ -475,7 +483,10 @@ async def cb_admin_reject(callback: CallbackQuery) -> None:
         await callback.answer("Unauthorized.", show_alert=True)
         return
 
-    order_id = callback.data.split(":")[1]
+    parts = await parse_callback(callback, "admin_reject", 2)
+    if parts is None:
+        return
+    order_id = parts[1]
     order = await db.get_order(order_id)
     # HIGH-5: Use database.reject_order instead of raw connection
     if order and order.get("status") == "pending":

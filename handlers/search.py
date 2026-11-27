@@ -3,12 +3,14 @@ Music Search & YouTube Link Processing Handler
 """
 import html
 import logging
+from typing import Optional
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
 from database import db
+from utils.callback_data import parse_callback
 from services.music_service import music_service
 from services.media_service import media_service
 from keyboards.search_keyboard import get_search_results_keyboard, get_media_type_keyboard
@@ -238,7 +240,10 @@ async def execute_search(
 @router.callback_query(F.data.startswith("sel:"))
 async def cb_select_result(callback: CallbackQuery) -> None:
     """User clicked one of the search results."""
-    video_id = callback.data.split(":")[1]
+    parts = await parse_callback(callback, "sel", 2)
+    if parts is None:
+        return
+    video_id = parts[1]
     from utils.selection_session import selection_session_manager
     if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return

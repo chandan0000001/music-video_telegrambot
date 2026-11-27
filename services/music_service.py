@@ -47,13 +47,7 @@ class MusicService:
         if YTDLP_PROXY:
             ydl_opts["proxy"] = YTDLP_PROXY
 
-        chrome_profile = Path.home() / ".config" / "google-chrome"
-        if not chrome_profile.exists():
-            chrome_profile = Path("/home/ubuntu/.config/google-chrome")
-
-        if chrome_profile.exists():
-            ydl_opts["cookiesfrombrowser"] = ("chrome",)
-        elif cookie_file:
+        if cookie_file:
             ydl_opts["cookiefile"] = str(cookie_file)
 
         search_query = f"ytsearch{limit}:{query}"
@@ -65,7 +59,7 @@ class MusicService:
         direct_opts["socket_timeout"] = 3
         direct_opts["retries"] = 0
         direct_opts["extractor_retries"] = 0
-        direct_opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+        direct_opts["proxy"] = YTDLP_PROXY or ""
         direct_opts.pop("cookiesfrombrowser", None)
         direct_opts.pop("cookiefile", None)
         try:

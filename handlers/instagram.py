@@ -11,6 +11,7 @@ Integrated with:
 - Clean Universal Back Navigation
 """
 import html
+from typing import Optional
 import asyncio
 import logging
 from pathlib import Path

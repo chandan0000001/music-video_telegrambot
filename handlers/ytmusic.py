@@ -3,6 +3,7 @@ Dedicated YouTube Music Studio Downloader Router
 Provides dedicated 1-tap audio downloading for music.youtube.com and high-fidelity music search.
 """
 import logging
+import html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command

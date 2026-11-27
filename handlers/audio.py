@@ -7,6 +7,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from database import db
+from utils.callback_data import parse_callback
 from services.media_service import media_service
 from services.telegram_service import telegram_service
 from keyboards.quality_keyboard import (
@@ -28,7 +29,10 @@ router = Router(name="audio_router")
 @router.callback_query(F.data.startswith("opt_audio:"))
 async def cb_choose_audio_format(callback: CallbackQuery) -> None:
     """Prompt user to select audio container format (MP3, M4A, WAV)."""
-    video_id = callback.data.split(":")[1]
+    parts = await parse_callback(callback, "opt_audio", 2)
+    if parts is None:
+        return
+    video_id = parts[1]
     from utils.selection_session import selection_session_manager
     if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
@@ -69,9 +73,14 @@ async def cb_choose_audio_format(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("afmt:"))
 async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
     """Prompt user to select audio bitrate quality (128, 192, 320 kbps)."""
-    parts = callback.data.split(":")
+    parts = await parse_callback(callback, "afmt", 3)
+    if parts is None:
+        return
     video_id = parts[1]
     selected_format = parts[2].lower()
+    if selected_format not in {"mp3", "m4a", "wav"}:
+        await callback.answer("Unsupported audio format. Choose MP3, M4A or WAV.", show_alert=True)
+        return
 
     from utils.selection_session import selection_session_manager
     if not await selection_session_manager.enforce_session_validity(callback, video_id):
@@ -127,10 +136,18 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("adl:"))
 async def cb_start_audio_download(callback: CallbackQuery) -> None:
     """Process and deliver audio with specified format and quality."""
-    parts = callback.data.split(":")
+    parts = await parse_callback(callback, "adl", 4)
+    if parts is None:
+        return
     video_id = parts[1]
     selected_format = parts[2].lower()
+    if selected_format not in {"mp3", "m4a", "wav"}:
+        await callback.answer("Unsupported audio format. Choose MP3, M4A or WAV.", show_alert=True)
+        return
     bitrate = parts[3]
+    if bitrate not in {"128", "192", "320"}:
+        await callback.answer("Unsupported audio quality. Please choose a listed option.", show_alert=True)
+        return
 
     user = callback.from_user
     user_id = user.id if user else 0

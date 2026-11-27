@@ -1,6 +1,6 @@
 aiogram>=3.17.0
 aiosqlite>=0.20.0
-yt-dlp>=2025.01.01
+yt-dlp[default]>=2025.01.01
 aiofiles>=24.1.0
 hydrogram>=0.2.0
 tgcrypto>=1.2.5

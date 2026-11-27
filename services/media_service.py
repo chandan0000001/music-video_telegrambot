@@ -101,28 +101,13 @@ class MediaService:
         node_bin = shutil.which("node") or shutil.which("nodejs")
         if node_bin:
             opts["js_runtimes"] = {"node": {"path": node_bin}}
-        if proxy:
-            opts["proxy"] = proxy
-        elif YTDLP_PROXY:
-            opts["proxy"] = YTDLP_PROXY
-
+        opts["proxy"] = proxy if proxy is not None else (YTDLP_PROXY or "")
+        opts["noplaylist"] = True
+        # Use yt-dlp's current client defaults; do not silently read a browser profile.
         if with_cookies:
             cookie_file = get_cookie_file()
             if cookie_file:
                 opts["cookiefile"] = str(cookie_file)
-            else:
-                chrome_profile = Path.home() / ".config" / "google-chrome"
-                if not chrome_profile.exists():
-                    chrome_profile = Path("/home/ubuntu/.config/google-chrome")
-
-                if chrome_profile.exists():
-                    opts["cookiesfrombrowser"] = ("chrome",)
-        else:
-            opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["visionos", "android", "ios", "mweb", "web"]
-                }
-            }
         return opts
 
     def _apply_turbo_downloader(self, opts: Dict[str, Any]) -> None:
@@ -158,7 +143,8 @@ class MediaService:
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
 
-        # 1. First hit: Own IP WITH COOKIES (direct request, no proxy)
+        direct_error = None
+        # Try the configured connection with current yt-dlp client defaults.
         clean_opts = {
             **self._get_common_ydl_opts(with_cookies=True),
             "quiet": True,
@@ -167,6 +153,7 @@ class MediaService:
             "socket_timeout": 6 if is_yt else 15,
             "retries": 1 if is_yt else 10,
             "extractor_retries": 1 if is_yt else 3,
+            "noplaylist": True,
             "check_formats": False,
         }
         try:
@@ -178,6 +165,9 @@ class MediaService:
         except Exception as e:
             if not is_yt:
                 raise
+            if not youtube_proxy_manager.is_retryable_error(e):
+                raise
+            direct_error = e
             logger.warning(
                 f"Direct Own IP extraction encountered challenge/block for YouTube {url}: {e}."
             )
@@ -186,11 +176,9 @@ class MediaService:
         proxies = youtube_proxy_manager.get_proxies()
         if not proxies:
             logger.info("No fallback proxies available in proxy pool.")
-            raise RuntimeError(
-                "YouTube verification challenge encountered. "
-                "Direct connection was blocked and no proxies are configured in the pool. "
-                "Please update cookies or provide proxies."
-            )
+            if direct_error is not None:
+                raise direct_error
+            raise RuntimeError("No playable video formats returned by YouTube.")
 
         # Notify user that proxy routing is active
         _notify_status(
@@ -211,7 +199,9 @@ class MediaService:
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
-                "socket_timeout": 12,
+                "socket_timeout": 6,
+                "retries": 0,
+                "extractor_retries": 0,
                 "check_formats": False,
             }
             try:
@@ -254,10 +244,8 @@ class MediaService:
             )
         except asyncio.TimeoutError:
             logger.error(f"Extraction timed out after 45s for {canonical_url}")
-            return False, None, "⏱ <b>Request Timed Out:</b> YouTube took too long to respond (>45s). Please try again or hit /start."
+            return False, None, "YouTube did not respond within 45 seconds. Please try again shortly."
         except Exception as e:
-            logger.error(f"Failed to extract info for {canonical_url}: {e}")
-            return False, None, f"Could not retrieve video information: {e}"
             logger.error(f"Failed to extract info for {canonical_url}: {e}")
             classified = classify_media_restriction(str(e))
             if classified:
@@ -401,6 +389,7 @@ class MediaService:
            without proxy for 0-quota consumption!
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
+        direct_error = None
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -408,6 +397,7 @@ class MediaService:
         except Exception as e:
             if not is_yt or not youtube_proxy_manager.is_retryable_error(e):
                 raise
+            direct_error = e
             logger.warning(
                 f"Direct download failed for YouTube {url} ({e}). Checking proxy pool fallback..."
             )
@@ -415,7 +405,7 @@ class MediaService:
         proxies = youtube_proxy_manager.get_proxies()
         if not proxies:
             logger.info("No fallback proxies available in proxy pool.")
-            raise
+            raise direct_error
 
         # Notify user that proxy routing is active
         _notify_status(
@@ -442,17 +432,7 @@ class MediaService:
             # Pop extractor_args so player_client list doesn't cause yt-dlp to skip clients when cookies are active
             extract_opts.pop("extractor_args", None)
 
-            # Attach authenticated Chrome session / cookiefile so proxy requests avoid bot challenges
-            chrome_profile = Path.home() / ".config" / "google-chrome"
-            if not chrome_profile.exists():
-                chrome_profile = Path("/home/ubuntu/.config/google-chrome")
-            if chrome_profile.exists():
-                extract_opts["cookiesfrombrowser"] = ("chrome",)
-            else:
-                from config import get_cookie_file
-                cookie_file = get_cookie_file()
-                if cookie_file:
-                    extract_opts["cookiefile"] = str(cookie_file)
+            # Retain only explicitly configured cookie files from ydl_opts.
 
             # Strictly preserve requested format selector (e.g. height<=2160)
             if "format" in ydl_opts:
@@ -465,7 +445,7 @@ class MediaService:
 
                 # Step B: Download media streams directly without proxy (0 MB proxy quota consumed!)
                 direct_opts = dict(ydl_opts)
-                direct_opts["proxy"] = None
+                direct_opts["proxy"] = ""
                 direct_opts["socket_timeout"] = 30
                 try:
                     logger.info("Directly streaming media from googlevideo.com (bypassing proxy for 0-quota consumption)...")

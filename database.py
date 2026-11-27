@@ -6,7 +6,7 @@ import io
 import csv
 import logging
 from pathlib import Path
-from typing import Any, Optional, AsyncIterator
+from typing import Any, Optional, AsyncIterator, Tuple
 from contextlib import asynccontextmanager
 import aiosqlite
 
@@ -725,9 +725,10 @@ class Database:
                 exp_dt = datetime.fromisoformat(exp_clean)
                 if exp_dt.tzinfo is None:
                     exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-            except Exception as e:
+            except (ValueError, TypeError) as e:
                 logger.error(f"Error parsing subscription expiry date for user {telegram_id}: {e}")
-                exp_dt = now + timedelta(days=365)  # Grace period: do not falsely expire valid subscriptions
+                return {"is_active": False, "plan_tier": sub["plan_tier"],
+                        "expired": False, "today_remaining": 0, "invalid_expiry": True}
 
             if exp_dt < now:
                 return {
