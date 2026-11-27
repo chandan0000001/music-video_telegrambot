@@ -46,6 +46,28 @@ STANDARD_TIER_WIDTHS: Dict[int, int] = {
 }
 
 
+def _notify_status(status_callback: Optional[Any], text: str, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+    """Safely deliver status update from worker thread to asyncio event loop."""
+    if not status_callback:
+        return
+    try:
+        if loop and loop.is_running():
+            if asyncio.iscoroutinefunction(status_callback):
+                asyncio.run_coroutine_threadsafe(status_callback(text), loop)
+            else:
+                def _run():
+                    res = status_callback(text)
+                    if asyncio.iscoroutine(res):
+                        asyncio.create_task(res)
+                loop.call_soon_threadsafe(_run)
+        else:
+            res = status_callback(text)
+            if asyncio.iscoroutine(res):
+                asyncio.run(res)
+    except Exception as e:
+        logger.debug(f"Could not deliver status notification: {e}")
+
+
 class MediaService:
     """Manages media downloads, quality inspection, and conversions."""
 
@@ -121,32 +143,32 @@ class MediaService:
                     ]
                 }
 
-    def _sync_extract_info(self, url: str) -> Dict[str, Any]:
+    def _sync_extract_info(
+        self,
+        url: str,
+        status_callback: Optional[Any] = None,
+        loop: Optional[asyncio.AbstractEventLoop] = None
+    ) -> Dict[str, Any]:
         """Extract metadata and analyze available video and audio formats.
         Direct-first with round-robin proxy fallback:
-        1. First hit: Own IP (direct, socket_timeout=6s to fail fast if blocked).
-        2. If Own IP fails (403, bot challenge, format not available, timeout) and it's YouTube:
-           Proceed to YouTube round-robin proxy!
+        1. First hit: Own IP WITH COOKIES (direct authenticated request, no proxy).
+        2. If Own IP encounters a bot block / 403 and proxies exist:
+           Notify user that proxy routing is active (delays may occur).
+           Rotate through available proxies!
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
 
-        # 1. First hit: Own IP (direct unauthenticated fast check)
+        # 1. First hit: Own IP WITH COOKIES (direct request, no proxy)
         clean_opts = {
-            **self._get_common_ydl_opts(with_cookies=False),
+            **self._get_common_ydl_opts(with_cookies=True),
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "socket_timeout": 3 if is_yt else 15,
-            "retries": 0 if is_yt else 10,
-            "extractor_retries": 0 if is_yt else 3,
+            "socket_timeout": 6 if is_yt else 15,
+            "retries": 1 if is_yt else 10,
+            "extractor_retries": 1 if is_yt else 3,
             "check_formats": False,
         }
-        if is_yt:
-            clean_opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["android"]
-                }
-            }
         try:
             with yt_dlp.YoutubeDL(clean_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -155,29 +177,35 @@ class MediaService:
                     return info
         except Exception as e:
             if not is_yt:
-                # If not YouTube, fallback to cookies if present, but never use YouTube proxies
-                auth_opts = {
-                    **self._get_common_ydl_opts(with_cookies=True),
-                    "quiet": True,
-                    "no_warnings": True,
-                    "skip_download": True,
-                    "socket_timeout": 15,
-                    "check_formats": False,
-                }
-                with yt_dlp.YoutubeDL(auth_opts) as ydl:
-                    return ydl.extract_info(url, download=False)
+                raise
             logger.warning(
-                f"Own IP extraction encountered challenge/block for YouTube {url}: {e}. "
-                f"Proceeding to round-robin proxy pool..."
+                f"Direct Own IP extraction encountered challenge/block for YouTube {url}: {e}."
             )
+
+        # Check if proxies are available
+        proxies = youtube_proxy_manager.get_proxies()
+        if not proxies:
+            logger.info("No fallback proxies available in proxy pool.")
+            raise RuntimeError(
+                "YouTube verification challenge encountered. "
+                "Direct connection was blocked and no proxies are configured in the pool. "
+                "Please update cookies or provide proxies."
+            )
+
+        # Notify user that proxy routing is active
+        _notify_status(
+            status_callback,
+            "🔄 <i>Direct connection challenged by YouTube. Routing via proxy pool (please wait a moment...)...</i>",
+            loop
+        )
 
         # 2. Proceed to Round-Robin YouTube Proxies (strictly isolated to YouTube)
         last_error = None
-        for attempt in range(4):
+        for attempt in range(min(4, len(proxies))):
             proxy = youtube_proxy_manager.get_next_proxy()
             if not proxy:
                 break
-            logger.info(f"Extracting YouTube metadata via round-robin proxy (attempt {attempt + 1}/4)...")
+            logger.info(f"Extracting YouTube metadata via round-robin proxy (attempt {attempt + 1})...")
             proxy_opts = {
                 **self._get_common_ydl_opts(with_cookies=True, proxy=proxy),
                 "quiet": True,
@@ -201,9 +229,13 @@ class MediaService:
 
         if last_error:
             raise last_error
-        raise RuntimeError("Could not retrieve media formats via Own IP or YouTube proxy pool.")
+        raise RuntimeError("Could not retrieve media formats via direct connection or YouTube proxy pool.")
 
-    async def get_media_info(self, url_or_id: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    async def get_media_info(
+        self,
+        url_or_id: str,
+        status_callback: Optional[Any] = None
+    ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
         """
         Validate URL, extract metadata, and determine genuine available qualities.
         Returns (success, info_dict, error_message).
@@ -213,16 +245,19 @@ class MediaService:
             return False, None, "Invalid or unsupported YouTube URL. Please provide a valid YouTube video link."
 
         canonical_url = f"https://www.youtube.com/watch?v={video_id}"
+        loop = asyncio.get_running_loop()
 
         try:
             raw_info = await asyncio.wait_for(
-                asyncio.to_thread(self._sync_extract_info, canonical_url),
+                asyncio.to_thread(self._sync_extract_info, canonical_url, status_callback, loop),
                 timeout=45.0
             )
         except asyncio.TimeoutError:
             logger.error(f"Extraction timed out after 45s for {canonical_url}")
             return False, None, "⏱ <b>Request Timed Out:</b> YouTube took too long to respond (>45s). Please try again or hit /start."
         except Exception as e:
+            logger.error(f"Failed to extract info for {canonical_url}: {e}")
+            return False, None, f"Could not retrieve video information: {e}"
             logger.error(f"Failed to extract info for {canonical_url}: {e}")
             classified = classify_media_restriction(str(e))
             if classified:
@@ -350,12 +385,20 @@ class MediaService:
 
         return True, info, None
 
-    def _sync_download(self, ydl_opts: Dict[str, Any], url: str) -> None:
+    def _sync_download(
+        self,
+        ydl_opts: Dict[str, Any],
+        url: str,
+        status_callback: Optional[Any] = None,
+        loop: Optional[asyncio.AbstractEventLoop] = None
+    ) -> None:
         """Synchronous yt-dlp download invocation.
         Direct-first with round-robin proxy fallback for YouTube:
-        1. Attempt download with Own IP.
-        2. If Own IP fails (403, bot challenge, format not available, timeout) and it's YouTube:
-           Proceed to YouTube round-robin proxy while strictly preserving requested resolution tier!
+        1. Attempt download with Own IP using cookies.
+        2. If Own IP fails on YouTube (403, bot challenge) and proxies exist:
+           Notify user that proxy routing is active (delays may occur).
+           Extract info_dict using proxy (~50 KB), then stream directly from googlevideo.com
+           without proxy for 0-quota consumption!
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
         try:
@@ -366,9 +409,20 @@ class MediaService:
             if not is_yt or not youtube_proxy_manager.is_retryable_error(e):
                 raise
             logger.warning(
-                f"Own IP download failed for YouTube {url} ({e}). "
-                f"Proceeding to round-robin proxy while strictly preserving requested format selector..."
+                f"Direct download failed for YouTube {url} ({e}). Checking proxy pool fallback..."
             )
+
+        proxies = youtube_proxy_manager.get_proxies()
+        if not proxies:
+            logger.info("No fallback proxies available in proxy pool.")
+            raise
+
+        # Notify user that proxy routing is active
+        _notify_status(
+            status_callback,
+            "🔄 <b>Direct connection restricted. Routing download via proxy pool (please wait a moment...)...</b>",
+            loop
+        )
 
         # Retry with round-robin proxies (strictly isolated to YouTube)
         # ZERO-PROXY-BANDWIDTH ARCHITECTURE:
@@ -376,11 +430,11 @@ class MediaService:
         # 2. Download media streams directly from googlevideo.com WITHOUT proxy (0 MB proxy quota consumed!).
         # 3. Only if direct stream download fails, fallback to full proxy streaming as safety net.
         last_dl_error = None
-        for attempt in range(4):
+        for attempt in range(min(4, len(proxies))):
             proxy = youtube_proxy_manager.get_next_proxy()
             if not proxy:
                 break
-            logger.info(f"Extracting YouTube download metadata via proxy (attempt {attempt + 1}/4)...")
+            logger.info(f"Extracting YouTube download metadata via proxy (attempt {attempt + 1})...")
             extract_opts = dict(ydl_opts)
             extract_opts["proxy"] = proxy
             extract_opts["skip_download"] = True
@@ -477,7 +531,7 @@ class MediaService:
         # yt-dlp options for best audio with universal fallback
         download_template = str(job_dir / "input_audio.%(ext)s")
         ydl_opts: Dict[str, Any] = {
-            **self._get_common_ydl_opts(with_cookies=False),
+            **self._get_common_ydl_opts(with_cookies=True),
             "format": "bestaudio/best/b",
             "outtmpl": download_template,
             "quiet": True,
@@ -499,9 +553,10 @@ class MediaService:
         # Retry loop for resilience
         download_success = False
         last_error = ""
+        loop = asyncio.get_running_loop()
         for attempt in range(1, 3):
             try:
-                await asyncio.to_thread(self._sync_download, ydl_opts, video_url)
+                await asyncio.to_thread(self._sync_download, ydl_opts, video_url, status_callback, loop)
                 download_success = True
                 break
             except Exception as e:
@@ -630,7 +685,7 @@ class MediaService:
         )
 
         ydl_opts: Dict[str, Any] = {
-            **self._get_common_ydl_opts(with_cookies=False),
+            **self._get_common_ydl_opts(with_cookies=True),
             "format": format_selector,
             "outtmpl": download_template,
             "quiet": True,
@@ -653,9 +708,10 @@ class MediaService:
         # Retry loop for resilience against intermittent drops
         download_success = False
         last_error = ""
+        loop = asyncio.get_running_loop()
         for attempt in range(1, 3):
             try:
-                await asyncio.to_thread(self._sync_download, ydl_opts, video_url)
+                await asyncio.to_thread(self._sync_download, ydl_opts, video_url, status_callback, loop)
                 download_success = True
                 break
             except Exception as e:

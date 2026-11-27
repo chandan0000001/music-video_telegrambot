@@ -85,7 +85,8 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
             pass
 
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
-    success, info, _ = await media_service.get_media_info(canonical_url)
+    status_cb = (lambda text: callback.message.edit_text(text, parse_mode="HTML")) if callback.message else None
+    success, info, _ = await media_service.get_media_info(canonical_url, status_callback=status_cb)
 
     approx_sizes = info.get("approx_audio_sizes", {}) if (success and info) else {}
 

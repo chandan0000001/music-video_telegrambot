@@ -43,7 +43,8 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
             pass
 
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
-    success, info, err = await media_service.get_media_info(canonical_url)
+    status_cb = (lambda text: callback.message.edit_text(text, parse_mode="HTML")) if callback.message else None
+    success, info, err = await media_service.get_media_info(canonical_url, status_callback=status_cb)
 
     if not success or not info:
         if callback.message:

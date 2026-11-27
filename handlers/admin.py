@@ -1092,3 +1092,51 @@ async def cmd_admin_sub_status(message: Message) -> None:
         f"• <b>Status:</b> 🟢 Active",
         parse_mode="HTML"
     )
+
+
+@router.message(F.document)
+async def handle_admin_config_files(message: Message) -> None:
+    """Handle admin uploads for cookies.txt or proxies.txt."""
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        return
+
+    doc = message.document
+    if not doc or not doc.file_name:
+        return
+
+    file_name = doc.file_name.lower()
+    if file_name in ("cookies.txt", "cookie.txt"):
+        from config import COOKIE_FILE, _write_cookie_file_secure
+        bot = message.bot
+        file_io = await bot.download(doc.file_id)
+        if file_io:
+            content = file_io.read()
+            _write_cookie_file_secure(COOKIE_FILE, content)
+            await message.answer(
+                f"✅ <b>YouTube cookies.txt updated successfully!</b>\n\n"
+                f"File size: <code>{len(content) / 1024:.1f} KB</code>\n"
+                f"Location: <code>{COOKIE_FILE}</code>\n"
+                f"Direct authenticated requests will now use this cookie file.",
+                parse_mode="HTML"
+            )
+            return
+
+    if file_name in ("proxies.txt", "proxy.txt"):
+        from config import BASE_DIR
+        from services.proxy_manager import youtube_proxy_manager
+        bot = message.bot
+        file_io = await bot.download(doc.file_id)
+        if file_io:
+            content = file_io.read()
+            p_file = BASE_DIR / "proxies.txt"
+            p_file.write_bytes(content)
+            lines = [l.strip() for l in content.decode("utf-8", errors="ignore").splitlines() if l.strip() and not l.strip().startswith("#")]
+            youtube_proxy_manager.set_proxies(lines)
+            await message.answer(
+                f"✅ <b>YouTube proxies.txt updated successfully!</b>\n\n"
+                f"Loaded: <code>{len(lines)} proxies</code>\n"
+                f"Location: <code>{p_file}</code>",
+                parse_mode="HTML"
+            )
+            return

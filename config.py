@@ -155,23 +155,22 @@ MAX_UPLOAD_SIZE_BYTES: int = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 YTDLP_PROXY: Optional[str] = os.getenv("YTDLP_PROXY")
 
 # YouTube-Dedicated Proxy Pool (isolated strictly to YouTube operations)
-DEFAULT_YOUTUBE_PROXIES: List[str] = [
-    "http://gpzyewzw:7yo2ov1b9hfp@45.38.107.97:6014",
-    "http://gpzyewzw:7yo2ov1b9hfp@64.137.96.74:6641",
-    "http://gpzyewzw:7yo2ov1b9hfp@198.23.243.226:6361",
-    "http://gpzyewzw:7yo2ov1b9hfp@38.154.185.97:6370",
-    "http://gpzyewzw:7yo2ov1b9hfp@84.247.60.125:6095",
-    "http://gpzyewzw:7yo2ov1b9hfp@191.96.254.138:6185",
-    "http://gpzyewzw:7yo2ov1b9hfp@198.46.161.42:5092",
-    "http://gpzyewzw:7yo2ov1b9hfp@64.137.10.153:5803",
-    "http://gpzyewzw:7yo2ov1b9hfp@104.164.49.38:7693",
-    "http://gpzyewzw:7yo2ov1b9hfp@23.26.71.145:5628",
-]
+# Populated from YOUTUBE_PROXIES in .env or proxies.txt
+DEFAULT_YOUTUBE_PROXIES: List[str] = []
 _raw_yt_proxies = os.getenv("YOUTUBE_PROXIES", "")
 if _raw_yt_proxies.strip():
     YOUTUBE_PROXIES: List[str] = [p.strip() for p in _raw_yt_proxies.split(",") if p.strip()]
 else:
-    YOUTUBE_PROXIES: List[str] = DEFAULT_YOUTUBE_PROXIES
+    # Also attempt loading from proxies.txt if present
+    _proxies_file = BASE_DIR / "proxies.txt"
+    if _proxies_file.exists():
+        try:
+            with open(_proxies_file, "r", encoding="utf-8") as _pf:
+                YOUTUBE_PROXIES: List[str] = [line.strip() for line in _pf if line.strip() and not line.strip().startswith("#")]
+        except Exception:
+            YOUTUBE_PROXIES: List[str] = []
+    else:
+        YOUTUBE_PROXIES: List[str] = DEFAULT_YOUTUBE_PROXIES
 
 # Maximum allowed duration for media processing (in seconds, e.g., 14400 = 4 hours, 0 = unlimited)
 MAX_DURATION_SECONDS: int = int(os.getenv("MAX_DURATION_SECONDS", "14400"))
