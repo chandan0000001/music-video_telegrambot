@@ -107,16 +107,16 @@ class MediaService:
             opts["proxy"] = YTDLP_PROXY
 
         if with_cookies:
-            chrome_profile = Path.home() / ".config" / "google-chrome"
-            if not chrome_profile.exists():
-                chrome_profile = Path("/home/ubuntu/.config/google-chrome")
-
-            if chrome_profile.exists():
-                opts["cookiesfrombrowser"] = ("chrome",)
+            cookie_file = get_cookie_file()
+            if cookie_file:
+                opts["cookiefile"] = str(cookie_file)
             else:
-                cookie_file = get_cookie_file()
-                if cookie_file:
-                    opts["cookiefile"] = str(cookie_file)
+                chrome_profile = Path.home() / ".config" / "google-chrome"
+                if not chrome_profile.exists():
+                    chrome_profile = Path("/home/ubuntu/.config/google-chrome")
+
+                if chrome_profile.exists():
+                    opts["cookiesfrombrowser"] = ("chrome",)
         else:
             opts["extractor_args"] = {
                 "youtube": {

@@ -22,7 +22,7 @@ if _env_file.exists():
 
 # Auto-generate or locate cookies.txt across common server paths
 def get_cookie_file() -> Optional[Path]:
-    """Search for cookies.txt across common deployment paths."""
+    """Search for cookies.txt across common deployment paths, including browser export in Downloads."""
     candidates = [
         BASE_DIR / "cookies.txt",
         Path.home() / "music_bot" / "cookies.txt",
@@ -30,11 +30,40 @@ def get_cookie_file() -> Optional[Path]:
         BASE_DIR.parent / "cookies.txt",
         Path("/home/ubuntu/music_bot/cookies.txt"),
         Path("/home/ubuntu/cookies.txt"),
+        Path.home() / "Downloads" / "www.youtube.com_cookies.txt",
+        Path("/home/ubuntu/Downloads/www.youtube.com_cookies.txt"),
     ]
+    # Check candidates
     for c in candidates:
         try:
             if c.exists() and c.is_file() and c.stat().st_size > 50:
+                target = BASE_DIR / "cookies.txt"
+                if c != target and (not target.exists() or c.stat().st_mtime > target.stat().st_mtime):
+                    try:
+                        import shutil
+                        shutil.copy2(c, target)
+                        os.chmod(target, 0o600)
+                        return target
+                    except Exception:
+                        pass
                 return c
+        except Exception:
+            pass
+
+    # Also search Downloads for any www.youtube.com_cookies*.txt
+    for d_dir in (Path.home() / "Downloads", Path("/home/ubuntu/Downloads")):
+        try:
+            if d_dir.exists():
+                matches = sorted(d_dir.glob("www.youtube.com_cookies*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if matches and matches[0].stat().st_size > 50:
+                    target = BASE_DIR / "cookies.txt"
+                    try:
+                        import shutil
+                        shutil.copy2(matches[0], target)
+                        os.chmod(target, 0o600)
+                        return target
+                    except Exception:
+                        return matches[0]
         except Exception:
             pass
     return None
