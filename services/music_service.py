@@ -8,7 +8,7 @@ from typing import Optional, Any
 import yt_dlp
 
 from utils.validators import sanitize_filename
-from services.proxy_manager import youtube_proxy_manager
+from services.proxy_manager import youtube_proxy_manager, mask_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -68,13 +68,26 @@ class MusicService:
         except Exception as e:
             logger.warning(f"Own IP YouTube search failed for '{query}': {e}. Proceeding to round-robin proxy...")
 
-        # Attempt 2: Round-robin proxy fallback (authenticated with Chrome session)
+        # Attempt 1b: Direct Own IP WITH cookies if unauthenticated search failed (skip if no cookie file)
+        if (not info or "entries" not in info) and cookie_file:
+            direct_auth_opts = dict(ydl_opts)
+            direct_auth_opts["socket_timeout"] = 6
+            direct_auth_opts["retries"] = 0
+            direct_auth_opts["extractor_retries"] = 0
+            try:
+                with yt_dlp.YoutubeDL(direct_auth_opts) as ydl:
+                    info = ydl.extract_info(search_query, download=False)
+            except Exception as e:
+                logger.warning(f"Direct authenticated YouTube search failed for '{query}': {e}.")
+
+        # Attempt 2: Round-robin proxy fallback when IP-flagged or direct search failed
         if not info or "entries" not in info:
-            for attempt in range(3):
+            proxies = youtube_proxy_manager.get_proxies()
+            for attempt in range(min(4, len(proxies))):
                 proxy = youtube_proxy_manager.get_next_proxy()
                 if not proxy:
                     break
-                logger.info(f"Retrying YouTube search via round-robin proxy {proxy} (attempt {attempt + 1}/3)...")
+                logger.info(f"Retrying YouTube search via round-robin proxy {mask_proxy_url(proxy)} (attempt {attempt + 1})...")
                 proxy_opts = dict(ydl_opts)
                 proxy_opts["proxy"] = proxy
                 proxy_opts["socket_timeout"] = 12
@@ -84,7 +97,12 @@ class MusicService:
                         if info and "entries" in info:
                             break
                 except Exception as pe:
-                    logger.warning(f"Proxy search attempt failed: {pe}. Rotating to next proxy...")
+                    err_str = str(pe).lower()
+                    if "402" in err_str or "bandwidthlimit" in err_str or "payment required" in err_str:
+                        youtube_proxy_manager.mark_exhausted(proxy)
+                    else:
+                        youtube_proxy_manager.mark_cooldown(proxy)
+                    logger.warning(f"Proxy search attempt via {mask_proxy_url(proxy)} failed: {pe}. Rotating to next proxy...")
 
         if not info or "entries" not in info:
             return []

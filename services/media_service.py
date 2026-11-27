@@ -3,6 +3,7 @@ Media Processing Service
 Handles yt-dlp metadata extraction, media downloading, conversion coordination, and resource cleanup.
 """
 import os
+import time
 import shutil
 import asyncio
 import logging
@@ -22,7 +23,7 @@ from config import (
     SUPPORTED_VIDEO_RESOLUTIONS
 )
 from services.ffmpeg_service import ffmpeg_service
-from services.proxy_manager import youtube_proxy_manager
+from services.proxy_manager import youtube_proxy_manager, mask_proxy_url
 from utils.validators import (
     extract_youtube_id,
     sanitize_filename,
@@ -71,8 +72,30 @@ def _notify_status(status_callback: Optional[Any], text: str, loop: Optional[asy
 class MediaService:
     """Manages media downloads, quality inspection, and conversions."""
 
+    _INFO_CACHE_TTL_SECONDS = 300.0
+    _INFO_CACHE_MAX_ENTRIES = 128
+
     def __init__(self, temp_base: Path = TEMP_DIR):
         self.temp_base = temp_base
+        self._raw_info_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    def _get_cached_raw_info(self, video_id: str) -> Optional[Dict[str, Any]]:
+        entry = self._raw_info_cache.get(video_id)
+        if not entry:
+            return None
+        ts, raw = entry
+        if (time.monotonic() - ts) > self._INFO_CACHE_TTL_SECONDS:
+            self._raw_info_cache.pop(video_id, None)
+            return None
+        return raw
+
+    def _set_cached_raw_info(self, video_id: str, raw_info: Dict[str, Any]) -> None:
+        if not video_id or not raw_info:
+            return
+        if len(self._raw_info_cache) >= self._INFO_CACHE_MAX_ENTRIES:
+            oldest_key = min(self._raw_info_cache, key=lambda k: self._raw_info_cache[k][0])
+            self._raw_info_cache.pop(oldest_key, None)
+        self._raw_info_cache[video_id] = (time.monotonic(), raw_info)
 
     def _get_job_dir(self) -> Path:
         """Create a dedicated unique temporary folder for a download job."""
@@ -142,6 +165,11 @@ class MediaService:
            Rotate through available proxies!
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
+        vid_id = extract_youtube_id(url) if is_yt else None
+        if vid_id:
+            cached = self._get_cached_raw_info(vid_id)
+            if cached:
+                return cached
 
         direct_error = None
         # Try the configured connection with current yt-dlp client defaults.
@@ -161,6 +189,8 @@ class MediaService:
                 info = ydl.extract_info(url, download=False)
                 fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
                 if len(fmts) > 0 or not is_yt:
+                    if vid_id and len(fmts) > 0 and info.get("is_live") is not True and (info.get("live_status") or "").lower() not in ("is_live", "is_upcoming"):
+                        self._set_cached_raw_info(vid_id, info)
                     return info
         except Exception as e:
             if not is_yt:
@@ -193,13 +223,13 @@ class MediaService:
             proxy = youtube_proxy_manager.get_next_proxy()
             if not proxy:
                 break
-            logger.info(f"Extracting YouTube metadata via round-robin proxy (attempt {attempt + 1})...")
+            logger.info(f"Extracting YouTube metadata via round-robin proxy {mask_proxy_url(proxy)} (attempt {attempt + 1})...")
             proxy_opts = {
                 **self._get_common_ydl_opts(with_cookies=True, proxy=proxy),
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
-                "socket_timeout": 6,
+                "socket_timeout": 8,
                 "retries": 0,
                 "extractor_retries": 0,
                 "check_formats": False,
@@ -209,13 +239,17 @@ class MediaService:
                     info = ydl.extract_info(url, download=False)
                     fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
                     if len(fmts) > 0:
+                        if vid_id and info.get("is_live") is not True and (info.get("live_status") or "").lower() not in ("is_live", "is_upcoming"):
+                            self._set_cached_raw_info(vid_id, info)
                         return info
             except Exception as pe:
                 last_error = pe
                 err_str = str(pe).lower()
                 if "402" in err_str or "bandwidthlimit" in err_str or "payment required" in err_str:
                     youtube_proxy_manager.mark_exhausted(proxy)
-                logger.warning(f"Proxy extraction failed via {proxy}: {pe}. Rotating to next proxy...")
+                else:
+                    youtube_proxy_manager.mark_cooldown(proxy)
+                logger.warning(f"Proxy extraction failed via {mask_proxy_url(proxy)}: {pe}. Rotating to next proxy...")
 
         if last_error:
             raise last_error
@@ -468,7 +502,9 @@ class MediaService:
                 err_str = str(pe).lower()
                 if "402" in err_str or "bandwidthlimit" in err_str or "payment required" in err_str:
                     youtube_proxy_manager.mark_exhausted(proxy)
-                logger.warning(f"Download attempt via proxy {proxy} failed: {pe}. Rotating to next proxy...")
+                else:
+                    youtube_proxy_manager.mark_cooldown(proxy)
+                logger.warning(f"Download attempt via proxy {mask_proxy_url(proxy)} failed: {pe}. Rotating to next proxy...")
 
         if last_dl_error:
             raise last_dl_error
@@ -596,11 +632,16 @@ class MediaService:
             except (ValueError, TypeError):
                 duration = 0
 
-        # Try to download thumbnail if available
+        # Try to download thumbnail if available (prefer cached metadata before network fetch)
         thumb_path = job_dir / "thumb.jpg"
         has_thumb = False
         try:
-            raw_info = await asyncio.to_thread(self._sync_extract_info, video_url)
+            vid_id = extract_youtube_id(video_url) or ""
+            raw_info = self._get_cached_raw_info(vid_id) if vid_id else None
+            if not raw_info:
+                raw_info = await asyncio.to_thread(self._sync_extract_info, video_url)
+                if vid_id and raw_info:
+                    self._set_cached_raw_info(vid_id, raw_info)
             title = raw_info.get("title", "audio")
             artist = raw_info.get("uploader") or raw_info.get("channel") or "Unknown"
             thumbnails = raw_info.get("thumbnails", [])
@@ -761,11 +802,16 @@ class MediaService:
         thumb_path = job_dir / "video_thumb.jpg"
         has_thumb = await ffmpeg_service.extract_thumbnail(target_file, thumb_path)
 
-        # Get metadata
+        # Get metadata (check cache before hitting YouTube again)
         title = video_title or "Video"
         if not video_title:
             try:
-                raw_info = await asyncio.to_thread(self._sync_extract_info, video_url)
+                vid_id = extract_youtube_id(video_url) or ""
+                raw_info = self._get_cached_raw_info(vid_id) if vid_id else None
+                if not raw_info:
+                    raw_info = await asyncio.to_thread(self._sync_extract_info, video_url)
+                    if vid_id and raw_info:
+                        self._set_cached_raw_info(vid_id, raw_info)
                 title = raw_info.get("title", "Video")
             except Exception:
                 title = "Video"

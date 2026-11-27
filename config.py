@@ -4,6 +4,8 @@ Centralized configuration for the Telegram Music & Video Downloader Bot.
 Loads credentials and overrides from .env if present.
 """
 import os
+import time
+import shutil
 import base64
 from pathlib import Path
 from typing import Optional
@@ -27,9 +29,25 @@ if _env_file.exists():
             key, val = line.split("=", 1)
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
+_COOKIE_CACHE: dict[str, object] = {"ts": 0.0, "path": None}
+_COOKIE_CACHE_TTL_SECONDS = 15.0
+
+
+def invalidate_cookie_cache() -> None:
+    """Reset cached cookie file path after runtime cookie updates."""
+    _COOKIE_CACHE["ts"] = 0.0
+    _COOKIE_CACHE["path"] = None
+
+
 # Auto-generate or locate cookies.txt across common server paths
 def get_cookie_file() -> Optional[Path]:
-    """Search for cookies.txt across common deployment paths, including browser export in Downloads."""
+    """Search for cookies.txt across common deployment paths, with short TTL caching."""
+    now = time.monotonic()
+    cached = _COOKIE_CACHE.get("path")
+    if (now - float(_COOKIE_CACHE.get("ts", 0.0))) < _COOKIE_CACHE_TTL_SECONDS:
+        if cached is None or (isinstance(cached, Path) and cached.exists()):
+            return cached  # type: ignore[return-value]
+
     candidates = [
         BASE_DIR / "cookies.txt",
         Path.home() / "music_bot" / "cookies.txt",
@@ -40,6 +58,7 @@ def get_cookie_file() -> Optional[Path]:
         Path.home() / "Downloads" / "www.youtube.com_cookies.txt",
         Path("/home/ubuntu/Downloads/www.youtube.com_cookies.txt"),
     ]
+    resolved: Optional[Path] = None
     # Check candidates
     for c in candidates:
         try:
@@ -47,33 +66,38 @@ def get_cookie_file() -> Optional[Path]:
                 target = BASE_DIR / "cookies.txt"
                 if c != target and (not target.exists() or c.stat().st_mtime > target.stat().st_mtime):
                     try:
-                        import shutil
                         shutil.copy2(c, target)
                         os.chmod(target, 0o600)
-                        return target
+                        resolved = target
+                        break
                     except Exception:
                         pass
-                return c
+                resolved = c
+                break
         except Exception:
             pass
 
-    # Also search Downloads for any www.youtube.com_cookies*.txt
-    for d_dir in (Path.home() / "Downloads", Path("/home/ubuntu/Downloads")):
-        try:
-            if d_dir.exists():
-                matches = sorted(d_dir.glob("www.youtube.com_cookies*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if matches and matches[0].stat().st_size > 50:
-                    target = BASE_DIR / "cookies.txt"
-                    try:
-                        import shutil
-                        shutil.copy2(matches[0], target)
-                        os.chmod(target, 0o600)
-                        return target
-                    except Exception:
-                        return matches[0]
-        except Exception:
-            pass
-    return None
+    if resolved is None:
+        # Also search Downloads for any www.youtube.com_cookies*.txt
+        for d_dir in (Path.home() / "Downloads", Path("/home/ubuntu/Downloads")):
+            try:
+                if d_dir.exists():
+                    matches = sorted(d_dir.glob("www.youtube.com_cookies*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if matches and matches[0].stat().st_size > 50:
+                        target = BASE_DIR / "cookies.txt"
+                        try:
+                            shutil.copy2(matches[0], target)
+                            os.chmod(target, 0o600)
+                            resolved = target
+                        except Exception:
+                            resolved = matches[0]
+                        break
+            except Exception:
+                pass
+
+    _COOKIE_CACHE["ts"] = now
+    _COOKIE_CACHE["path"] = resolved
+    return resolved
 
 
 def _write_cookie_file_secure(path: Path, content: bytes) -> None:
@@ -213,6 +237,8 @@ MAX_DURATION_SECONDS: int = max(0, _safe_int(os.getenv("MAX_DURATION_SECONDS"), 
 
 # Concurrency & Worker Limits
 MAX_CONCURRENT_DOWNLOADS: int = max(1, _safe_int(os.getenv("MAX_CONCURRENT_DOWNLOADS"), 3))
+MAX_GLOBAL_DOWNLOADS: int = max(1, _safe_int(os.getenv("MAX_GLOBAL_DOWNLOADS"), 4))
+MAX_GLOBAL_UPLOADS: int = max(1, _safe_int(os.getenv("MAX_GLOBAL_UPLOADS"), 4))
 
 # Rate Limiting (Per-user)
 RATE_LIMIT_REQUESTS: int = _safe_int(os.getenv("RATE_LIMIT_REQUESTS"), 5)

@@ -166,6 +166,13 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     if not status_msg:
         return
 
+    preserved_title = f"YouTube Audio ({video_id})"
+    if status_msg.text and "Title:" in status_msg.text:
+        try:
+            preserved_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
+        except Exception:
+            pass
+
     chat_id = status_msg.chat.id if status_msg and status_msg.chat else user_id
     try:
         await status_msg.edit_text(f"⏳ <b>Starting {selected_format.upper()} ({bitrate}kbps) audio download...</b>", parse_mode="HTML")
@@ -179,7 +186,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     # Record initial pending download in database
     download_id = await db.record_download(
         telegram_id=user_id,
-        media_title=f"YouTube_{video_id}",
+        media_title=preserved_title,
         source=canonical_url,
         media_type="audio",
         selected_quality=f"{bitrate}kbps",
@@ -187,12 +194,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         status="pending"
     )
 
-    media_title = f"YouTube Audio ({video_id})"
-    if status_msg.text and "Title:" in status_msg.text:
-        try:
-            media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
-        except Exception:
-            pass
+    media_title = preserved_title
 
     # Check per-user limit
     can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
@@ -254,14 +256,22 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         reporter = AsyncProgressReporter(status_msg, tracker, reply_markup=cancel_kb)
         reporter.start()
 
+        async def _audio_status_cb(text: str) -> None:
+            tracker.defer_updates(2.5)
+            await telegram_service.update_status(status_msg, text)
+
         success, result, err, job_dir = await media_service.process_audio(
             video_url=canonical_url,
             output_format=selected_format,
             bitrate_kbps=bitrate,
             tracker=tracker,
-            status_callback=lambda text: telegram_service.update_status(status_msg, text)
+            status_callback=_audio_status_cb
         )
         await reporter.stop()
+
+        if acquired_slot:
+            queue_manager.release_download_slot(user_id)
+            acquired_slot = False
 
         if not success or not result:
             await vanish_download_animation(anim_msg)
@@ -281,16 +291,20 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
                 )
             return
 
-        sent = await telegram_service.send_audio_file(
-            bot=callback.bot,
-            chat_id=chat_id,
-            file_path=result["file_path"],
-            title=result["title"],
-            artist=result["artist"],
-            duration=result["duration"],
-            thumbnail_path=result["thumbnail_path"],
-            status_message=status_msg
-        )
+        await queue_manager.acquire_upload_slot(user_id)
+        try:
+            sent = await telegram_service.send_audio_file(
+                bot=callback.bot,
+                chat_id=chat_id,
+                file_path=result["file_path"],
+                title=result["title"],
+                artist=result["artist"],
+                duration=result["duration"],
+                thumbnail_path=result["thumbnail_path"],
+                status_message=status_msg
+            )
+        finally:
+            queue_manager.release_upload_slot(user_id)
 
         if sent:
             await db.update_download_status(download_id, "completed")
@@ -337,7 +351,7 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         if reporter:
             await reporter.stop()
         await vanish_download_animation(anim_msg)
-        task_registry.unregister(user_id)
+        task_registry.unregister(user_id, task=current_task)
         if acquired_slot:
             queue_manager.release_download_slot(user_id)
         if job_dir:

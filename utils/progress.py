@@ -161,6 +161,10 @@ class DownloadProgressTracker:
         """Flag the tracker as cancelled to stop yt-dlp on next progress tick."""
         self._is_cancelled = True
 
+    def defer_updates(self, seconds: float = 2.5) -> None:
+        """Temporarily defer progress card edits so high-priority status notices remain visible."""
+        self.last_update_time = max(self.last_update_time, time.time() + max(0.0, seconds))
+
     def ytdlp_hook(self, d: dict) -> None:
         """Synchronous callback executed inside yt-dlp worker thread."""
         if self._is_cancelled:

@@ -24,11 +24,8 @@ class Database:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             await conn.execute("PRAGMA foreign_keys = ON;")
-            await conn.execute("PRAGMA journal_mode = WAL;")
             await conn.execute("PRAGMA synchronous = NORMAL;")
             await conn.execute("PRAGMA temp_store = MEMORY;")
-            await conn.execute("PRAGMA cache_size = -64000;")
-            await conn.execute("PRAGMA mmap_size = 268435456;")
             await conn.execute("PRAGMA busy_timeout = 5000;")
             yield conn
 
@@ -39,6 +36,10 @@ class Database:
             raise FileNotFoundError(f"Schema file not found at {schema_file}")
 
         async with self._get_connection() as conn:
+            # Persistent DB-level WAL & cache pragmas configured once on initialization
+            await conn.execute("PRAGMA journal_mode = WAL;")
+            await conn.execute("PRAGMA cache_size = -64000;")
+            await conn.execute("PRAGMA mmap_size = 268435456;")
             with open(schema_file, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
             await conn.executescript(schema_sql)
@@ -781,6 +782,64 @@ class Database:
             )
             await conn.commit()
             return True
+
+    async def refund_subscription_video_quota(self, telegram_id: int) -> bool:
+        """Refund 1 daily video quota unit when a download fails, cancels, or cannot be delivered."""
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "UPDATE user_subscriptions SET today_video_used = MAX(0, today_video_used - 1) WHERE telegram_id = ? AND today_video_used > 0",
+                (telegram_id,)
+            )
+            await conn.commit()
+            return cur.rowcount > 0
+
+    # ------------------ Persistent FSM Storage Helpers ------------------
+
+    async def fsm_set_state(self, storage_key: str, state: Optional[str]) -> None:
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO fsm_states (storage_key, state, data, updated_at)
+                VALUES (?, ?, '{}', CURRENT_TIMESTAMP)
+                ON CONFLICT(storage_key) DO UPDATE SET
+                    state = excluded.state,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (storage_key, state)
+            )
+            await conn.commit()
+
+    async def fsm_get_state(self, storage_key: str) -> Optional[str]:
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT state FROM fsm_states WHERE storage_key = ?",
+                (storage_key,)
+            )
+            row = await cur.fetchone()
+            return row["state"] if row else None
+
+    async def fsm_set_data(self, storage_key: str, data_json: str) -> None:
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO fsm_states (storage_key, state, data, updated_at)
+                VALUES (?, NULL, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(storage_key) DO UPDATE SET
+                    data = excluded.data,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (storage_key, data_json)
+            )
+            await conn.commit()
+
+    async def fsm_get_data(self, storage_key: str) -> Optional[str]:
+        async with self._get_connection() as conn:
+            cur = await conn.execute(
+                "SELECT data FROM fsm_states WHERE storage_key = ?",
+                (storage_key,)
+            )
+            row = await cur.fetchone()
+            return row["data"] if row else None
 
     # ------------------ Coupons ------------------
 

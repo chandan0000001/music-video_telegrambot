@@ -6,7 +6,7 @@
 > **Runtime:** Local polling supported; optional AWS/systemd deployment instructions below. Hosting uptime depends on the running deployment.
 > **HD Demo Video:** [Watch Demo Video (1080p 60fps MP4)](https://github.com/chandan0000001/music-video_telegrambot/raw/main/assets/demo.mp4)
 
-An asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `1080p` MP4) from authorized YouTube sources with automated compression to fit Telegram limits.
+An asynchronous Telegram bot built with **Python 3.11+**, **aiogram 3**, **SQLite (WAL mode + persistent FSM storage)**, and **FFmpeg**. It allows users anywhere in the world to search music, extract audio in high-fidelity formats (`MP3`, `M4A`, `WAV` at `128k`, `192k`, `320k`), and download videos in genuine resolutions (`144p` up to `2160p` / `4K` MP4) from authorized YouTube sources, Instagram, and X (Twitter), with native MTProto uploads up to **2000 MB (2 GB)**.
 
 ---
 
@@ -108,6 +108,7 @@ The bot uses SQLite 3 with **Write-Ahead Logging (WAL)**, **SYNCHRONOUS=NORMAL**
 - **`coupon_redemptions`**: Tracks user coupon redemptions to prevent duplicate usage per user.
 - **`referrals`**: Tracks friend invitations via unique deep links (`ref_<user_id>`) with anti-fraud constraints.
 - **`referral_rewards`**: Records milestone VIP access grants (+7 days VIP for every 3 friends invited).
+- **`fsm_states`**: Persists active aiogram FSM flows (e.g., pending 12-digit UTR input, coupon redemption, admin broadcasts) cleanly across bot restarts via `SQLiteStorage`.
 
 ### 4. Subscription & Pricing Matrix
 
@@ -147,10 +148,17 @@ flowchart TD
    - **Administrators:** Absolute bypass of all queues and concurrent limits.
    - **Paid Plan Subscribers (`Go`, `Pro`, `Ultra`, `Max`):** Jump straight to the **front of the queue** ahead of free users (`VIP Fast-Track`), allowed up to **10 concurrent downloads**, and completely immune to the 6-second link cooldown.
    - **Free Users:** Standard FIFO queue, limited to **3 concurrent downloads**.
-2. **⚡ Global Concurrency Safety (8 Downloads / 8 Uploads):**
-   - The queue manager caps active operations to **8 downloads** and **8 uploads**, safeguarding network bandwidth and RAM.
-3. **🔄 Real-Time Dynamic Queue UI:**
-   - When slots are full, waiting users receive a dynamic Telegram status message that automatically updates every **1.5 seconds** showing their current `#1, #2, #3...` position and estimated wait time until a slot frees up.
+2. **⚡ Global Concurrency Safety & Queue Slots:**
+   - Configurable global download and upload caps (`MAX_GLOBAL_DOWNLOADS`, `MAX_GLOBAL_UPLOADS`, defaulting to `4` each for safe 4 GB RAM VPS operation) safeguard memory, CPU, and disk I/O.
+   - Download slots are released cleanly once FFmpeg processing finishes, while uploads are separately paced through upload slots.
+   - Multi-job `TaskRegistry` tracks concurrent active downloads per user cleanly without overwriting older jobs, and VIP daily quotas are automatically refunded (`refund_subscription_video_quota`) if a VIP download fails, cancels, or cannot be delivered.
+3. **🛡️ YouTube IP-Flag Resilience, PO Tokens & Zero-Proxy-Bandwidth Failover:**
+   - **Direct-First with Cookies & PO Token Engine:** All requests attempt direct server delivery first using authenticated `cookies.txt` (including `.google.com` + `.youtube.com` tokens) alongside a local `bgutil-ytdlp-pot-provider` HTTP POT server (`127.0.0.1:4416`) and Deno/Node JS challenge solver.
+   - **Automatic Proxy Failover on Google IP Flags:** If Google/YouTube challenges or blocks the server IP (`403 Forbidden`, `We're sorry... automated queries`, `unusual traffic`, `LOGIN_REQUIRED`, or bot-check prompts) and proxies are configured in `proxies.txt` or `YOUTUBE_PROXIES`, `YouTubeProxyManager` immediately notifies the user and rotates through the proxy pool (`proxies.txt` hot-reloads without restarting the bot, with credentials masked in logs).
+   - **Zero-Proxy-Bandwidth Download Architecture:** Proxies are used strictly for tiny YouTube metadata JSON lookups (~50 KB), while heavy media streams download directly from `googlevideo.com`, maximizing proxy longevity.
+   - **5-Minute Metadata Cache:** Eliminates redundant YouTube extraction hits across quality menus, payment checks, and post-download tagging.
+4. **🔄 Real-Time Dynamic Queue UI:**
+   - When slots are full, waiting users receive a dynamic HTML-escaped Telegram status message updated automatically showing their current `#1, #2, #3...` position and estimated wait time until a slot frees up.
 4. **🛡️ 6-Second Link Spam Guard:**
    - Prevents link flooding by requiring 6 seconds between link submissions.
    - Triggers friendly warnings: *"⚠️ Ladle, don't spam here! Otherwise you will be banned."*
@@ -407,10 +415,16 @@ ADMIN_IDS=2063913663
 TELEGRAM_API_ID=your_api_id
 TELEGRAM_API_HASH=your_api_hash
 
-# Media Processing Limits (Optional)
+# Media Processing & Concurrency Limits (Optional)
 MAX_UPLOAD_SIZE_MB=2000
-MAX_DURATION_SECONDS=3600
+MAX_DURATION_SECONDS=14400
 MAX_CONCURRENT_DOWNLOADS=3
+MAX_GLOBAL_DOWNLOADS=4
+MAX_GLOBAL_UPLOADS=4
+
+# Optional YouTube Proxy Pool (comma-separated, or put one proxy URL per line in proxies.txt)
+# Used automatically ONLY for YouTube metadata fallback when Google flags the server IP
+YOUTUBE_PROXIES=
 ```
 
 *(You can also configure `config.py` directly if preferred).*
@@ -487,10 +501,10 @@ Upon launching, the bot output will confirm:
   - Bitrates: `128 kbps` (fast/lightweight), `192 kbps` (standard fidelity), `320 kbps` (maximum studio quality)
   - Native delivery using `sendAudio` with title, artist, duration, and thumbnail preview.
 - **Video:**
-  - Formats: `MP4` with H.264 video and AAC audio.
-  - Resolutions: Only **genuinely available** stream heights (`144p`, `240p`, `360p`, `480p`, `720p`, `1080p`).
+  - Formats: `MP4` with H.264/HEVC/AV1 video and AAC audio.
+  - Resolutions: Only **genuinely available** stream heights (`144p`, `240p`, `360p`, `480p`, `720p`, `1080p`, `1440p`, `2160p` / `4K`).
   - Streamable playback: Remuxed with `+faststart` so users can watch while downloading on Telegram.
-  - **Intel VAAPI / QuickSync Acceleration:** Encodings run at ~10x speed using hardware GPU render nodes (`/dev/dri/renderD128`) with zero CPU stress.
+  - **Intel VAAPI / QuickSync & Thread-Bounded Fallback:** Uses hardware GPU acceleration (`/dev/dri/renderD128`) when present, with thread-capped `libx264` fallback to protect low-RAM VPS hosts.
   - **Smart Routing & 2 GB Uploads:** Videos and songs up to **2000 MB** deliver directly without compression degradation when MTProto is configured. Files under 48 MB route via high-speed HTTP Bot API.
 
 ### Admin-Reviewed UPI Payments & Subscription Tiers (Normal, Go, Pro, Ultra, Max)
@@ -567,16 +581,23 @@ Keep the production SQLite database and credentials separate from test data. Set
 
 YouTube availability depends on the source, installed extractor version and authentication requirements. Cookies and JavaScript runtime configuration do not guarantee that every download will succeed. Never commit cookies or credentials.
 
-### Server management after installing the system service
+### Server management after installing system services
 ```bash
+# Enable auto-start on boot for bot & POT provider
+sudo systemctl enable --now bgutil-pot.service
+sudo systemctl enable --now musicbot.service
+
 # Check 24/7 service status
-sudo systemctl status musicbot.service
+sudo systemctl status musicbot.service bgutil-pot.service
 
 # Stream live real-time logs
 journalctl -u musicbot.service -f
 
 # Restart bot after updates
 sudo systemctl restart musicbot.service
+
+# Sync fresh Chrome browser cookies into cookies.txt (if running Chrome on the server)
+.venv/bin/python scripts/sync_chrome_cookies.py chrome cookies.txt
 
 # Stop bot
 sudo systemctl stop musicbot.service
@@ -717,7 +738,7 @@ See the security review at the end for remaining work. No claim of a complete pe
 
 ## 🧪 Automated Testing
 
-The bot includes an automated test suite covering all 15 core scenarios, multi-aspect ratio video streaming, and security hardening:
+The bot includes a comprehensive automated test suite covering core workflows, queue & VIP quota refunds, FSM persistence, proxy failover, multi-aspect ratio video streaming, and security hardening:
 
 ```bash
 # Activate virtual environment
@@ -727,23 +748,9 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-All 125 automated test cases will execute:
+Latest verified suite result:
 ```text
-tests/test_all_buttons.py ...                                            [  2%]
-tests/test_coupons_and_referrals.py ..........                           [ 10%]
-tests/test_database.py ....                                              [ 13%]
-tests/test_handlers.py ........................                          [ 32%]
-tests/test_instagram.py .............                                    [ 43%]
-tests/test_progress.py ...............                                   [ 55%]
-tests/test_queue_and_spam.py .......                                     [ 60%]
-tests/test_rate_limiter.py .....                                         [ 64%]
-tests/test_security_fixes.py ..........                                  [ 72%]
-tests/test_services.py ...........                                       [ 81%]
-tests/test_time_utils.py .....                                           [ 85%]
-tests/test_twitter.py ........                                           [ 92%]
-tests/test_validators.py ..........                                      [100%]
-
-============================= 125 passed in 16.92s =============================
+============================= 193 passed in 21.29s =============================
 ```
 
 ---
@@ -761,10 +768,12 @@ tests/test_validators.py ..........                                      [100%]
 ### Q: Why does YouTube download in 2 parts (video + audio) on AWS and upload in 1 part?
 **A:** YouTube uses DASH adaptive streaming, serving high-definition video (silent) and audio (no video) as two separate streams. On your AWS server, `yt-dlp` downloads both parts, then instantly merges them with FFmpeg into one complete `.mp4` file (`merge_output_format: "mp4"`). Since the merged file (e.g. 115 MB) is under the 2000 MB (2 GB) MTProto limit, the bot uploads the complete video as a single file directly to the user!
 
-### Q: How do I provide `cookies.txt` when deploying to Cloud Providers (Railway, Render, VPS)?
-**A:** Because `cookies.txt` is in `.gitignore`, there are two convenient ways to supply it:
-- **Cloud / PaaS (Railway, Render, Heroku, Fly.io):** Convert your `cookies.txt` to Base64 (`base64 -w 0 cookies.txt` on Linux/Mac, or `[Convert]::ToBase64String([IO.File]::ReadAllBytes('cookies.txt'))` on Windows). Add an environment variable in your provider's dashboard: `YOUTUBE_COOKIES_BASE64=<base64_string>`. The bot automatically generates `cookies.txt` on container startup!
-- **VPS / Dedicated Servers (AWS, DigitalOcean, Hetzner):** After cloning the repo, simply upload `cookies.txt` using SCP (`scp cookies.txt user@vps_ip:/path/to/music_bot/`) or paste it directly using `nano cookies.txt`.
+### Q: How do I provide `cookies.txt` or fallback proxies when deploying to Cloud Providers (AWS, Railway, Render, VPS)?
+**A:** Because `cookies.txt` and `proxies.txt` are in `.gitignore`, you can supply them in several ways:
+- **Admin Upload in Telegram Chat:** As an admin, simply send `cookies.txt`, Chrome's `www.youtube.com_cookies.txt` export, or `proxies.txt` directly to the bot in Telegram to apply immediately without restarting.
+- **On-Server Chrome Sync (`scripts/sync_chrome_cookies.py`):** If Google Chrome is logged in on your Linux/EC2 host, run `.venv/bin/python scripts/sync_chrome_cookies.py chrome` (or schedule a systemd timer) to sync live `.google.com` + `.youtube.com` cookies cleanly into `cookies.txt`.
+- **Fallback Proxies (`proxies.txt` / `YOUTUBE_PROXIES`):** Add HTTP/SOCKS5 proxy URLs one per line in `proxies.txt` (or comma-separated in `.env`). The bot always tries direct server connection first and **automatically fails over to the proxy pool only if Google flags the server IP**, using zero proxy bandwidth for media streaming.
+- **Cloud / PaaS (Railway, Render, Heroku, Fly.io):** Convert your `cookies.txt` to Base64 (`base64 -w 0 cookies.txt`) and set `YOUTUBE_COOKIES_BASE64=<base64_string>`.
 
 ### Q: Does the bot clean up downloaded files?
 **A:** Yes. Each download job operates in an isolated folder under `temp/job_<UUID>/` and is completely deleted in a `finally` block immediately after delivery or if an error occurs.

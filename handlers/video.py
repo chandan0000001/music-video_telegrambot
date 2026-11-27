@@ -168,6 +168,7 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
     if not status_msg:
         return
 
+    quota_deducted = False
     # Check paywall for 1080p and higher resolutions (720p is 100% Free)
     if resolution in ("1080p", "1440p", "2160p"):
         is_admin = user_id in ADMIN_IDS
@@ -223,7 +224,14 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             await callback.answer()
             return
         elif has_active_sub and not is_admin:
-            await db.use_subscription_video_quota(user_id)
+            quota_deducted = await db.use_subscription_video_quota(user_id)
+
+    preserved_title = None
+    if status_msg.text and "Title:" in status_msg.text:
+        try:
+            preserved_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
+        except Exception:
+            preserved_title = None
 
     await callback.answer(f"Starting {resolution} video download...")
     chat_id = status_msg.chat.id if status_msg and status_msg.chat else user_id
@@ -238,7 +246,9 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
         resolution=resolution,
         user_id=user_id,
         bot=callback.bot,
-        anim_msg=anim_msg
+        anim_msg=anim_msg,
+        video_title=preserved_title,
+        quota_deducted=quota_deducted
     )
 
 
@@ -248,7 +258,9 @@ async def execute_video_download_pipeline(
     resolution: str,
     user_id: int,
     bot=None,
-    anim_msg: Optional[Message] = None
+    anim_msg: Optional[Message] = None,
+    video_title: Optional[str] = None,
+    quota_deducted: bool = False
 ) -> None:
     """Download, remux, and deliver video file with progress tracking."""
     if bot is None:
@@ -257,10 +269,21 @@ async def execute_video_download_pipeline(
     chat_id = status_msg.chat.id if status_msg and status_msg.chat else user_id
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
+    quota_refunded = False
+
+    async def _refund_quota_if_needed() -> None:
+        nonlocal quota_refunded
+        if quota_deducted and not quota_refunded:
+            quota_refunded = True
+            try:
+                await db.refund_subscription_video_quota(user_id)
+            except Exception as qe:
+                logger.warning(f"Failed to refund video quota for user {user_id}: {qe}")
+
     # Record initial pending download in database
     download_id = await db.record_download(
         telegram_id=user_id,
-        media_title=f"YouTube_{video_id}",
+        media_title=video_title or f"YouTube_{video_id}",
         source=canonical_url,
         media_type="video",
         selected_quality=resolution,
@@ -276,13 +299,15 @@ async def execute_video_download_pipeline(
     acquired_slot = False
     job_dir = None
     reporter = None
+    retry_cb = f"vdl:{video_id}:{resolution}"
+    back_cb = f"opt_video:{video_id}"
 
     if anim_msg is None:
         anim_msg = await send_download_animation(bot, chat_id)
 
     try:
-        media_title = f"YouTube Video ({video_id})"
-        if status_msg.text and "Title:" in status_msg.text:
+        media_title = video_title or f"YouTube Video ({video_id})"
+        if not video_title and status_msg.text and "Title:" in status_msg.text:
             try:
                 media_title = status_msg.text.split("Title:")[1].split("\n")[0].strip()
             except Exception:
@@ -291,6 +316,7 @@ async def execute_video_download_pipeline(
         # Check per-user limit
         can_start, limit_msg = await queue_manager.can_user_start_job(user_id)
         if not can_start:
+            await _refund_quota_if_needed()
             await vanish_download_animation(anim_msg)
             await status_msg.edit_text(limit_msg, parse_mode="Markdown")
             return
@@ -299,29 +325,28 @@ async def execute_video_download_pipeline(
         from utils.disk_cleaner import check_disk_space_available
         has_disk, _ = check_disk_space_available(min_free_mb=1000)
         if not has_disk:
+            await _refund_quota_if_needed()
             await vanish_download_animation(anim_msg)
             await status_msg.edit_text(
                 "⚠️ **Server Storage Busy**\n\n"
                 "The server's media buffer is currently handling multiple large downloads. "
                 "Please retry in 1–2 minutes once active downloads complete!",
-                reply_markup=get_retry_keyboard(f"vdl:{video_id}:{resolution}", f"opt_video:{video_id}"),
+                reply_markup=get_retry_keyboard(retry_cb, back_cb),
                 parse_mode="Markdown"
             )
             return
 
-        # Acquire slot via dynamic 8/8 Queue
+        # Acquire slot via dynamic Queue
         acquired = await queue_manager.acquire_download_slot(
             user_id=user_id,
             media_title=media_title,
             status_msg=status_msg
         )
         if not acquired:
+            await _refund_quota_if_needed()
             await vanish_download_animation(anim_msg)
             return
         acquired_slot = True
-
-        retry_cb = f"vdl:{video_id}:{resolution}"
-        back_cb = f"opt_video:{video_id}"
 
         tracker = DownloadProgressTracker(
             media_title=media_title,
@@ -334,16 +359,25 @@ async def execute_video_download_pipeline(
         reporter = AsyncProgressReporter(status_msg, tracker, reply_markup=cancel_kb)
         reporter.start()
 
+        async def _video_status_cb(text: str) -> None:
+            tracker.defer_updates(2.5)
+            await telegram_service.update_status(status_msg, text)
+
         success, result, err, job_dir = await media_service.process_video(
             video_url=canonical_url,
             resolution=resolution,
             tracker=tracker,
-            status_callback=lambda text: telegram_service.update_status(status_msg, text),
-            video_title=media_title
+            status_callback=_video_status_cb,
+            video_title=media_title if media_title != f"YouTube Video ({video_id})" else None
         )
         await reporter.stop()
 
+        if acquired_slot:
+            queue_manager.release_download_slot(user_id)
+            acquired_slot = False
+
         if not success or not result:
+            await _refund_quota_if_needed()
             await vanish_download_animation(anim_msg)
             await db.update_download_status(download_id, "failed")
             if err and ("access restricted" in err.lower() or "access notice" in err.lower()):
@@ -361,23 +395,28 @@ async def execute_video_download_pipeline(
                 )
             return
 
-        sent = await telegram_service.send_video_file(
-            bot=bot,
-            chat_id=chat_id,
-            file_path=result["file_path"],
-            title=result["title"],
-            duration=result["duration"],
-            width=result["width"],
-            height=result["height"],
-            thumbnail_path=result["thumbnail_path"],
-            status_message=status_msg
-        )
+        await queue_manager.acquire_upload_slot(user_id)
+        try:
+            sent = await telegram_service.send_video_file(
+                bot=bot,
+                chat_id=chat_id,
+                file_path=result["file_path"],
+                title=result["title"],
+                duration=result["duration"],
+                width=result["width"],
+                height=result["height"],
+                thumbnail_path=result["thumbnail_path"],
+                status_message=status_msg
+            )
+        finally:
+            queue_manager.release_upload_slot(user_id)
 
         if sent:
             await db.update_download_status(download_id, "completed")
             await vanish_status_message(status_msg, delay=0.3)
             await vanish_download_animation(anim_msg, delay=0.3)
         else:
+            await _refund_quota_if_needed()
             await vanish_download_animation(anim_msg)
             await db.update_download_status(download_id, "failed")
             await telegram_service.update_status_with_keyboard(
@@ -389,6 +428,7 @@ async def execute_video_download_pipeline(
 
     except asyncio.CancelledError:
         logger.info(f"Video job aborted by user {user_id} ({canonical_url})")
+        await _refund_quota_if_needed()
         if reporter:
             await reporter.stop()
         await vanish_download_animation(anim_msg)
@@ -403,6 +443,7 @@ async def execute_video_download_pipeline(
         except Exception:
             pass
     except Exception as e:
+        await _refund_quota_if_needed()
         if reporter:
             await reporter.stop()
         await vanish_download_animation(anim_msg)
@@ -418,7 +459,7 @@ async def execute_video_download_pipeline(
         if reporter:
             await reporter.stop()
         await vanish_download_animation(anim_msg)
-        task_registry.unregister(user_id)
+        task_registry.unregister(user_id, task=current_task)
         if acquired_slot:
             queue_manager.release_download_slot(user_id)
         if job_dir:

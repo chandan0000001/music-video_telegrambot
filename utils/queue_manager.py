@@ -8,11 +8,14 @@ Enforces:
 4. Live Dynamic Queue: Real-time countdown updates (#1, #2, #3...) every 1.5 seconds.
 """
 import time
+import html
 import asyncio
 import logging
 from typing import Dict, List, Optional
 from aiogram.types import Message
+from aiogram.exceptions import TelegramRetryAfter
 
+from config import MAX_GLOBAL_DOWNLOADS, MAX_GLOBAL_UPLOADS
 from utils.vip_manager import (
     vip_manager,
     PRIORITY_FREE,
@@ -22,8 +25,6 @@ from utils.vip_manager import (
 
 logger = logging.getLogger(__name__)
 
-MAX_GLOBAL_DOWNLOADS = 8
-MAX_GLOBAL_UPLOADS = 8
 MAX_PER_USER_JOBS_FREE = 3
 
 
@@ -213,11 +214,11 @@ class DownloadQueueManager:
                 if not next_item.is_cancelled:
                     self._active_downloads += 1
                     is_vip = next_item.priority >= PRIORITY_PAID
-                    msg_prefix = "👑 *VIP Fast-Track:* " if is_vip else "🚀 "
+                    msg_prefix = "👑 <b>VIP Fast-Track:</b> " if is_vip else "🚀 "
                     try:
                         await next_item.status_msg.edit_text(
-                            f"{msg_prefix}*Slot opened! Starting download now...*",
-                            parse_mode="Markdown"
+                            f"{msg_prefix}<b>Slot opened! Starting download now...</b>",
+                            parse_mode="HTML"
                         )
                     except Exception:
                         pass
@@ -265,9 +266,9 @@ class DownloadQueueManager:
         return cancelled
 
     async def _queue_loop(self) -> None:
-        """Background loop updating all waiting users' queue positions every 1.5 seconds."""
+        """Background loop updating waiting users' queue positions cleanly."""
         while True:
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
             async with self._lock:
                 self._sort_queue()
                 items_snapshot = [q for q in self._waiting_queue if not q.is_cancelled]
@@ -280,29 +281,32 @@ class DownloadQueueManager:
                 pos = idx + 1
                 await self._render_queue_message(item, pos, active_count)
 
-    async def _render_queue_message(self, item: QueueItem, position: int, active_count: int = 8) -> None:
-        title = item.media_title[:38] + "..." if len(item.media_title) > 38 else item.media_title
+    async def _render_queue_message(self, item: QueueItem, position: int, active_count: int = MAX_GLOBAL_DOWNLOADS) -> None:
+        raw_title = item.media_title[:38] + "..." if len(item.media_title) > 38 else item.media_title
+        title = html.escape(raw_title)
         ahead = position - 1
         wait_est = max(2, ahead * 8)
 
         is_vip = item.priority >= PRIORITY_PAID
-        badge = "👑 *VIP Fast-Track Active*" if is_vip else "👥 *Standard Queue*"
+        badge = "👑 <b>VIP Fast-Track Active</b>" if is_vip else "👥 <b>Standard Queue</b>"
         pos_suffix = " (VIP Priority)" if is_vip else ""
 
         text = (
-            f"⏳ *Server Busy: You are in Queue*\n"
-            f"🎬 *Media:* `{title}`\n\n"
+            f"⏳ <b>Server Busy: You are in Queue</b>\n"
+            f"🎬 <b>Media:</b> <code>{title}</code>\n\n"
             f"{badge}\n"
-            f"📊 *Your Queue Position:* `#{position}{pos_suffix}`\n"
-            f"⏳ *Downloads ahead of you:* `{ahead}`\n"
-            f"⚡ *Server Load:* `{active_count}/8 active downloads`\n"
-            f"⏱ *Estimated wait:* `~{wait_est}s`\n\n"
-            f"🔄 *Queue updates automatically every 1-2s...*"
+            f"📊 <b>Your Queue Position:</b> <code>#{position}{pos_suffix}</code>\n"
+            f"⏳ <b>Downloads ahead of you:</b> <code>{ahead}</code>\n"
+            f"⚡ <b>Server Load:</b> <code>{active_count}/{self.max_downloads} active downloads</code>\n"
+            f"⏱ <b>Estimated wait:</b> <code>~{wait_est}s</code>\n\n"
+            f"🔄 <i>Queue updates automatically every 2s...</i>"
         )
         if text != item.last_rendered_text:
             try:
-                await item.status_msg.edit_text(text, parse_mode="Markdown")
+                await item.status_msg.edit_text(text, parse_mode="HTML")
                 item.last_rendered_text = text
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(min(float(e.retry_after) + 0.2, 5.0))
             except Exception:
                 pass
 

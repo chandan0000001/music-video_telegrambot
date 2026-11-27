@@ -5,10 +5,11 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies: FFmpeg and SQLite
+# Install system dependencies: FFmpeg, SQLite, curl/unzip (for JS runtime)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     sqlite3 \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

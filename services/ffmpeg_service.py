@@ -200,6 +200,7 @@ class FFmpegService:
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "24",
+                    "-threads", "2",
                     "-c:a", "aac",
                     "-b:a", "128k",
                     "-movflags", "+faststart",

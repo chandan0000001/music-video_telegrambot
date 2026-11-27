@@ -1,6 +1,7 @@
 aiogram>=3.17.0
 aiosqlite>=0.20.0
 yt-dlp[default]>=2025.01.01
+bgutil-ytdlp-pot-provider>=2.0.0
 aiofiles>=24.1.0
 hydrogram>=0.2.0
 tgcrypto>=1.2.5

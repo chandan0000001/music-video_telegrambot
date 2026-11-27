@@ -124,6 +124,14 @@ CREATE TABLE IF NOT EXISTS referral_rewards (
     FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
 );
 
+-- 11. Persistent Bot FSM Storage (Survives restarts for UTR & admin flows)
+CREATE TABLE IF NOT EXISTS fsm_states (
+    storage_key TEXT PRIMARY KEY,
+    state TEXT,
+    data TEXT DEFAULT '{}',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Initialize singleton statistics row if not exists
 INSERT OR IGNORE INTO bot_statistics (id, total_users, total_searches, total_successful_downloads, total_failed_downloads)
 VALUES (1, 0, 0, 0, 0);
