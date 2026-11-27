@@ -240,6 +240,13 @@ MAX_CONCURRENT_DOWNLOADS: int = max(1, _safe_int(os.getenv("MAX_CONCURRENT_DOWNL
 MAX_GLOBAL_DOWNLOADS: int = max(1, _safe_int(os.getenv("MAX_GLOBAL_DOWNLOADS"), 4))
 MAX_GLOBAL_UPLOADS: int = max(1, _safe_int(os.getenv("MAX_GLOBAL_UPLOADS"), 4))
 
+# Carousel Download Bounds & Stats Cache
+MAX_CAROUSEL_ITEMS: int = max(1, _safe_int(os.getenv("MAX_CAROUSEL_ITEMS"), 20))
+MAX_CAROUSEL_TOTAL_MB: int = max(10, _safe_int(os.getenv("MAX_CAROUSEL_TOTAL_MB"), 500))
+MAX_CAROUSEL_TOTAL_BYTES: int = MAX_CAROUSEL_TOTAL_MB * 1024 * 1024
+CAROUSEL_CONCURRENCY: int = max(1, _safe_int(os.getenv("CAROUSEL_CONCURRENCY"), 4))
+STATS_CACHE_TTL_SECONDS: float = float(max(0, _safe_int(os.getenv("STATS_CACHE_TTL_SECONDS"), 30)))
+
 # Rate Limiting (Per-user)
 RATE_LIMIT_REQUESTS: int = _safe_int(os.getenv("RATE_LIMIT_REQUESTS"), 5)
 RATE_LIMIT_WINDOW: int = _safe_int(os.getenv("RATE_LIMIT_WINDOW"), 10)

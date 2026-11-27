@@ -53,9 +53,29 @@ def check_disk_space_available(min_free_mb: int = 1000, target_dir: Optional[Pat
     return stats["free_mb"] >= min_free_mb, stats["free_mb"]
 
 
+def _prune_directory_entries(directory: Path, now: float, max_age: float) -> int:
+    pruned = 0
+    for item in directory.iterdir():
+        try:
+            mtime = item.stat().st_mtime
+            if (now - mtime) > max_age:
+                if item.is_dir():
+                    try:
+                        shutil.rmtree(item, ignore_errors=True)
+                    except OSError as e:
+                        logger.warning(f"Could not remove stale temp directory {item}: {e}")
+                else:
+                    item.unlink(missing_ok=True)
+                pruned += 1
+        except Exception as e:
+            logger.debug(f"Could not process temp item {item}: {e}")
+    return pruned
+
+
 def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STALE_FILE_MAX_AGE_SECONDS) -> int:
     """
-    Synchronously scan and remove files/folders older than max_age from temp_dir.
+    Synchronously scan and remove files/folders older than max_age from temp_dir
+    and nested service buckets (instagram/, twitter/).
     Returns number of pruned items.
     """
     target = temp_dir or TEMP_DIR
@@ -68,11 +88,14 @@ def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STA
 
     for item in target.iterdir():
         try:
+            if item.is_dir() and item.name in ("instagram", "twitter"):
+                pruned_count += _prune_directory_entries(item, now, max_age)
+                continue
             mtime = item.stat().st_mtime
             if (now - mtime) > max_age:
                 if item.is_dir():
                     try:
-                        shutil.rmtree(item)
+                        shutil.rmtree(item, ignore_errors=True)
                     except OSError as e:
                         logger.warning(f"Could not remove stale temp directory {item}: {e}")
                 else:
@@ -90,6 +113,56 @@ def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STA
 async def purge_stale_temp_files_async(temp_dir: Optional[Path] = None, max_age: float = STALE_FILE_MAX_AGE_SECONDS) -> int:
     """PERF-3: Non-blocking async version of purge_stale_temp_files running in thread pool."""
     return await asyncio.to_thread(purge_stale_temp_files, temp_dir, max_age)
+
+
+async def get_disk_usage_stats_async(target_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Non-blocking async wrapper for get_disk_usage_stats."""
+    return await asyncio.to_thread(get_disk_usage_stats, target_dir)
+
+
+async def check_disk_space_available_async(
+    min_free_mb: int = 1000, target_dir: Optional[Path] = None
+) -> tuple[bool, float]:
+    """Non-blocking async wrapper for check_disk_space_available."""
+    return await asyncio.to_thread(check_disk_space_available, min_free_mb, target_dir)
+
+
+async def cleanup_dir_async(job_dir: Optional[Path]) -> None:
+    """Non-blocking temporary directory removal executed off the event loop."""
+    if not job_dir:
+        return
+
+    def _rm() -> None:
+        try:
+            if job_dir.exists() and job_dir.is_dir():
+                shutil.rmtree(job_dir, ignore_errors=True)
+        except Exception as e:
+            logger.debug(f"Failed async cleanup for {job_dir}: {e}")
+
+    await asyncio.to_thread(_rm)
+
+
+def get_temp_dir_size_bytes(target_dir: Optional[Path] = None) -> int:
+    """Calculate total temporary directory byte usage synchronously."""
+    target = target_dir or TEMP_DIR
+    if not target.exists():
+        return 0
+    total = 0
+    try:
+        for p in target.rglob("*"):
+            if p.is_file():
+                try:
+                    total += p.stat().st_size
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    return total
+
+
+async def get_temp_dir_size_bytes_async(target_dir: Optional[Path] = None) -> int:
+    """Non-blocking temp directory byte size calculation."""
+    return await asyncio.to_thread(get_temp_dir_size_bytes, target_dir)
 
 
 def get_user_disk_usage(user_id: int, temp_dir: Optional[Path] = None) -> int:

@@ -6,10 +6,12 @@ import os
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
 from config import FFMPEG_TIMEOUT
+from utils.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ class FFmpegService:
         # LOW-1: Truncate and sanitize debug log to prevent leaking full filesystem structure
         target_name = Path(cmd[-1]).name if cmd else "unknown"
         logger.debug(f"Executing FFmpeg/FFprobe: {cmd[0] if cmd else ''} [{len(cmd)-1} args] -> {target_name}")
+        metrics.incr("ffmpeg_jobs")
+        start_ts = time.perf_counter()
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -66,6 +70,8 @@ class FFmpegService:
         except Exception as e:
             logger.exception(f"Unexpected error executing command: {e}")
             return False, str(e)
+        finally:
+            metrics.record_timing("ffmpeg", (time.perf_counter() - start_ts) * 1000.0)
 
     async def probe_media(self, input_file: Path) -> Optional[Dict[str, Any]]:
         """Extract media metadata (duration, resolution, audio streams) using ffprobe."""

@@ -323,9 +323,9 @@ async def execute_video_download_pipeline(
             await status_msg.edit_text(limit_msg, parse_mode="Markdown")
             return
 
-        # Check server storage health before accepting large jobs
-        from utils.disk_cleaner import check_disk_space_available
-        has_disk, _ = check_disk_space_available(min_free_mb=1000)
+        # Check server storage health asynchronously before accepting large jobs
+        from utils.disk_cleaner import check_disk_space_available_async, cleanup_dir_async
+        has_disk, _ = await check_disk_space_available_async(min_free_mb=1000)
         if not has_disk:
             await _refund_quota_if_needed()
             await vanish_download_animation(anim_msg)
@@ -465,4 +465,5 @@ async def execute_video_download_pipeline(
         if acquired_slot:
             queue_manager.release_download_slot(user_id)
         if job_dir:
-            media_service.cleanup_job_dir(job_dir)
+            from utils.disk_cleaner import cleanup_dir_async
+            await cleanup_dir_async(job_dir)

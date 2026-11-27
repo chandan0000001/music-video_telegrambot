@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 import shutil
+import time
 import logging
 import asyncio
 from pathlib import Path
@@ -14,7 +15,17 @@ from typing import Dict, Any, List, Tuple, Optional
 import aiohttp
 import yt_dlp
 
-from config import TEMP_DIR, get_instagram_cookie_file, INSTAGRAM_SESSION_ID, YTDLP_PROXY
+from config import (
+    TEMP_DIR,
+    get_instagram_cookie_file,
+    INSTAGRAM_SESSION_ID,
+    YTDLP_PROXY,
+    MAX_CAROUSEL_ITEMS,
+    MAX_CAROUSEL_TOTAL_BYTES,
+    CAROUSEL_CONCURRENCY,
+)
+from utils.http_client import http_client, stream_url_to_file, download_carousel_batch
+from utils.metrics import metrics
 from utils.validators import (
     extract_instagram_info,
     is_valid_instagram_url,
@@ -30,7 +41,34 @@ class InstagramService:
     def __init__(self, temp_base: Optional[Path] = None):
         self.temp_base = temp_base or (TEMP_DIR / "instagram")
         self.temp_base.mkdir(parents=True, exist_ok=True)
-        # No artificial carousel item limit: download all existing media items
+        self.max_items_limit = MAX_CAROUSEL_ITEMS
+        self.max_total_bytes = MAX_CAROUSEL_TOTAL_BYTES
+        self.concurrency = CAROUSEL_CONCURRENCY
+        self._media_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+        self._cache_ttl_seconds = 180.0
+        self._cache_max_entries = 64
+
+    def _get_cached_media(self, key: str) -> Optional[List[Dict[str, Any]]]:
+        """Return non-expired cached media list or purge stale entries."""
+        entry = self._media_cache.get(key)
+        if not entry:
+            return None
+        cached_at, items = entry
+        if (time.monotonic() - cached_at) > self._cache_ttl_seconds:
+            self._media_cache.pop(key, None)
+            return None
+        return [dict(item) for item in items]
+
+    def _set_cached_media(self, key: str, items: List[Dict[str, Any]]) -> None:
+        """Store media list in bounded TTL cache."""
+        now = time.monotonic()
+        expired = [k for k, (ts, _) in self._media_cache.items() if (now - ts) > self._cache_ttl_seconds]
+        for k in expired:
+            self._media_cache.pop(k, None)
+        while len(self._media_cache) >= self._cache_max_entries:
+            oldest_key = next(iter(self._media_cache))
+            self._media_cache.pop(oldest_key, None)
+        self._media_cache[key] = (now, [dict(item) for item in items])
 
     def _get_job_dir(self) -> Path:
         """Create a dedicated temporary directory for a download job."""
@@ -104,8 +142,10 @@ class InstagramService:
         if INSTAGRAM_SESSION_ID:
             headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
         url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
+        session = await http_client.get_session()
+        metrics.incr("http_requests")
+        t0 = time.perf_counter()
+        try:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -122,6 +162,8 @@ class InstagramService:
                             "following_count": u.get("edge_follow", {}).get("count", 0),
                             "posts_count": u.get("edge_owner_to_timeline_media", {}).get("count", 0),
                         }
+        finally:
+            metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
         return None
 
     async def _fetch_profile_via_web(self, username: str) -> Optional[Dict[str, Any]]:
@@ -131,8 +173,10 @@ class InstagramService:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         url = f"https://www.instagram.com/{username}/"
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
+        session = await http_client.get_session()
+        metrics.incr("http_requests")
+        t0 = time.perf_counter()
+        try:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
                     html_text = await resp.text()
@@ -171,6 +215,8 @@ class InstagramService:
                             "following_count": following,
                             "posts_count": posts
                         }
+        finally:
+            metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
         return None
 
     async def _fetch_profile_via_ytdlp(self, username: str) -> Optional[Dict[str, Any]]:
@@ -232,6 +278,15 @@ class InstagramService:
             )
 
         canonical_url = f"https://www.instagram.com/{category}/{identifier}/"
+        cache_key = f"{category}:{identifier}"
+        if category != "story":
+            cached = self._get_cached_media(cache_key)
+            if cached is not None:
+                metrics.incr("cache_hits")
+                return True, cached, None
+        metrics.incr("cache_misses")
+        metrics.incr("metadata_extractions")
+        meta_start = time.perf_counter()
         last_error = None
 
         # Smart Adaptive Routing for Ultra-Fast Extraction (< 1-2 seconds):
@@ -251,31 +306,36 @@ class InstagramService:
                 ("cobalt", lambda: self._extract_via_cobalt(canonical_url))
             ]
 
-        for name, extractor in ordered_extractors:
-            try:
-                res = await extractor()
-                if isinstance(res, tuple):
-                    items, err = res
-                    if err:
-                        last_error = err
-                else:
-                    items = res
-                if items:
-                    return True, items, None
-            except Exception as e:
-                logger.debug(f"Instagram extraction strategy ({name}) error for {canonical_url}: {e}")
+        try:
+            for name, extractor in ordered_extractors:
+                try:
+                    res = await extractor()
+                    if isinstance(res, tuple):
+                        items, err = res
+                        if err:
+                            last_error = err
+                    else:
+                        items = res
+                    if items:
+                        if category != "story":
+                            self._set_cached_media(cache_key, items)
+                        return True, items, None
+                except Exception as e:
+                    logger.debug(f"Instagram extraction strategy ({name}) error for {canonical_url}: {e}")
 
-        if category in ("story", "highlight"):
-            return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or requires login session."
+            if category in ("story", "highlight"):
+                return False, [], "⚠️ Could not access this Instagram Story or Highlight. It may be expired (stories last 24h) or requires login session."
 
-        if last_error:
-            classified = classify_media_restriction(last_error)
-            if classified:
-                return False, [], classified[1]
-            if "login" in last_error.lower() or "sign in" in last_error.lower() or "checkpoint" in last_error.lower() or "rate-limit for accessing posts anonymously" in last_error.lower():
-                return False, [], "⚠️ Instagram login session required for this post. Add your sessionid or cookies.txt in .env to bypass."
+            if last_error:
+                classified = classify_media_restriction(last_error)
+                if classified:
+                    return False, [], classified[1]
+                if "login" in last_error.lower() or "sign in" in last_error.lower() or "checkpoint" in last_error.lower() or "rate-limit for accessing posts anonymously" in last_error.lower():
+                    return False, [], "⚠️ Instagram login session required for this post. Add your sessionid or cookies.txt in .env to bypass."
 
-        return False, [], "⚠️ Could not retrieve media from this Instagram post. The post may be restricted or requires Instagram cookies."
+            return False, [], "⚠️ Could not retrieve media from this Instagram post. The post may be restricted or requires Instagram cookies."
+        finally:
+            metrics.record_timing("metadata", (time.perf_counter() - meta_start) * 1000.0)
 
     async def _extract_via_embed_and_html(self, shortcode: str, category: str = "p") -> Optional[List[Dict[str, Any]]]:
         """
@@ -296,30 +356,33 @@ class InstagramService:
             f"https://www.instagram.com/{category}/{shortcode}/",
         ]
 
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
-            for fetch_url in urls_to_try:
-                try:
-                    async with session.get(fetch_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
-                        if resp.status != 200:
-                            continue
-                        content_type = resp.headers.get("Content-Type", "")
+        session = await http_client.get_session()
+        for fetch_url in urls_to_try:
+            metrics.incr("http_requests")
+            t0 = time.perf_counter()
+            try:
+                async with session.get(fetch_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
+                    if resp.status != 200:
+                        continue
+                    content_type = resp.headers.get("Content-Type", "")
 
-                        # 1. Check if JSON response (__a=1)
-                        if "json" in content_type:
-                            data = await resp.json()
-                            items = self._parse_instagram_json_payload(data)
-                            if items:
-                                return items
-
-                        # 2. Check HTML response
-                        html_text = await resp.text()
-                        items = self._parse_instagram_html_text(html_text)
+                    # 1. Check if JSON response (__a=1)
+                    if "json" in content_type:
+                        data = await resp.json()
+                        items = self._parse_instagram_json_payload(data)
                         if items:
                             return items
-                except Exception as e:
-                    logger.debug(f"Error fetching {fetch_url}: {e}")
-                    continue
+
+                    # 2. Check HTML response
+                    html_text = await resp.text()
+                    items = self._parse_instagram_html_text(html_text)
+                    if items:
+                        return items
+            except Exception as e:
+                logger.debug(f"Error fetching {fetch_url}: {e}")
+                continue
+            finally:
+                metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
 
         return None
 
@@ -454,8 +517,10 @@ class InstagramService:
             "Accept": "text/html,application/xhtml+xml",
         }
         try:
-            connector = aiohttp.TCPConnector()
-            async with aiohttp.ClientSession(connector=connector) as session:
+            session = await http_client.get_session()
+            metrics.incr("http_requests")
+            t0 = time.perf_counter()
+            try:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status == 200:
                         html_text = await resp.text()
@@ -468,6 +533,8 @@ class InstagramService:
                             items.append({"type": "photo", "url": im.replace("&amp;", "&")})
                         if items:
                             return items
+            finally:
+                metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
         except Exception:
             pass
         return None
@@ -490,40 +557,43 @@ class InstagramService:
             "https://api.cobalt.tools"
         ]
 
+        session = await http_client.get_session()
         for base_api in instances:
+            metrics.incr("http_requests")
+            t0 = time.perf_counter()
             try:
-                connector = aiohttp.TCPConnector()
-                async with aiohttp.ClientSession(connector=connector) as session:
-                    async with session.post(
-                        f"{base_api}/",
-                        json=payload,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=3.5)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            status = data.get("status")
-                            if status in ("stream", "redirect") and data.get("url"):
-                                return [{
-                                    "type": "video",
-                                    "url": data["url"],
-                                    "thumbnail_url": None
-                                }]
-                            elif status == "picker" and data.get("picker"):
-                                items = []
-                                for item in data["picker"]:
-                                    item_type = item.get("type", "video")
-                                    item_url = item.get("url")
-                                    if item_url:
-                                        items.append({
-                                            "type": "photo" if item_type == "photo" else "video",
-                                            "url": item_url,
-                                            "thumbnail_url": item.get("thumb")
-                                        })
-                                if items:
-                                    return items
+                async with session.post(
+                    f"{base_api}/",
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=3.5)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        status = data.get("status")
+                        if status in ("stream", "redirect") and data.get("url"):
+                            return [{
+                                "type": "video",
+                                "url": data["url"],
+                                "thumbnail_url": None
+                            }]
+                        elif status == "picker" and data.get("picker"):
+                            items = []
+                            for item in data["picker"]:
+                                item_type = item.get("type", "video")
+                                item_url = item.get("url")
+                                if item_url:
+                                    items.append({
+                                        "type": "photo" if item_type == "photo" else "video",
+                                        "url": item_url,
+                                        "thumbnail_url": item.get("thumb")
+                                    })
+                            if items:
+                                return items
             except Exception:
                 continue
+            finally:
+                metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
 
         return None
 
@@ -687,48 +757,44 @@ class InstagramService:
             return [], f"⚠️ Post extraction failed: {str(e)[:80]}"
 
     async def download_file(self, url: str, dest_path: Path, tracker: Optional[Any] = None) -> bool:
-        """Download remote media file to local destination path with live progress tracking."""
+        """Download remote media file via shared HTTP session and async file I/O."""
+        metrics.incr("downloads")
+        dl_start = time.perf_counter()
         try:
-            connector = aiohttp.TCPConnector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"Download failed with status {resp.status} for {url}")
-                        return False
-                    total_len = int(resp.headers.get("Content-Length", 0))
-                    if tracker:
-                        tracker.status = "downloading"
-                        if total_len > 0 and tracker.total_bytes == 0:
-                            tracker.total_bytes = total_len
+            start_time = time.monotonic()
+            if tracker:
+                tracker.status = "downloading"
 
-                    start_time = asyncio.get_event_loop().time()
-                    downloaded = 0
+            def _on_chunk(_chunk_len: int, written: int, total_len: int) -> None:
+                if not tracker:
+                    return
+                if total_len > 0 and tracker.total_bytes == 0:
+                    tracker.total_bytes = total_len
+                tracker.downloaded_bytes = written
+                if tracker.total_bytes > 0:
+                    tracker.percentage = min(100.0, (written / tracker.total_bytes) * 100.0)
+                elapsed = time.monotonic() - start_time
+                if elapsed > 0:
+                    tracker.speed = written / elapsed
+                    if tracker.speed > 0 and tracker.total_bytes > written:
+                        tracker.eta = int((tracker.total_bytes - written) / tracker.speed)
 
-                    with open(dest_path, "wb") as f:
-                        while True:
-                            chunk = await resp.content.read(256 * 1024)
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                            downloaded += len(chunk)
-
-                            if tracker:
-                                tracker.downloaded_bytes = downloaded
-                                if tracker.total_bytes > 0:
-                                    tracker.percentage = min(100.0, (downloaded / tracker.total_bytes) * 100.0)
-                                elapsed = asyncio.get_event_loop().time() - start_time
-                                if elapsed > 0:
-                                    tracker.speed = downloaded / elapsed
-                                    if tracker.speed > 0 and tracker.total_bytes > downloaded:
-                                        tracker.eta = int((tracker.total_bytes - downloaded) / tracker.speed)
-
-                    if tracker:
-                        tracker.percentage = 100.0
-                        tracker.status = "processing"
-                    return True
+            ok, _ = await stream_url_to_file(
+                url,
+                dest_path,
+                timeout_seconds=60.0,
+                chunk_size=256 * 1024,
+                on_chunk=_on_chunk if tracker else None,
+            )
+            if ok and tracker:
+                tracker.percentage = 100.0
+                tracker.status = "processing"
+            return ok
         except Exception as e:
             logger.error(f"Error downloading {url} to {dest_path}: {e}")
             return False
+        finally:
+            metrics.record_timing("download", (time.perf_counter() - dl_start) * 1000.0)
 
     async def download_all_media(
         self,
@@ -737,9 +803,12 @@ class InstagramService:
         tracker: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Download all media items into job_dir concurrently with live progress tracking.
-        Returns list of downloaded media item dicts with 'file_path' added.
+        Download media items into job_dir with bounded concurrency, shared HTTP
+        connection pooling, non-blocking async file writes, and aggregate size caps.
         """
+        if not media_items:
+            return []
+
         if tracker and len(media_items) == 1:
             item = media_items[0]
             item_type = item["type"]
@@ -757,89 +826,34 @@ class InstagramService:
                 return [{**item, "file_path": dest_file, "index": 0}]
             return []
 
-        # Multi-item carousel download
-        total_items = len(media_items)
-        lock = asyncio.Lock()
-        total_downloaded = 0
-        start_time = asyncio.get_event_loop().time()
+        dl_start = time.perf_counter()
+        downloaded = await download_carousel_batch(
+            media_items,
+            job_dir,
+            max_items=self.max_items_limit,
+            max_total_bytes=self.max_total_bytes,
+            concurrency=self.concurrency,
+            tracker=tracker,
+            timeout_seconds=60.0,
+        )
+        metrics.incr("downloads", max(1, len(downloaded)))
+        metrics.record_timing("download", (time.perf_counter() - dl_start) * 1000.0)
 
-        # Probe content lengths quickly to estimate total size accurately
-        async def _probe_size(it: Dict[str, Any]) -> int:
-            try:
-                connector = aiohttp.TCPConnector()
-                async with aiohttp.ClientSession(connector=connector) as s:
-                    async with s.head(it["url"], timeout=aiohttp.ClientTimeout(total=5)) as r:
-                        return int(r.headers.get("Content-Length", 0))
-            except Exception:
-                return 0
-
-        sizes = await asyncio.gather(*[_probe_size(it) for it in media_items])
-        sum_sizes = sum(s for s in sizes if s > 0)
-
-        if tracker:
-            tracker.status = "downloading"
-            tracker.total_bytes = sum_sizes if sum_sizes > 0 else (total_items * 1024 * 1024)
-
-        async def _download_one(index: int, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            nonlocal total_downloaded
-            item_type = item["type"]
-            ext = "jpg" if item_type == "photo" else "mp4"
-            dest_file = job_dir / f"media_{index + 1}.{ext}"
-
-            try:
-                connector = aiohttp.TCPConnector()
-                async with aiohttp.ClientSession(connector=connector) as session:
-                    async with session.get(item["url"], timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                        if resp.status != 200:
-                            return None
-                        with open(dest_file, "wb") as f:
-                            while True:
-                                chunk = await resp.content.read(64 * 1024)
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                                if tracker:
-                                    async with lock:
-                                        total_downloaded += len(chunk)
-                                        tracker.downloaded_bytes = total_downloaded
-                                        if tracker.total_bytes > 0:
-                                            tracker.percentage = min(100.0, (total_downloaded / tracker.total_bytes) * 100.0)
-                                        elapsed = asyncio.get_event_loop().time() - start_time
-                                        if elapsed > 0:
-                                            tracker.speed = total_downloaded / elapsed
-                                            if tracker.speed > 0 and tracker.total_bytes > total_downloaded:
-                                                tracker.eta = int((tracker.total_bytes - total_downloaded) / tracker.speed)
-
-                if dest_file.exists() and dest_file.stat().st_size > 0:
-                    return {
-                        **item,
-                        "file_path": dest_file,
-                        "index": index
-                    }
-            except Exception as e:
-                logger.error(f"Error downloading carousel item {index}: {e}")
-            return None
-
-        tasks = [_download_one(i, item) for i, item in enumerate(media_items)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        downloaded: List[Dict[str, Any]] = []
-        for res in results:
-            if isinstance(res, dict) and res.get("file_path"):
-                downloaded.append(res)
-
-        downloaded.sort(key=lambda x: x.get("index", 0))
-
-        # Cap any videos exceeding 1080p to 1080p using FFmpeg; leave photos untouched at original quality
+        # Cap any videos exceeding 1080p to 1080p using FFmpeg with bounded concurrency
         from services.ffmpeg_service import ffmpeg_service
-        for it in downloaded:
+        ff_sem = asyncio.Semaphore(2)
+
+        async def _cap_video(it: Dict[str, Any]) -> None:
             if it.get("type") == "video" and it.get("file_path"):
                 v_file = it["file_path"]
                 capped_file = job_dir / f"capped_{v_file.name}"
-                did_cap = await ffmpeg_service.cap_video_to_1080p(v_file, capped_file)
+                async with ff_sem:
+                    did_cap = await ffmpeg_service.cap_video_to_1080p(v_file, capped_file)
                 if did_cap and capped_file.exists() and capped_file.stat().st_size > 0:
                     v_file.unlink(missing_ok=True)
                     capped_file.rename(v_file)
+
+        await asyncio.gather(*[_cap_video(it) for it in downloaded])
 
         return downloaded
 
@@ -902,8 +916,10 @@ class InstagramService:
             headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
 
         url = f"https://www.instagram.com/api/v1/clips/music/{audio_id}/"
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
+        session = await http_client.get_session()
+        metrics.incr("http_requests")
+        t0 = time.perf_counter()
+        try:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -934,6 +950,8 @@ class InstagramService:
                             "thumbnail_url": thumbnail,
                             "duration": duration
                         }
+        finally:
+            metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
         return None
 
     async def _fetch_audio_via_web(self, audio_id: str) -> Optional[Dict[str, Any]]:
@@ -947,8 +965,10 @@ class InstagramService:
             headers["Cookie"] = f"sessionid={INSTAGRAM_SESSION_ID.strip()};"
 
         url = f"https://www.instagram.com/reels/audio/{audio_id}/"
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
+        session = await http_client.get_session()
+        metrics.incr("http_requests")
+        t0 = time.perf_counter()
+        try:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
                     html_text = await resp.text()
@@ -991,6 +1011,8 @@ class InstagramService:
                             "thumbnail_url": thumb_url,
                             "duration": duration
                         }
+        finally:
+            metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
         return None
 
     async def _fetch_audio_via_cobalt(self, audio_id: str) -> Optional[Dict[str, Any]]:
@@ -1008,30 +1030,33 @@ class InstagramService:
         instances = [
             "https://api.cobalt.tools"
         ]
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
-            for base_api in instances:
-                try:
-                    async with session.post(
-                        f"{base_api}/",
-                        json=payload,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=3.5)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            status = data.get("status")
-                            if status in ("stream", "redirect") and data.get("url"):
-                                return {
-                                    "id": audio_id,
-                                    "title": f"Instagram Audio {audio_id}",
-                                    "artist": "Instagram Artist",
-                                    "audio_url": data["url"],
-                                    "thumbnail_url": None,
-                                    "duration": None
-                                }
-                except Exception:
-                    continue
+        session = await http_client.get_session()
+        for base_api in instances:
+            metrics.incr("http_requests")
+            t0 = time.perf_counter()
+            try:
+                async with session.post(
+                    f"{base_api}/",
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=3.5)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        status = data.get("status")
+                        if status in ("stream", "redirect") and data.get("url"):
+                            return {
+                                "id": audio_id,
+                                "title": f"Instagram Audio {audio_id}",
+                                "artist": "Instagram Artist",
+                                "audio_url": data["url"],
+                                "thumbnail_url": None,
+                                "duration": None
+                            }
+            except Exception:
+                continue
+            finally:
+                metrics.record_timing("http", (time.perf_counter() - t0) * 1000.0)
         return None
 
     async def download_instagram_audio(

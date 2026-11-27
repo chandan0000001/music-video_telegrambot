@@ -40,6 +40,7 @@ from utils.validators import (
 )
 from utils.rate_limiter import link_spam_guard
 from utils.queue_manager import queue_manager
+from utils.disk_cleaner import cleanup_dir_async
 from utils.progress import (
     DownloadProgressTracker,
     UploadProgressTracker,
@@ -219,7 +220,7 @@ async def _execute_instagram_profile(message: Message, username: str, check_spam
             except Exception as e:
                 logger.error(f"Failed to send profile photo for @{clean_user}: {e}")
             finally:
-                instagram_service.cleanup_job_dir(job_dir)
+                await cleanup_dir_async(job_dir)
 
     # Fallback if photo couldn't be sent
     await status_msg.edit_text(
@@ -295,7 +296,7 @@ async def _execute_instagram_audio(
             reply_markup=get_back_to_main_keyboard(),
             parse_mode="Markdown"
         )
-        instagram_service.cleanup_job_dir(job_dir)
+        await cleanup_dir_async(job_dir)
         return
 
     await queue_manager.acquire_upload_slot(user_id)
@@ -324,7 +325,7 @@ async def _execute_instagram_audio(
         selected_format="mp3",
         status="completed" if sent else "failed"
     )
-    instagram_service.cleanup_job_dir(job_dir)
+    await cleanup_dir_async(job_dir)
 
 
 async def _execute_instagram_download(message: Message, url: str, check_spam: bool = True) -> None:
@@ -439,7 +440,7 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
             reply_markup=get_back_to_main_keyboard(),
             parse_mode="Markdown"
         )
-        instagram_service.cleanup_job_dir(job_dir)
+        await cleanup_dir_async(job_dir)
         return
 
     # 5. Acquire Global Upload Slot from 8/8 Queue
@@ -621,7 +622,7 @@ async def _execute_instagram_download(message: Message, url: str, check_spam: bo
         await vanish_download_animation(anim_msg, delay=0.1)
         await up_reporter.vanish(delay=0.1)
         queue_manager.release_upload_slot(user_id)
-        instagram_service.cleanup_job_dir(job_dir)
+        await cleanup_dir_async(job_dir)
 
 
 @router.message(UserStates.waiting_for_instagram)

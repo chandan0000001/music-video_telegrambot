@@ -11,11 +11,12 @@ import time
 import html
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from aiogram.types import Message
 from aiogram.exceptions import TelegramRetryAfter
 
 from config import MAX_GLOBAL_DOWNLOADS, MAX_GLOBAL_UPLOADS
+from utils.metrics import metrics
 from utils.vip_manager import (
     vip_manager,
     PRIORITY_FREE,
@@ -38,6 +39,7 @@ class QueueItem:
         self.priority = priority
         self.ready_event = asyncio.Event()
         self.is_cancelled = False
+        self.slot_granted = False
         self.enqueued_at = time.time()
         self.last_rendered_text = ""
         self.last_update_time = 0.0
@@ -64,7 +66,15 @@ class DownloadQueueManager:
         self._waiting_queue: List[QueueItem] = []
 
         self._lock = asyncio.Lock()
+        self._upload_condition = asyncio.Condition(self._lock)
+        self._waiters_event = asyncio.Event()
+        self._bg_tasks: Set[asyncio.Task] = set()
         self._queue_worker_task: Optional[asyncio.Task] = None
+
+    def _track_bg_task(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     def start_worker(self) -> None:
         """Ensure the background queue position updater loop is running."""
@@ -153,6 +163,7 @@ class DownloadQueueManager:
             self._waiting_queue.append(item)
             # Higher priority items jump ahead of lower priority items
             self._sort_queue()
+            self._waiters_event.set()
 
             position = self._get_item_position(item)
             active_now = self._active_downloads
@@ -163,9 +174,16 @@ class DownloadQueueManager:
         # Wait until our turn arrives or cancellation happens
         await item.ready_event.wait()
 
+        metrics.record_timing("queue_wait", (time.time() - item.enqueued_at) * 1000.0)
+
         if item.is_cancelled:
             async with self._lock:
-                self._active_downloads = max(0, self._active_downloads - 1)
+                if item in self._waiting_queue:
+                    self._waiting_queue.remove(item)
+                if item.slot_granted:
+                    self._active_downloads = max(0, self._active_downloads - 1)
+                    item.slot_granted = False
+                    await self._promote_next_locked()
             return False
 
         async with self._lock:
@@ -190,7 +208,29 @@ class DownloadQueueManager:
 
     def release_download_slot(self, user_id: int) -> None:
         """Release a download slot, decrement user's active job counter, and advance queue."""
-        asyncio.create_task(self._release_download_async(user_id))
+        self._track_bg_task(self._release_download_async(user_id))
+
+    async def _promote_next_locked(self) -> None:
+        """Promote the highest-priority waiting item (caller must hold self._lock)."""
+        self._sort_queue()
+        while self._waiting_queue:
+            next_item = self._waiting_queue.pop(0)
+            if not next_item.is_cancelled:
+                self._active_downloads += 1
+                next_item.slot_granted = True
+                is_vip = next_item.priority >= PRIORITY_PAID
+                msg_prefix = "👑 <b>VIP Fast-Track:</b> " if is_vip else "🚀 "
+                try:
+                    await next_item.status_msg.edit_text(
+                        f"{msg_prefix}<b>Slot opened! Starting download now...</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+                next_item.ready_event.set()
+                break
+        if not self._waiting_queue:
+            self._waiters_event.clear()
 
     async def _release_download_async(self, user_id: int) -> None:
         async with self._lock:
@@ -204,54 +244,33 @@ class DownloadQueueManager:
                 if not self._user_job_timestamps[user_id]:
                     del self._user_job_timestamps[user_id]
 
-            # 2. Decrement global active downloads
+            # 2. Decrement global active downloads and promote next eligible waiter
             self._active_downloads = max(0, self._active_downloads - 1)
-            self._sort_queue()
-
-            # Find next waiting item that is not cancelled
-            while self._waiting_queue:
-                next_item = self._waiting_queue.pop(0)
-                if not next_item.is_cancelled:
-                    self._active_downloads += 1
-                    is_vip = next_item.priority >= PRIORITY_PAID
-                    msg_prefix = "👑 <b>VIP Fast-Track:</b> " if is_vip else "🚀 "
-                    try:
-                        await next_item.status_msg.edit_text(
-                            f"{msg_prefix}<b>Slot opened! Starting download now...</b>",
-                            parse_mode="HTML"
-                        )
-                    except Exception:
-                        pass
-                    next_item.ready_event.set()
-                    break
+            await self._promote_next_locked()
 
     async def acquire_upload_slot(self, user_id: int) -> None:
-        """Wait for 1 of the 8 global upload slots."""
+        """Wait for 1 of the global upload slots using asyncio.Condition (no busy-polling)."""
         from config import ADMIN_IDS
         if user_id in ADMIN_IDS:
             return
 
         priority = await vip_manager.get_user_priority(user_id)
-        # Admin immediate upload bypass
-        if priority >= PRIORITY_ADMIN:
-            async with self._lock:
+        async with self._lock:
+            if priority >= PRIORITY_ADMIN:
                 self._active_uploads += 1
                 return
-
-        while True:
-            async with self._lock:
-                if self._active_uploads < self.max_uploads:
-                    self._active_uploads += 1
-                    return
-            await asyncio.sleep(0.4)
+            while self._active_uploads >= self.max_uploads:
+                await self._upload_condition.wait()
+            self._active_uploads += 1
 
     def release_upload_slot(self, user_id: int = 0) -> None:
-        """Release an upload slot."""
-        asyncio.create_task(self._release_upload_async())
+        """Release an upload slot and wake next waiting upload."""
+        self._track_bg_task(self._release_upload_async())
 
     async def _release_upload_async(self) -> None:
         async with self._lock:
             self._active_uploads = max(0, self._active_uploads - 1)
+            self._upload_condition.notify()
 
     def cancel_queue_item(self, user_id: int) -> bool:
         """Remove a user's item from the queue if they click cancel."""
@@ -263,25 +282,35 @@ class DownloadQueueManager:
                 if item in self._waiting_queue:
                     self._waiting_queue.remove(item)
                 cancelled = True
+        if not self._waiting_queue:
+            self._waiters_event.clear()
         return cancelled
 
     async def _queue_loop(self) -> None:
-        """Background loop updating waiting users' queue positions cleanly."""
+        """Event-driven background loop updating waiting users' queue positions smoothly."""
         while True:
+            await self._waiters_event.wait()
             await asyncio.sleep(2.0)
             async with self._lock:
                 self._sort_queue()
                 items_snapshot = [q for q in self._waiting_queue if not q.is_cancelled]
                 active_count = self._active_downloads
-
-            if not items_snapshot:
-                continue
+                if not items_snapshot:
+                    self._waiters_event.clear()
+                    continue
 
             for idx, item in enumerate(items_snapshot):
+                if item.is_cancelled:
+                    continue
                 pos = idx + 1
                 await self._render_queue_message(item, pos, active_count)
 
     async def _render_queue_message(self, item: QueueItem, position: int, active_count: int = MAX_GLOBAL_DOWNLOADS) -> None:
+        if item.is_cancelled:
+            return
+        now = time.monotonic()
+        if item.last_update_time > 0 and (now - item.last_update_time) < 2.0:
+            return
         raw_title = item.media_title[:38] + "..." if len(item.media_title) > 38 else item.media_title
         title = html.escape(raw_title)
         ahead = position - 1
@@ -301,10 +330,11 @@ class DownloadQueueManager:
             f"⏱ <b>Estimated wait:</b> <code>~{wait_est}s</code>\n\n"
             f"🔄 <i>Queue updates automatically every 2s...</i>"
         )
-        if text != item.last_rendered_text:
+        if text != item.last_rendered_text and not item.is_cancelled:
             try:
                 await item.status_msg.edit_text(text, parse_mode="HTML")
                 item.last_rendered_text = text
+                item.last_update_time = now
             except TelegramRetryAfter as e:
                 await asyncio.sleep(min(float(e.retry_after) + 0.2, 5.0))
             except Exception:

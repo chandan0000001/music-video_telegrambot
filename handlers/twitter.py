@@ -24,6 +24,7 @@ from keyboards.main_menu import get_twitter_menu_keyboard, get_back_to_main_keyb
 from utils.validators import is_valid_twitter_url, is_cancel_intent
 from utils.rate_limiter import link_spam_guard
 from utils.queue_manager import queue_manager
+from utils.disk_cleaner import cleanup_dir_async
 from utils.progress import (
     DownloadProgressTracker,
     UploadProgressTracker,
@@ -192,7 +193,7 @@ async def _execute_twitter_download(message: Message, url: str, check_spam: bool
     if not downloaded:
         await vanish_download_animation(anim_msg)
         await status_msg.edit_text("❌ *Failed to download media files. Please try again.*", parse_mode="Markdown")
-        twitter_service.cleanup_job_dir(job_dir)
+        await cleanup_dir_async(job_dir)
         return
 
     # 5. Acquire Global Upload Slot from 8/8 Queue
@@ -382,7 +383,7 @@ async def _execute_twitter_download(message: Message, url: str, check_spam: bool
         await vanish_download_animation(anim_msg, delay=0.1)
         await up_reporter.vanish(delay=0.1)
         queue_manager.release_upload_slot(user_id)
-        twitter_service.cleanup_job_dir(job_dir)
+        await cleanup_dir_async(job_dir)
 
 
 @router.message(UserStates.waiting_for_twitter)

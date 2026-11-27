@@ -147,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_users_joined_at ON users(joined_at DESC);
 -- Search History (Composite index for user history & top query aggregations)
 CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(telegram_id, searched_at DESC);
 CREATE INDEX IF NOT EXISTS idx_search_history_query ON search_history(search_query);
+CREATE INDEX IF NOT EXISTS idx_search_history_lower_query ON search_history(LOWER(search_query));
 
 -- Downloads (Composite index for user history & status reporting)
 CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(telegram_id, created_at DESC);
@@ -156,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status, created_at 
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(telegram_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_status_id ON orders(status, id DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_utr_status ON orders(utr_number, status);
+CREATE INDEX IF NOT EXISTS idx_orders_expires_pending ON orders(status, expires_at);
 
 -- Subscriptions (Optimizes active subscriber lookups)
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_expiry ON user_subscriptions(expiry_date);

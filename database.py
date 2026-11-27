@@ -4,30 +4,111 @@ Uses aiosqlite for non-blocking asynchronous database operations.
 """
 import io
 import csv
+import time
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Optional, AsyncIterator, Tuple
 from contextlib import asynccontextmanager
 import aiosqlite
 
-from config import DATABASE_PATH, BASE_DIR
+from config import DATABASE_PATH, BASE_DIR, STATS_CACHE_TTL_SECONDS
+from utils.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
 
 class Database:
-    def __init__(self, db_path: Optional[Path | str] = None):
+    def __init__(self, db_path: Optional[Path | str] = None, pool_size: int = 4):
         self.db_path = Path(db_path or DATABASE_PATH)
+        self._pool_size = max(1, pool_size)
+        self._pool: Optional[asyncio.Queue[aiosqlite.Connection]] = None
+        self._pool_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._pool_conns: list[aiosqlite.Connection] = []
+        self._stats_cache: Optional[Tuple[float, dict[str, Any]]] = None
+
+    def invalidate_stats_cache(self) -> None:
+        """Invalidate cached dashboard statistics on write mutations."""
+        self._stats_cache = None
+
+    async def _open_configured_connection(self) -> aiosqlite.Connection:
+        conn = await aiosqlite.connect(self.db_path)
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA foreign_keys = ON;")
+        await conn.execute("PRAGMA synchronous = NORMAL;")
+        await conn.execute("PRAGMA temp_store = MEMORY;")
+        await conn.execute("PRAGMA busy_timeout = 5000;")
+        return conn
+
+    async def connect(self) -> None:
+        """Initialize bounded SQLite connection pool for high-concurrency runtime."""
+        loop = asyncio.get_running_loop()
+        if self._pool is not None and self._pool_loop is loop:
+            return
+        await self.close()
+        self._pool = asyncio.Queue(maxsize=self._pool_size)
+        self._pool_loop = loop
+        self._pool_conns = []
+        for _ in range(self._pool_size):
+            conn = await self._open_configured_connection()
+            self._pool_conns.append(conn)
+            await self._pool.put(conn)
+
+    async def close(self) -> None:
+        """Close all pooled SQLite connections cleanly on shutdown."""
+        conns = list(self._pool_conns)
+        self._pool_conns.clear()
+        self._pool = None
+        self._pool_loop = None
+        for conn in conns:
+            try:
+                await conn.close()
+            except Exception as e:
+                logger.debug(f"Error closing pooled SQLite connection: {e}")
 
     @asynccontextmanager
     async def _get_connection(self) -> AsyncIterator[aiosqlite.Connection]:
+        start = time.perf_counter()
+        metrics.incr("db_operations")
+        loop = asyncio.get_running_loop()
+        pooled_conn: Optional[aiosqlite.Connection] = None
+
+        if self._pool is not None and self._pool_loop is loop:
+            try:
+                pooled_conn = self._pool.get_nowait()
+            except asyncio.QueueEmpty:
+                pooled_conn = None
+
+        if pooled_conn is not None:
+            try:
+                yield pooled_conn
+            except Exception:
+                try:
+                    await pooled_conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                if pooled_conn.in_transaction:
+                    try:
+                        await pooled_conn.rollback()
+                    except Exception:
+                        pass
+                if self._pool is not None and self._pool_loop is loop:
+                    self._pool.put_nowait(pooled_conn)
+                metrics.record_timing("db", (time.perf_counter() - start) * 1000.0)
+            return
+
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             await conn.execute("PRAGMA foreign_keys = ON;")
             await conn.execute("PRAGMA synchronous = NORMAL;")
             await conn.execute("PRAGMA temp_store = MEMORY;")
             await conn.execute("PRAGMA busy_timeout = 5000;")
-            yield conn
+            try:
+                yield conn
+            finally:
+                metrics.record_timing("db", (time.perf_counter() - start) * 1000.0)
 
     async def init_db(self, schema_path: Optional[Path | str] = None) -> None:
         """Initialize and optimize database tables, indexes, and triggers."""
@@ -85,6 +166,7 @@ class Database:
             )
             row = await cursor.fetchone()
             await conn.commit()
+            self.invalidate_stats_cache()
             if row:
                 return dict(row)
             return {
@@ -140,6 +222,7 @@ class Database:
                 "UPDATE bot_statistics SET total_searches = total_searches + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1"
             )
             await conn.commit()
+            self.invalidate_stats_cache()
             return cursor.lastrowid or 0
 
     async def record_download(
@@ -182,6 +265,7 @@ class Database:
                     "UPDATE bot_statistics SET total_failed_downloads = total_failed_downloads + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1"
                 )
             await conn.commit()
+            self.invalidate_stats_cache()
 
     async def get_user_search_history(self, telegram_id: int, limit: int = 10) -> list[dict[str, Any]]:
         """Retrieve recent searches for a specific user."""
@@ -230,7 +314,7 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-    async def get_recent_searches(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_recent_searches(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         """Retrieve recent searches across all users for admin review."""
         async with self._get_connection() as conn:
             cursor = await conn.execute(
@@ -238,15 +322,15 @@ class Database:
                 SELECT s.id, s.telegram_id, u.username, s.search_query, s.source, s.searched_at
                 FROM search_history s
                 LEFT JOIN users u ON s.telegram_id = u.telegram_id
-                ORDER BY s.searched_at DESC
-                LIMIT ?
+                ORDER BY s.searched_at DESC, s.id DESC
+                LIMIT ? OFFSET ?
                 """,
-                (limit,)
+                (limit, max(0, offset))
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-    async def get_recent_downloads(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_recent_downloads(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         """Retrieve recent downloads across all users for admin review."""
         async with self._get_connection() as conn:
             cursor = await conn.execute(
@@ -255,16 +339,16 @@ class Database:
                        d.selected_quality, d.selected_format, d.status, d.created_at
                 FROM downloads d
                 LEFT JOIN users u ON d.telegram_id = u.telegram_id
-                ORDER BY d.created_at DESC
-                LIMIT ?
+                ORDER BY d.created_at DESC, d.id DESC
+                LIMIT ? OFFSET ?
                 """,
-                (limit,)
+                (limit, max(0, offset))
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
     async def get_top_searches(self, limit: int = 5) -> list[dict[str, Any]]:
-        """Retrieve most searched queries."""
+        """Retrieve most searched queries (uses LOWER(search_query) expression index)."""
         async with self._get_connection() as conn:
             cursor = await conn.execute(
                 """
@@ -284,10 +368,18 @@ class Database:
         async with self._get_connection() as conn:
             cur = await conn.execute("DELETE FROM search_history")
             await conn.commit()
+            self.invalidate_stats_cache()
             return cur.rowcount
 
-    async def get_statistics(self) -> dict[str, Any]:
-        """PERF-2: Aggregate all dashboard metrics in a single combined SQL query."""
+    async def get_statistics(self, use_cache: bool = True) -> dict[str, Any]:
+        """Aggregate dashboard metrics with bounded short-TTL caching and single-connection reuse."""
+        if use_cache and STATS_CACHE_TTL_SECONDS > 0 and self._stats_cache is not None:
+            cached_ts, cached_val = self._stats_cache
+            if (time.monotonic() - cached_ts) < STATS_CACHE_TTL_SECONDS:
+                metrics.incr("cache_hits")
+                return {**cached_val}
+
+        metrics.incr("cache_misses")
         async with self._get_connection() as conn:
             cur = await conn.execute(
                 """
@@ -307,16 +399,24 @@ class Database:
             successful_downloads = row["successful_downloads"] if row else 0
             failed_downloads = row["failed_downloads"] if row else 0
 
-            # Most searched songs
-            top_searches = await self.get_top_searches(limit=5)
+            # Run on the same connection to avoid nested pool checkout
+            cur_top = await conn.execute(
+                """
+                SELECT search_query, COUNT(*) as count
+                FROM search_history
+                GROUP BY LOWER(search_query)
+                ORDER BY count DESC
+                LIMIT 5
+                """
+            )
+            top_searches = [dict(r) for r in await cur_top.fetchall()]
 
-            # Recently joined users
             cur = await conn.execute(
                 "SELECT telegram_id, username, first_name, joined_at FROM users ORDER BY joined_at DESC LIMIT 5"
             )
             recent_users = [dict(r) for r in await cur.fetchall()]
 
-            return {
+            result = {
                 "total_users": total_users,
                 "new_users_today": new_users_today,
                 "total_searches": total_searches,
@@ -325,27 +425,44 @@ class Database:
                 "top_searches": top_searches,
                 "recent_users": recent_users
             }
+            if STATS_CACHE_TTL_SECONDS > 0:
+                self._stats_cache = (time.monotonic(), result)
+            return {**result}
 
-    async def export_table_to_csv(self, table_name: str) -> str:
-        """MED-1: Export specified table data as CSV with strictly validated allowlist."""
+    async def export_table_to_csv(
+        self,
+        table_name: str,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> str:
+        """MED-1: Stream specified table data as CSV using bounded fetchmany batches."""
         allowed_tables = frozenset({"users", "search_history", "downloads", "user_subscriptions", "orders"})
         if table_name not in allowed_tables:
             raise ValueError(f"Invalid table name: {table_name!r}")
 
         async with self._get_connection() as conn:
-            cursor = await conn.execute(f"SELECT * FROM {table_name}")
-            rows = await cursor.fetchall()
-            if not rows:
+            if limit is not None:
+                cursor = await conn.execute(
+                    f"SELECT * FROM {table_name} LIMIT ? OFFSET ?",
+                    (max(1, limit), max(0, offset))
+                )
+            else:
+                cursor = await conn.execute(f"SELECT * FROM {table_name}")
+
+            first_batch = await cursor.fetchmany(500)
+            if not first_batch:
                 return ""
 
             output = io.StringIO()
             writer = csv.writer(output)
-            # Column headers
             headers = [col[0] for col in cursor.description]
             writer.writerow(headers)
-            # Data rows
-            for row in rows:
-                writer.writerow(list(row))
+
+            batch = first_batch
+            while batch:
+                for row in batch:
+                    writer.writerow(list(row))
+                batch = await cursor.fetchmany(500)
 
             return output.getvalue()
 
@@ -992,12 +1109,12 @@ class Database:
             await conn.commit()
             return True, f"Coupon '{clean_code}' has been terminated successfully."
 
-    async def list_coupons(self, limit: int = 20) -> list[dict[str, Any]]:
+    async def list_coupons(self, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         """List recent coupons with usage stats and active status."""
         async with self._get_connection() as conn:
             cur = await conn.execute(
-                "SELECT * FROM coupons ORDER BY id DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM coupons ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, max(0, offset))
             )
             rows = await cur.fetchall()
             return [dict(r) for r in rows]

@@ -89,12 +89,19 @@ async def render_admin_dashboard_text() -> str:
         if stats["recent_users"] else "  <i>None yet</i>"
     )
 
-    from utils.disk_cleaner import get_disk_usage_stats
+    from utils.disk_cleaner import get_disk_usage_stats_async, get_temp_dir_size_bytes_async
+    from utils.metrics import metrics
     from config import get_cookie_file
 
-    disk = get_disk_usage_stats()
-    cookie_f = get_cookie_file()
-    yt_cookie_status = f"✅ Active ({cookie_f.stat().st_size / 1024:.1f} KB)" if (cookie_f and cookie_f.exists()) else "⚪ None"
+    disk = await get_disk_usage_stats_async()
+    temp_mb = (await get_temp_dir_size_bytes_async()) / (1024 * 1024)
+    snap = metrics.snapshot()
+    counters = snap["counters"]
+    cookie_f = await asyncio.to_thread(get_cookie_file)
+    yt_cookie_status = (
+        f"✅ Active ({(await asyncio.to_thread(lambda: cookie_f.stat().st_size)) / 1024:.1f} KB)"
+        if (cookie_f and cookie_f.exists()) else "⚪ None"
+    )
 
     return (
         "🛡️ <b>ADMIN DASHBOARD</b>\n"
@@ -104,9 +111,10 @@ async def render_admin_dashboard_text() -> str:
         f"🔍 <b>Total Searches Performed:</b> <code>{stats['total_searches']}</code>\n"
         f"✅ <b>Successful Downloads:</b> <code>{stats['successful_downloads']}</code>\n"
         f"❌ <b>Failed Downloads:</b> <code>{stats['failed_downloads']}</code>\n\n"
-        "🖥️ <b>Server Storage & Health:</b>\n"
+        "🖥️ <b>Server Storage &amp; Health:</b>\n"
         f"  • <b>Available Free Space:</b> <code>{disk['free_gb']:.1f} GB ({disk['free_percent']:.0f}% Free) 🟢</code>\n"
-        f"  • <b>Used Disk:</b> <code>{disk['used_gb']:.1f} GB / {disk['total_gb']:.1f} GB (System & Apps)</code>\n"
+        f"  • <b>Used Disk:</b> <code>{disk['used_gb']:.1f} GB / {disk['total_gb']:.1f} GB</code> · <b>Temp:</b> <code>{temp_mb:.1f} MB</code>\n"
+        f"  • <b>Ops:</b> <code>DL:{counters.get('downloads', 0)} Meta:{counters.get('metadata_extractions', 0)} HTTP:{counters.get('http_requests', 0)} DB:{counters.get('db_operations', 0)}</code>\n"
         f"  • <b>YouTube Cookies:</b> <code>{yt_cookie_status}</code>\n\n"
         f"🔥 <b>Top Searched Songs:</b>\n{top_searches_str}\n\n"
         f"👤 <b>Recently Joined Users:</b>\n{recent_users_str}\n\n"
@@ -1115,7 +1123,7 @@ async def handle_admin_config_files(message: Message) -> None:
         file_io = await bot.download(doc.file_id)
         if file_io:
             content = file_io.read()
-            _write_cookie_file_secure(COOKIE_FILE, content)
+            await asyncio.to_thread(_write_cookie_file_secure, COOKIE_FILE, content)
             invalidate_cookie_cache()
             await message.answer(
                 f"✅ <b>YouTube cookies.txt updated successfully!</b>\n\n"
@@ -1135,7 +1143,7 @@ async def handle_admin_config_files(message: Message) -> None:
         if file_io:
             content = file_io.read()
             p_file = BASE_DIR / "proxies.txt"
-            _write_cookie_file_secure(p_file, content)
+            await asyncio.to_thread(_write_cookie_file_secure, p_file, content)
             lines = [l.strip() for l in content.decode("utf-8", errors="ignore").splitlines() if l.strip() and not l.strip().startswith("#")]
             youtube_proxy_manager.set_proxies(lines)
             await message.answer(

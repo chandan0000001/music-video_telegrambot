@@ -11,6 +11,7 @@ from database import db
 from utils.fsm_storage import SQLiteStorage
 from utils.logger import setup_logger
 from utils.rate_limiter import ThrottlingMiddleware
+from utils.http_client import http_client
 from handlers import setup_routers
 from services.ffmpeg_service import ffmpeg_service
 from services.mtproto_service import mtproto_service
@@ -40,9 +41,10 @@ async def on_startup(bot: Bot) -> None:
     """Startup initialization: verify environment, DB, and FFmpeg."""
     logger.info("Initializing Telegram Music & Video Downloader Bot...")
 
-    # 1. Initialize SQLite Database Schema
+    # 1. Initialize SQLite Database Schema & Connection Pool
     try:
         await db.init_db()
+        await db.connect()
         logger.info("Database schema initialized and verified.")
     except Exception as e:
         logger.critical(f"Failed to initialize database: {e}")
@@ -64,10 +66,10 @@ async def on_startup(bot: Bot) -> None:
         logger.warning("⚠️ YouTube Cookies: No valid cookies.txt found! Put cookies.txt in ~/music_bot/ or ~/")
 
     # 4. Storage Cleaner, Session Expiry Cleaner & Queue Manager Startup
-    from utils.disk_cleaner import purge_stale_temp_files, periodic_disk_cleaner_task
+    from utils.disk_cleaner import purge_stale_temp_files_async, periodic_disk_cleaner_task
     from utils.queue_manager import queue_manager
     from utils.selection_session import selection_session_manager
-    purge_stale_temp_files()
+    await purge_stale_temp_files_async()
     asyncio.create_task(periodic_disk_cleaner_task())
     asyncio.create_task(daily_quota_reset_task())
     asyncio.create_task(selection_session_manager.periodic_cleaner_task())
@@ -106,12 +108,18 @@ async def on_startup(bot: Bot) -> None:
 
 
 async def on_shutdown(bot: Bot) -> None:
-    """Graceful shutdown: close bot session and cleanup."""
+    """Graceful shutdown: close MTProto, HTTP client pool, DB pool, and Bot session."""
     logger.info("Shutting down bot and closing network sessions...")
     try:
         await mtproto_service.stop()
     finally:
-        await bot.session.close()
+        try:
+            await http_client.close_all()
+        finally:
+            try:
+                await db.close()
+            finally:
+                await bot.session.close()
     logger.info("Bot stopped cleanly.")
 
 

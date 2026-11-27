@@ -3,6 +3,7 @@ Twitter / X Media Downloader Service
 Extracts original quality photos, videos, and GIFs from public X/Twitter posts.
 """
 import os
+import time
 import uuid
 import shutil
 import logging
@@ -13,7 +14,13 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 import aiohttp
 import yt_dlp
 
-from config import TEMP_DIR
+from config import (
+    TEMP_DIR,
+    MAX_CAROUSEL_TOTAL_BYTES,
+    CAROUSEL_CONCURRENCY,
+)
+from utils.http_client import http_client, stream_url_to_file, download_carousel_batch
+from utils.metrics import metrics
 from utils.validators import (
     extract_twitter_info,
     is_valid_twitter_url,
@@ -30,6 +37,33 @@ class TwitterService:
         self.temp_base = temp_base or (TEMP_DIR / "twitter")
         self.temp_base.mkdir(parents=True, exist_ok=True)
         self.max_items_limit = 15
+        self.max_total_bytes = MAX_CAROUSEL_TOTAL_BYTES
+        self.concurrency = CAROUSEL_CONCURRENCY
+        self._tweet_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+        self._cache_ttl_seconds = 180.0
+        self._cache_max_entries = 64
+
+    def _get_cached_tweet(self, key: str) -> Optional[List[Dict[str, Any]]]:
+        """Return non-expired cached tweet media list."""
+        entry = self._tweet_cache.get(key)
+        if not entry:
+            return None
+        cached_at, items = entry
+        if (time.monotonic() - cached_at) > self._cache_ttl_seconds:
+            self._tweet_cache.pop(key, None)
+            return None
+        return [dict(item) for item in items]
+
+    def _set_cached_tweet(self, key: str, items: List[Dict[str, Any]]) -> None:
+        """Store tweet media list in bounded TTL cache."""
+        now = time.monotonic()
+        expired = [k for k, (ts, _) in self._tweet_cache.items() if (now - ts) > self._cache_ttl_seconds]
+        for k in expired:
+            self._tweet_cache.pop(k, None)
+        while len(self._tweet_cache) >= self._cache_max_entries:
+            oldest_key = next(iter(self._tweet_cache))
+            self._tweet_cache.pop(oldest_key, None)
+        self._tweet_cache[key] = (now, [dict(item) for item in items])
 
     def _get_job_dir(self) -> Path:
         """Create a dedicated temporary directory for a download job."""
@@ -73,6 +107,15 @@ class TwitterService:
             return False, [], "⚠️ Invalid or unsupported X (Twitter) URL. Please provide a valid post link."
 
         username, tweet_id = info
+        cache_key = f"{username}:{tweet_id}"
+        cached = self._get_cached_tweet(cache_key)
+        if cached is not None:
+            metrics.incr("cache_hits")
+            return True, cached, None
+        metrics.incr("cache_misses")
+        metrics.incr("metadata_extractions")
+        meta_start = time.perf_counter()
+
         endpoints = [
             (f"https://api.vxtwitter.com/{username}/status/{tweet_id}", "vxtwitter"),
             (f"https://api.fxtwitter.com/{username}/status/{tweet_id}", "fxtwitter"),
@@ -82,31 +125,43 @@ class TwitterService:
             "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://t.me/songsuperzxbot)"
         }
 
-        for api_url, api_kind in endpoints:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4, connect=2.5)) as resp:
-                        if resp.status == 404:
-                            return False, [], (
-                                "🔒 <b>Access Restricted: Private Category</b>\n\n"
-                                "⚠️ This X (Twitter) post was not found, has been deleted, or belongs to a <b>Private / Protected</b> account.\n\n"
-                                "<i>Private posts cannot be accessed or downloaded without authorized follower access.</i>"
-                            )
+        try:
+            session = await http_client.get_session()
+            for api_url, api_kind in endpoints:
+                try:
+                    metrics.incr("http_requests")
+                    req_t0 = time.perf_counter()
+                    try:
+                        async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4, connect=2.5)) as resp:
+                            if resp.status == 404:
+                                return False, [], (
+                                    "🔒 <b>Access Restricted: Private Category</b>\n\n"
+                                    "⚠️ This X (Twitter) post was not found, has been deleted, or belongs to a <b>Private / Protected</b> account.\n\n"
+                                    "<i>Private posts cannot be accessed or downloaded without authorized follower access.</i>"
+                                )
 
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if api_kind == "vxtwitter" and ("media_extended" in data or "mediaURLs" in data):
-                                ok, items, err = self._parse_vxtwitter_response(data)
-                            else:
-                                ok, items, err = self._parse_fxtwitter_response(data)
-                            if ok and items:
-                                return ok, items, err
-            except Exception as e:
-                logger.debug(f"{api_kind} failed for {url} ({api_url}): {e}")
-                continue
+                            if resp.status == 200:
+                                data = await resp.json()
+                                if api_kind == "vxtwitter" and ("media_extended" in data or "mediaURLs" in data):
+                                    ok, items, err = self._parse_vxtwitter_response(data)
+                                else:
+                                    ok, items, err = self._parse_fxtwitter_response(data)
+                                if ok and items:
+                                    self._set_cached_tweet(cache_key, items)
+                                    return ok, [dict(x) for x in items], err
+                    finally:
+                        metrics.record_timing("http", (time.perf_counter() - req_t0) * 1000.0)
+                except Exception as e:
+                    logger.debug(f"{api_kind} failed for {url} ({api_url}): {e}")
+                    continue
 
-        # Fallback to yt-dlp with strict fast timeouts
-        return await asyncio.to_thread(self._fallback_extract_with_ytdlp, url)
+            # Fallback to yt-dlp with strict fast timeouts
+            ok, items, err = await asyncio.to_thread(self._fallback_extract_with_ytdlp, url)
+            if ok and items:
+                self._set_cached_tweet(cache_key, items)
+            return ok, items, err
+        finally:
+            metrics.record_timing("metadata", (time.perf_counter() - meta_start) * 1000.0)
 
     def _parse_vxtwitter_response(self, data: Dict[str, Any]) -> Tuple[bool, List[Dict[str, Any]], Optional[str]]:
         """Parse structured JSON from vxTwitter API."""
@@ -277,47 +332,44 @@ class TwitterService:
             return False, [], f"⚠️ Failed to process X post: {str(e)[:80]}"
 
     async def download_file(self, url: str, dest_path: Path, tracker: Optional[Any] = None) -> bool:
-        """Download remote media file to local destination path with live progress tracking."""
+        """Download remote media file via shared HTTP session and async file I/O."""
+        metrics.incr("downloads")
+        dl_start = time.perf_counter()
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"Download failed with status {resp.status} for {url}")
-                        return False
-                    total_len = int(resp.headers.get("Content-Length", 0))
-                    if tracker:
-                        tracker.status = "downloading"
-                        if total_len > 0:
-                            tracker.total_bytes = total_len
+            start_time = time.monotonic()
+            if tracker:
+                tracker.status = "downloading"
 
-                    start_time = asyncio.get_event_loop().time()
-                    downloaded = 0
+            def _on_chunk(_chunk_len: int, written: int, total_len: int) -> None:
+                if not tracker:
+                    return
+                if total_len > 0 and tracker.total_bytes == 0:
+                    tracker.total_bytes = total_len
+                tracker.downloaded_bytes = written
+                if tracker.total_bytes > 0:
+                    tracker.percentage = min(100.0, (written / tracker.total_bytes) * 100.0)
+                elapsed = time.monotonic() - start_time
+                if elapsed > 0:
+                    tracker.speed = written / elapsed
+                    if tracker.speed > 0 and tracker.total_bytes > written:
+                        tracker.eta = int((tracker.total_bytes - written) / tracker.speed)
 
-                    with open(dest_path, "wb") as f:
-                        while True:
-                            chunk = await resp.content.read(256 * 1024)
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                            downloaded += len(chunk)
-
-                            if tracker:
-                                tracker.downloaded_bytes = downloaded
-                                if tracker.total_bytes > 0:
-                                    tracker.percentage = min(100.0, (downloaded / tracker.total_bytes) * 100.0)
-                                elapsed = asyncio.get_event_loop().time() - start_time
-                                if elapsed > 0:
-                                    tracker.speed = downloaded / elapsed
-                                    if tracker.speed > 0 and tracker.total_bytes > downloaded:
-                                        tracker.eta = int((tracker.total_bytes - downloaded) / tracker.speed)
-
-                    if tracker:
-                        tracker.percentage = 100.0
-                        tracker.status = "processing"
-                    return True
+            ok, _ = await stream_url_to_file(
+                url,
+                dest_path,
+                timeout_seconds=60.0,
+                chunk_size=256 * 1024,
+                on_chunk=_on_chunk if tracker else None,
+            )
+            if ok and tracker:
+                tracker.percentage = 100.0
+                tracker.status = "processing"
+            return ok
         except Exception as e:
             logger.error(f"Error downloading {url} to {dest_path}: {e}")
             return False
+        finally:
+            metrics.record_timing("download", (time.perf_counter() - dl_start) * 1000.0)
 
     async def download_all_media(
         self,
@@ -326,10 +378,11 @@ class TwitterService:
         tracker: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Download all media items into job_dir concurrently with progress tracking.
-        Returns list of downloaded media item dicts with 'file_path' added.
+        Download media items into job_dir with bounded concurrency, shared HTTP
+        connection pooling, non-blocking async file writes, and aggregate size caps.
         """
-        downloaded: List[Dict[str, Any]] = []
+        if not media_items:
+            return []
 
         if tracker and len(media_items) == 1:
             # Single item: tracker directly tracks the file
@@ -342,75 +395,18 @@ class TwitterService:
                 return [{**item, "file_path": dest_file, "index": 0}]
             return []
 
-        # Multi-item download
-        total_items = len(media_items)
-        lock = asyncio.Lock()
-        total_downloaded = 0
-        start_time = asyncio.get_event_loop().time()
-
-        # Probe content lengths quickly to estimate total size accurately
-        async def _probe_size(it: Dict[str, Any]) -> int:
-            try:
-                async with aiohttp.ClientSession() as s:
-                    async with s.head(it["url"], timeout=aiohttp.ClientTimeout(total=5)) as r:
-                        return int(r.headers.get("Content-Length", 0))
-            except Exception:
-                return 0
-
-        sizes = await asyncio.gather(*[_probe_size(it) for it in media_items])
-        sum_sizes = sum(s for s in sizes if s > 0)
-
-        if tracker:
-            tracker.status = "downloading"
-            tracker.total_bytes = sum_sizes if sum_sizes > 0 else (total_items * 1024 * 1024)
-
-        async def _download_one(index: int, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            nonlocal total_downloaded
-            item_type = item["type"]
-            ext = "jpg" if item_type == "photo" else "mp4"
-            dest_file = job_dir / f"media_{index + 1}.{ext}"
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(item["url"], timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                        if resp.status != 200:
-                            return None
-                        with open(dest_file, "wb") as f:
-                            while True:
-                                chunk = await resp.content.read(256 * 1024)
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                                if tracker:
-                                    async with lock:
-                                        total_downloaded += len(chunk)
-                                        tracker.downloaded_bytes = total_downloaded
-                                        if tracker.total_bytes > 0:
-                                            tracker.percentage = min(100.0, (total_downloaded / tracker.total_bytes) * 100.0)
-                                        elapsed = asyncio.get_event_loop().time() - start_time
-                                        if elapsed > 0:
-                                            tracker.speed = total_downloaded / elapsed
-                                            if tracker.speed > 0 and tracker.total_bytes > total_downloaded:
-                                                tracker.eta = int((tracker.total_bytes - total_downloaded) / tracker.speed)
-
-                if dest_file.exists() and dest_file.stat().st_size > 0:
-                    return {
-                        **item,
-                        "file_path": dest_file,
-                        "index": index
-                    }
-            except Exception as e:
-                logger.error(f"Error downloading album item {index}: {e}")
-            return None
-
-        tasks = [_download_one(i, item) for i, item in enumerate(media_items)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for res in results:
-            if isinstance(res, dict) and res.get("file_path"):
-                downloaded.append(res)
-
-        downloaded.sort(key=lambda x: x.get("index", 0))
+        dl_start = time.perf_counter()
+        downloaded = await download_carousel_batch(
+            media_items,
+            job_dir,
+            max_items=self.max_items_limit,
+            max_total_bytes=self.max_total_bytes,
+            concurrency=self.concurrency,
+            tracker=tracker,
+            timeout_seconds=60.0,
+        )
+        metrics.incr("downloads", max(1, len(downloaded)))
+        metrics.record_timing("download", (time.perf_counter() - dl_start) * 1000.0)
         return downloaded
 
 

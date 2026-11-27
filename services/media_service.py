@@ -24,6 +24,8 @@ from config import (
 )
 from services.ffmpeg_service import ffmpeg_service
 from services.proxy_manager import youtube_proxy_manager, mask_proxy_url
+from utils.http_client import stream_url_to_file
+from utils.metrics import metrics
 from utils.validators import (
     extract_youtube_id,
     sanitize_filename,
@@ -169,7 +171,11 @@ class MediaService:
         if vid_id:
             cached = self._get_cached_raw_info(vid_id)
             if cached:
+                metrics.incr("cache_hits")
                 return cached
+        metrics.incr("cache_misses")
+        metrics.incr("metadata_extractions")
+        meta_start = time.perf_counter()
 
         direct_error = None
         # Try the configured connection with current yt-dlp client defaults.
@@ -189,6 +195,7 @@ class MediaService:
                 info = ydl.extract_info(url, download=False)
                 fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
                 if len(fmts) > 0 or not is_yt:
+                    metrics.record_timing("metadata", (time.perf_counter() - meta_start) * 1000.0)
                     if vid_id and len(fmts) > 0 and info.get("is_live") is not True and (info.get("live_status") or "").lower() not in ("is_live", "is_upcoming"):
                         self._set_cached_raw_info(vid_id, info)
                     return info
@@ -239,6 +246,7 @@ class MediaService:
                     info = ydl.extract_info(url, download=False)
                     fmts = [f for f in info.get("formats", []) if f.get("vcodec") != "none"]
                     if len(fmts) > 0:
+                        metrics.record_timing("metadata", (time.perf_counter() - meta_start) * 1000.0)
                         if vid_id and info.get("is_live") is not True and (info.get("live_status") or "").lower() not in ("is_live", "is_upcoming"):
                             self._set_cached_raw_info(vid_id, info)
                         return info
@@ -423,10 +431,13 @@ class MediaService:
            without proxy for 0-quota consumption!
         """
         is_yt = youtube_proxy_manager.is_youtube_url(url)
+        metrics.incr("downloads")
+        dl_start = time.perf_counter()
         direct_error = None
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
+                metrics.record_timing("download", (time.perf_counter() - dl_start) * 1000.0)
                 return
         except Exception as e:
             if not is_yt or not youtube_proxy_manager.is_retryable_error(e):
@@ -511,21 +522,11 @@ class MediaService:
         raise RuntimeError("All download attempts (Own IP and Proxies) failed.")
 
     async def download_thumbnail(self, thumbnail_url: str, dest_path: Path) -> bool:
-        """Download remote thumbnail image to local file."""
+        """Download remote thumbnail image to local file using shared HTTP session and aiofiles."""
         if not thumbnail_url:
             return False
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(thumbnail_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        content = await resp.read()
-                        with open(dest_path, "wb") as f:
-                            f.write(content)
-                        return True
-            return False
-        except Exception as e:
-            logger.warning(f"Could not download thumbnail from {thumbnail_url}: {e}")
-            return False
+        ok, _ = await stream_url_to_file(thumbnail_url, dest_path, timeout_seconds=15.0)
+        return ok
 
     async def process_audio(
         self,

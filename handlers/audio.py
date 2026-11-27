@@ -213,9 +213,9 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
     reporter = None
 
     try:
-        # Check server storage health before accepting jobs
-        from utils.disk_cleaner import check_disk_space_available
-        has_disk, _ = check_disk_space_available(min_free_mb=600)
+        # Check server storage health asynchronously before accepting jobs
+        from utils.disk_cleaner import check_disk_space_available_async, cleanup_dir_async
+        has_disk, _ = await check_disk_space_available_async(min_free_mb=600)
         if not has_disk:
             await vanish_download_animation(anim_msg)
             await status_msg.edit_text(
@@ -355,4 +355,5 @@ async def cb_start_audio_download(callback: CallbackQuery) -> None:
         if acquired_slot:
             queue_manager.release_download_slot(user_id)
         if job_dir:
-            media_service.cleanup_job_dir(job_dir)
+            from utils.disk_cleaner import cleanup_dir_async
+            await cleanup_dir_async(job_dir)
