@@ -72,13 +72,19 @@ class InstagramService:
 
     def _get_job_dir(self) -> Path:
         """Create a dedicated temporary directory for a download job."""
+        from utils.disk_cleaner import register_active_job_dir
+
         job_id = uuid.uuid4().hex[:12]
         job_dir = self.temp_base / f"job_{job_id}"
         job_dir.mkdir(parents=True, exist_ok=True)
+        register_active_job_dir(job_dir)
         return job_dir
 
     def cleanup_job_dir(self, job_dir: Path) -> None:
         """Safely remove temporary job directory."""
+        from utils.disk_cleaner import unregister_active_job_dir
+
+        unregister_active_job_dir(job_dir)
         try:
             if job_dir.exists() and job_dir.is_dir():
                 shutil.rmtree(job_dir, ignore_errors=True)

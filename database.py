@@ -132,6 +132,10 @@ class Database:
                 await conn.execute("ALTER TABLE orders ADD COLUMN attempt_count INTEGER DEFAULT 0")
             except Exception:
                 pass
+            try:
+                await conn.execute("ALTER TABLE orders ADD COLUMN fulfilled_at TIMESTAMP")
+            except Exception:
+                pass
             # Clean up any legacy redundant duplicate indexes using strict allowlist
             ALLOWED_LEGACY_INDEXES = frozenset({"idx_users_telegram_id", "idx_orders_order_id", "idx_orders_utr_number"})
             for legacy_idx in ALLOWED_LEGACY_INDEXES:
@@ -676,35 +680,84 @@ class Database:
         return True, order_dict, "✅ Successfully verified and activated!"
 
     async def mark_order_paid(self, order_id: str, utr_number: Optional[str] = None) -> Optional[dict[str, Any]]:
-        """Mark order as paid and activate subscription if order_type is a pass (Idempotent)."""
+        """
+        Mark a pending order as paid and activate subscription if applicable (strict & idempotent).
+        Never resurrects expired, rejected, or cancelled orders, and never re-activates an already-paid pass.
+        """
         if utr_number:
             success, order_dict, _ = await self.atomic_claim_and_mark_paid(order_id, utr_number)
-            if success:
-                return order_dict
+            return order_dict if success else None
 
         async with self._get_connection() as conn:
-            cur = await conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
-            order = await cur.fetchone()
-            if not order:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = await conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+                order = await cur.fetchone()
+                if not order:
+                    await conn.rollback()
+                    return None
+
+                order_dict = dict(order)
+                if order_dict.get("status") == "paid":
+                    await conn.commit()
+                    return order_dict
+
+                if order_dict.get("status") != "pending":
+                    await conn.rollback()
+                    return None
+
+                if self.is_order_expired(order_dict):
+                    await conn.execute("UPDATE orders SET status = 'expired' WHERE order_id = ?", (order_id,))
+                    await conn.commit()
+                    return None
+
+                cur = await conn.execute(
+                    "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ? AND status = 'pending'",
+                    (order_id,)
+                )
+                if cur.rowcount == 0:
+                    await conn.rollback()
+                    return None
+                await conn.commit()
+            except Exception as e:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
+                logger.exception(f"Error marking order {order_id} paid: {e}")
                 return None
 
-            order_dict = dict(order)
-            if order_dict.get("status") == "paid":
-                return order_dict
-
-            await conn.execute(
-                "UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ?",
-                (order_id,)
-            )
-            await conn.commit()
-
-        # If it's a subscription pass, activate it!
+        # Activate subscription once on the initial pending -> paid transition
         if order_dict["order_type"].startswith("sub_"):
             plan = order_dict["order_type"].replace("sub_", "")
             await self.activate_subscription(order_dict["telegram_id"], plan)
 
         order_dict["status"] = "paid"
         return order_dict
+
+    async def claim_order_fulfillment(self, order_id: str) -> bool:
+        """Atomically claim one-time fulfillment ownership for a paid order."""
+        async with self._get_connection() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = await conn.execute(
+                    """
+                    UPDATE orders
+                    SET fulfilled_at = CURRENT_TIMESTAMP
+                    WHERE order_id = ? AND status = 'paid' AND fulfilled_at IS NULL
+                    """,
+                    (order_id,)
+                )
+                claimed = cur.rowcount > 0
+                await conn.commit()
+                return claimed
+            except Exception as e:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
+                logger.exception(f"Error claiming fulfillment for {order_id}: {e}")
+                return False
 
     # ------------------ Subscriptions ------------------
 
@@ -891,14 +944,41 @@ class Database:
             return cur.rowcount
 
     async def use_subscription_video_quota(self, telegram_id: int) -> bool:
-        """Increment daily video usage for subscriber."""
+        """
+        Atomically check active subscription, handle midnight daily reset if due,
+        and consume 1 daily video quota unit only if remaining quota > 0.
+        """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        today_str = now.strftime("%Y-%m-%d")
+
         async with self._get_connection() as conn:
-            await conn.execute(
-                "UPDATE user_subscriptions SET today_video_used = today_video_used + 1 WHERE telegram_id = ?",
-                (telegram_id,)
-            )
-            await conn.commit()
-            return True
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = await conn.execute(
+                    """
+                    UPDATE user_subscriptions
+                    SET
+                        today_video_used = CASE
+                            WHEN last_reset_date != ? THEN 1
+                            ELSE today_video_used + 1
+                        END,
+                        last_reset_date = ?
+                    WHERE telegram_id = ?
+                      AND datetime(expiry_date) > datetime(?)
+                      AND (CASE WHEN last_reset_date != ? THEN 0 ELSE today_video_used END) < daily_video_limit
+                    """,
+                    (today_str, today_str, telegram_id, now_str, today_str)
+                )
+                await conn.commit()
+                return cur.rowcount > 0
+            except Exception:
+                try:
+                    await conn.rollback()
+                except Exception:
+                    pass
+                raise
 
     async def refund_subscription_video_quota(self, telegram_id: int) -> bool:
         """Refund 1 daily video quota unit when a download fails, cancels, or cannot be delivered."""

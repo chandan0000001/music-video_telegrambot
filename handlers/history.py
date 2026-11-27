@@ -55,18 +55,41 @@ async def render_user_history(user_id: int) -> str:
 
 @router.message(Command("history"))
 async def cmd_history(message: Message) -> None:
-    """Handle /history command."""
+    """Handle /history command without exposing personal activity in group chats."""
     user = message.from_user
     if not user:
         return
+    chat = getattr(message, "chat", None)
+    chat_type = getattr(chat, "type", "private")
     text = await render_user_history(user.id)
+
+    if isinstance(chat_type, str) and chat_type != "private":
+        try:
+            sent = await message.bot.send_message(
+                chat_id=user.id,
+                text=text,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+            from utils.selection_session import selection_session_manager
+            await selection_session_manager.register_session(
+                bot=message.bot,
+                user_id=user.id,
+                chat_id=user.id,
+                message_id=getattr(sent, "message_id", None)
+            )
+            await message.answer("🔒 Sent your personal history to your private DM.")
+        except Exception:
+            await message.answer("🔒 Personal history is private — please open our private chat and run /history.")
+        return
+
     sent = await message.answer(
         text=text,
         reply_markup=get_back_to_main_keyboard(),
         parse_mode="HTML"
     )
     from utils.selection_session import selection_session_manager
-    chat_id = getattr(getattr(message, "chat", None), "id", getattr(user, "id", 0)) if user else 0
+    chat_id = getattr(chat, "id", getattr(user, "id", 0)) if user else 0
     await selection_session_manager.register_session(
         bot=message.bot,
         user_id=user.id,
@@ -77,12 +100,28 @@ async def cmd_history(message: Message) -> None:
 
 @router.callback_query(F.data == "menu:history")
 async def cb_history(callback: CallbackQuery) -> None:
-    """Handle My History callback from main menu."""
+    """Handle My History callback from main menu without leaking history into group chats."""
     user = callback.from_user
     if not user:
         return
-    await callback.answer()
+    chat = getattr(callback.message, "chat", None) if callback.message else None
+    chat_type = getattr(chat, "type", "private")
+
     text = await render_user_history(user.id)
+    if isinstance(chat_type, str) and chat_type != "private":
+        try:
+            await callback.bot.send_message(
+                chat_id=user.id,
+                text=text,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+            await callback.answer("Sent your personal history to your private DM.", show_alert=True)
+        except Exception:
+            await callback.answer("Open my private chat to view your personal history.", show_alert=True)
+        return
+
+    await callback.answer()
     if callback.message:
         sent_msg = None
         try:

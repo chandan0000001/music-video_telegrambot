@@ -262,9 +262,9 @@ async def test_queue_priority_cancellation_slot_release_and_edit_throttle():
         up_waiter = asyncio.create_task(qm.acquire_upload_slot(user_id=2))
         await asyncio.sleep(0.02)
         assert not up_waiter.done()
-        await qm._release_upload_async()
+        await qm._release_upload_async(1)
         await asyncio.wait_for(up_waiter, timeout=1.0)
-        await qm._release_upload_async()
+        await qm._release_upload_async(2)
         assert qm._active_uploads == 0
 
 

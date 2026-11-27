@@ -150,26 +150,23 @@ flowchart TD
    - **Free Users:** Standard FIFO queue, limited to **3 concurrent downloads**.
 2. **⚡ Global Concurrency Safety & Queue Slots:**
    - Configurable global download and upload caps (`MAX_GLOBAL_DOWNLOADS`, `MAX_GLOBAL_UPLOADS`, defaulting to `4` each for safe 4 GB RAM VPS operation) safeguard memory, CPU, and disk I/O.
-   - Download slots are released cleanly once FFmpeg processing finishes, while uploads are separately paced through upload slots.
-   - Multi-job `TaskRegistry` tracks concurrent active downloads per user cleanly without overwriting older jobs, and VIP daily quotas are automatically refunded (`refund_subscription_video_quota`) if a VIP download fails, cancels, or cannot be delivered.
+   - Download slots are released cleanly once FFmpeg processing finishes (with safe cancelled-waiter accounting), while uploads are paced via `asyncio.Condition` with admin bypasses excluded from decrements.
+   - Multi-job `TaskRegistry` tracks concurrent active downloads per user cleanly without overwriting older jobs, and VIP daily quotas use atomic conditional SQLite deductions with automatic refunds (`refund_subscription_video_quota`) if a download fails or cancels.
 3. **🛡️ YouTube IP-Flag Resilience, PO Tokens & Zero-Proxy-Bandwidth Failover:**
    - **Direct-First with Cookies & PO Token Engine:** All requests attempt direct server delivery first using authenticated `cookies.txt` (including `.google.com` + `.youtube.com` tokens) alongside a local `bgutil-ytdlp-pot-provider` HTTP POT server (`127.0.0.1:4416`) and Deno/Node JS challenge solver.
    - **Automatic Proxy Failover on Google IP Flags:** If Google/YouTube challenges or blocks the server IP (`403 Forbidden`, `We're sorry... automated queries`, `unusual traffic`, `LOGIN_REQUIRED`, or bot-check prompts) and proxies are configured in `proxies.txt` or `YOUTUBE_PROXIES`, `YouTubeProxyManager` immediately notifies the user and rotates through the proxy pool (`proxies.txt` hot-reloads without restarting the bot, with credentials masked in logs).
    - **Zero-Proxy-Bandwidth Download Architecture:** Proxies are used strictly for tiny YouTube metadata JSON lookups (~50 KB), while heavy media streams download directly from `googlevideo.com`, maximizing proxy longevity.
-   - **5-Minute Metadata Cache:** Eliminates redundant YouTube extraction hits across quality menus, payment checks, and post-download tagging.
-4. **🔄 Real-Time Dynamic Queue UI:**
-   - When slots are full, waiting users receive a dynamic HTML-escaped Telegram status message updated automatically showing their current `#1, #2, #3...` position and estimated wait time until a slot frees up.
-4. **🛡️ 6-Second Link Spam Guard:**
-   - Prevents link flooding by requiring 6 seconds between link submissions.
-   - Triggers friendly warnings: *"⚠️ Ladle, don't spam here! Otherwise you will be banned."*
-   - Repeated abuse (3 violations within 30 seconds) triggers an automated **10-minute temporary ban**.
-5. **🧹 Automated Temp Storage Cleaner & Pre-Flight Disk Guard:**
-   - Background worker executes every 5 minutes, automatically removing temporary media older than 30 minutes to protect EBS storage.
-   - Pre-flight storage check verifies available disk space before starting heavy media conversions to prevent out-of-disk crashes.
-   - Live server storage diagnostics on the Admin Dashboard display exact available free space, percentage, and system disk usage.
+   - **Bounded 5-Minute Metadata Cache:** Eliminates redundant YouTube extraction hits across quality menus, payment checks, and post-download tagging while capping memory via TTL & max-entry eviction.
+4. **🔄 Event-Driven Queue UI & Performance Telemetry:**
+   - Waiting users receive a live HTML-escaped Telegram status message throttled cleanly (`>= 2s` per edit) showing `#1, #2, #3...` position and estimated wait time, while `utils/metrics.py` records request/download/FFmpeg/DB/cache latency and counts on the admin dashboard.
+   - **6-Second Link Spam Guard:** Enforces a 6-second cooldown between link submissions for free users (3 violations within 30s triggers an automated **10-minute temporary ban**).
+5. **🧹 Automated Temp Storage Cleaner & Active-Job Disk Guard:**
+   - Background worker runs off the event loop every 5 minutes (`asyncio.to_thread`), removing abandoned top-level and nested (`temp/instagram/job_*`, `temp/twitter/job_*`) entries older than 30 minutes while protecting actively running or upload-queued job directories from premature deletion.
+   - Pre-flight storage check verifies available disk space before heavy conversions without deleting active job workspaces.
+   - Live server storage diagnostics on the Admin Dashboard display exact available free space, percentage, disk usage, and live operational metrics.
 6. **📸 Instagram & 𝕏 X (Twitter) Multi-Media Downloaders:**
    - **Instagram Suite:**
-     - **Reels & Posts:** High-definition single MP4 videos, full-resolution untouched photos, and complete carousels (all items in the album, no artificial limit).
+     - **Reels & Posts:** High-definition single MP4 videos, full-resolution untouched photos, and bounded carousels (up to `MAX_CAROUSEL_ITEMS` / `MAX_CAROUSEL_TOTAL_MB` with `CAROUSEL_CONCURRENCY` semaphore bounds, shared HTTP session pooling, and non-blocking `aiofiles` streaming).
      - **Music & Audio Links:** Paste any Instagram audio link (`instagram.com/reels/audio/<id>`, `/audio/<id>`, or `/music/<id>`) to extract and receive native high-fidelity Telegram audio with full ID3 tags (artist, title, and cover artwork).
      - **Quality & 1080p Cap:** Original upload quality matched; videos exceeding 1080p (2K/4K) are scaled cleanly to 1080p via FFmpeg, while images remain 100% untouched.
      - **Stories & Highlights:** Download active public stories and highlight collections directly.
@@ -723,22 +720,23 @@ Stop-Process -Name "python"
 
 Current controls include:
 
-- **Payment ownership:** Submission, cancellation and recheck verify the acting user's order ownership.
+- **Payment ownership & strict approval:** Submission, cancellation, and recheck verify the acting user's order ownership. `mark_order_paid()` enforces strict pending/non-expired/unique-UTR atomic transactions with no permissive fallback override.
+- **Per-order fulfillment lock:** Orders track `fulfilled_at` in SQLite (`claim_order_fulfillment()`), preventing repeated paid media deliveries or double admin approval triggers on duplicate clicks or concurrent rechecks.
+- **Atomic premium quota consumption:** Daily HD subscription quotas use a conditional SQLite write (`WHERE ... used < daily_limit` with midnight rollover) so concurrent requests cannot claim the final quota unit twice.
 - **Payment review:** Email-only approval is disabled. An administrator verifies bank/provider credit; verification attempts are counted in SQLite.
-- **Atomic claims:** The automated payment service's UTR claim helper uses a SQLite transaction. Manual approval and repeated fulfillment still require further review.
+- **Balanced queue & privacy controls:** Admin upload bypasses do not decrement counted upload slots held by other users, and `/history` routes personal search/download history to private DM when invoked outside private chats.
+- **Active temp job protection:** Download/upload job directories are tracked in an active registry so low-disk cleanup sweeps skip active or upload-queued folders.
 - **Access controls:** Message and callback middleware checks blocked users and throttles requests, including download/search/coupon callbacks. Admin handlers check configured IDs.
-- **TLS:** Media extraction uses certificate verification.
-- **Input handling:** Welcome names are HTML-escaped; FFmpeg uses argument lists and sanitized metadata.
-- **URL validation:** Initial URL checks reject many private-network targets. Connection-time DNS/redirect protection is still a review item; this is not complete SSRF protection.
-- **Deployment:** Keep credentials out of Git and restrict local `.env` permissions. The Docker image runs as an unprivileged user.
+- **TLS & input handling:** Media extraction uses certificate verification; welcome names are HTML-escaped; FFmpeg uses argument lists and sanitized metadata.
+- **URL validation & deployment:** Initial URL checks reject many private-network targets (connection-time DNS/redirect SSRF checks remain a review item). Keep credentials out of Git and restrict local `.env` permissions.
 
-See the security review at the end for remaining work. No claim of a complete penetration test or vulnerability-free deployment is made.
+No claim of a complete penetration test or vulnerability-free deployment is made.
 
 ---
 
 ## 🧪 Automated Testing
 
-The bot includes a comprehensive automated test suite covering core workflows, queue & VIP quota refunds, FSM persistence, proxy failover, multi-aspect ratio video streaming, and security hardening:
+The bot includes a comprehensive automated test suite covering core workflows, HTTP/SQLite pooling, bounded carousels, queue & VIP quota atomicity, payment idempotency, active temp protection, proxy failover, and security hardening:
 
 ```bash
 # Activate virtual environment
@@ -750,7 +748,7 @@ pytest tests/ -v
 
 Latest verified suite result:
 ```text
-============================= 193 passed in 21.29s =============================
+============================= 210 passed in 23.53s =============================
 ```
 
 ---
@@ -802,7 +800,10 @@ only return after implementing authenticated payment-provider events with
 amount, currency, merchant, order binding and replay checks.
 
 **Remaining review areas:** this is not a guarantee of complete security.
-Outbound media URLs and redirects still need connection-time SSRF protection
-and download byte limits across all providers. Review payment fulfillment
-idempotency, per-user in-memory cache bounds, dependency advisories, and
-credential/log handling separately before exposing the bot more broadly.
+Outbound media URLs and redirects still need connection-time SSRF protection,
+and `yt-dlp` direct streams outside carousel batch downloads need download byte
+limits across all providers. Per-order payment fulfillment idempotency
+(`fulfilled_at` + strict `mark_order_paid`), atomic daily subscription quota
+deductions, bounded metadata caches, admin upload slot accounting, `/history`
+private DM routing, and active temp-job cleanup protection have been added;
+continue reviewing dependency advisories and credential/log handling separately.

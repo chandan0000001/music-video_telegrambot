@@ -375,9 +375,24 @@ async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Order not found.", show_alert=True)
         return
 
-    # If the order is ALREADY marked as paid (e.g. approved by Admin), deliver immediately!
+    # If the order is ALREADY marked as paid (e.g. approved by Admin), deliver only if not already fulfilled!
     if order.get("status") == "paid":
         await state.clear()
+        if order.get("fulfilled_at"):
+            await callback.answer("Order already paid and fulfilled.", show_alert=True)
+            if callback.message:
+                try:
+                    await callback.message.edit_text(
+                        "✅ **Order Already Fulfilled!**\n\n"
+                        f"• **Order ID:** `{order_id}`\n"
+                        f"• **Amount:** `₹{order['amount_inr']:.2f}`\n\n"
+                        "Your access or media for this order has already been delivered.",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+            return
+
         if callback.message:
             await callback.message.edit_text(
                 f"🎉 **Payment Verified Successfully!**\n\n"
@@ -386,10 +401,6 @@ async def cb_recheck_utr(callback: CallbackQuery, state: FSMContext) -> None:
                 f"🚀 *Starting fulfillment now...*",
                 parse_mode="Markdown"
             )
-            user = callback.from_user
-            user_name = user.username or user.first_name if user else "User"
-            user_id = user.id if user else 0
-            await notify_admin_payment_proof(callback.bot, order, utr, user_name, user_id, auto_verified=False)
             await fulfill_paid_order(callback.message, order)
         return
 
@@ -448,7 +459,25 @@ async def cb_admin_force_approve(callback: CallbackQuery) -> None:
 
     order = await db.mark_order_paid(order_id, utr)
     if not order:
-        await callback.answer("Order not found.", show_alert=True)
+        await callback.answer(
+            "❌ Order cannot be approved (not found, expired, or UTR already claimed).",
+            show_alert=True
+        )
+        return
+
+    if order.get("fulfilled_at"):
+        await callback.answer("ℹ️ Order is already paid and fulfilled.", show_alert=True)
+        if callback.message:
+            try:
+                await callback.message.edit_text(
+                    f"ℹ️ **Order** `{order_id}` **Already Fulfilled**\n"
+                    f"• UTR: `{utr}`\n"
+                    f"• User ID: `{order['telegram_id']}`\n"
+                    f"• Amount: `₹{order['amount_inr']:.2f}`",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.warning(f"Could not edit admin message: {e}")
         return
 
     await callback.answer("✅ Order approved successfully!")
@@ -582,7 +611,17 @@ async def alert_admin_unverified_payment(bot, order: dict, utr: str, user_name: 
 
 
 async def fulfill_paid_order(message: Message, order: dict) -> None:
-    """Deliver video or notify subscription activation."""
+    """Deliver video or notify subscription activation strictly once per paid order."""
+    order_id = order.get("order_id")
+    if order.get("fulfilled_at"):
+        logger.info(f"Skipping duplicate fulfillment for already-fulfilled order {order_id}.")
+        return
+    if order_id:
+        claimed = await db.claim_order_fulfillment(order_id)
+        if not claimed:
+            logger.warning(f"Fulfillment already claimed or order invalid for {order_id}; skipping.")
+            return
+
     media_id = order.get("media_id")
     quality = order.get("quality") or "720p"
     order_type = order.get("order_type", "")

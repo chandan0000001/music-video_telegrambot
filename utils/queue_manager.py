@@ -61,6 +61,7 @@ class DownloadQueueManager:
 
         self._active_downloads: int = 0
         self._active_uploads: int = 0
+        self._counted_uploads_by_user: Dict[int, int] = {}
         self._user_active_jobs: Dict[int, int] = {}
         self._user_job_timestamps: Dict[int, List[float]] = {}
         self._waiting_queue: List[QueueItem] = []
@@ -255,20 +256,29 @@ class DownloadQueueManager:
             return
 
         priority = await vip_manager.get_user_priority(user_id)
+        if priority >= PRIORITY_ADMIN:
+            return
+
         async with self._lock:
-            if priority >= PRIORITY_ADMIN:
-                self._active_uploads += 1
-                return
             while self._active_uploads >= self.max_uploads:
                 await self._upload_condition.wait()
             self._active_uploads += 1
+            self._counted_uploads_by_user[user_id] = self._counted_uploads_by_user.get(user_id, 0) + 1
 
-    def release_upload_slot(self, user_id: int = 0) -> None:
-        """Release an upload slot and wake next waiting upload."""
-        self._track_bg_task(self._release_upload_async())
+    def release_upload_slot(self, user_id: Optional[int] = None) -> None:
+        """Release a counted upload slot and wake next waiting upload."""
+        self._track_bg_task(self._release_upload_async(user_id))
 
-    async def _release_upload_async(self) -> None:
+    async def _release_upload_async(self, user_id: Optional[int] = None) -> None:
         async with self._lock:
+            if user_id is not None:
+                held = self._counted_uploads_by_user.get(user_id, 0)
+                if held <= 0:
+                    return
+                if held == 1:
+                    self._counted_uploads_by_user.pop(user_id, None)
+                else:
+                    self._counted_uploads_by_user[user_id] = held - 1
             self._active_uploads = max(0, self._active_uploads - 1)
             self._upload_condition.notify()
 

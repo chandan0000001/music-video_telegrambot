@@ -7,6 +7,7 @@ import time
 import shutil
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -16,6 +17,43 @@ logger = logging.getLogger(__name__)
 
 STALE_FILE_MAX_AGE_SECONDS = 30 * 60  # 30 minutes
 CLEANUP_INTERVAL_SECONDS = 5 * 60     # run every 5 minutes (guarantees strict 30-min purge)
+
+_active_job_lock = threading.Lock()
+_active_job_dirs: set[Path] = set()
+
+
+def _normalize_job_path(job_dir: Path) -> Path:
+    try:
+        return Path(job_dir).resolve(strict=False)
+    except Exception:
+        return Path(job_dir)
+
+
+def register_active_job_dir(job_dir: Optional[Path]) -> None:
+    """Protect an active job directory from premature stale/low-disk cleanup."""
+    if not job_dir:
+        return
+    norm = _normalize_job_path(Path(job_dir))
+    with _active_job_lock:
+        _active_job_dirs.add(norm)
+
+
+def unregister_active_job_dir(job_dir: Optional[Path]) -> None:
+    """Release cleanup protection once a job directory is no longer in use."""
+    if not job_dir:
+        return
+    norm = _normalize_job_path(Path(job_dir))
+    with _active_job_lock:
+        _active_job_dirs.discard(norm)
+
+
+def is_job_dir_active(job_dir: Optional[Path]) -> bool:
+    """Return True if a job directory is currently registered as active."""
+    if not job_dir:
+        return False
+    norm = _normalize_job_path(Path(job_dir))
+    with _active_job_lock:
+        return norm in _active_job_dirs
 
 
 def get_disk_usage_stats(target_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -53,28 +91,53 @@ def check_disk_space_available(min_free_mb: int = 1000, target_dir: Optional[Pat
     return stats["free_mb"] >= min_free_mb, stats["free_mb"]
 
 
+def _effective_entry_mtime(item: Path) -> float:
+    """Return latest modification timestamp of entry or any direct child inside a directory."""
+    mtime = item.stat().st_mtime
+    if item.is_dir():
+        try:
+            for child in item.iterdir():
+                try:
+                    child_mtime = child.stat().st_mtime
+                    if child_mtime > mtime:
+                        mtime = child_mtime
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    return mtime
+
+
+def _prune_single_entry(item: Path, now: float, max_age: float) -> int:
+    """Remove an inactive file/directory older than max_age; return 1 if pruned else 0."""
+    try:
+        if item.is_dir() and is_job_dir_active(item):
+            return 0
+        mtime = _effective_entry_mtime(item)
+        if (now - mtime) > max_age:
+            if item.is_dir():
+                try:
+                    shutil.rmtree(item, ignore_errors=True)
+                except OSError as e:
+                    logger.warning(f"Could not remove stale temp directory {item}: {e}")
+            else:
+                item.unlink(missing_ok=True)
+            return 1
+    except Exception as e:
+        logger.debug(f"Could not process temp item {item}: {e}")
+    return 0
+
+
 def _prune_directory_entries(directory: Path, now: float, max_age: float) -> int:
     pruned = 0
     for item in directory.iterdir():
-        try:
-            mtime = item.stat().st_mtime
-            if (now - mtime) > max_age:
-                if item.is_dir():
-                    try:
-                        shutil.rmtree(item, ignore_errors=True)
-                    except OSError as e:
-                        logger.warning(f"Could not remove stale temp directory {item}: {e}")
-                else:
-                    item.unlink(missing_ok=True)
-                pruned += 1
-        except Exception as e:
-            logger.debug(f"Could not process temp item {item}: {e}")
+        pruned += _prune_single_entry(item, now, max_age)
     return pruned
 
 
 def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STALE_FILE_MAX_AGE_SECONDS) -> int:
     """
-    Synchronously scan and remove files/folders older than max_age from temp_dir
+    Synchronously scan and remove inactive files/folders older than max_age from temp_dir
     and nested service buckets (instagram/, twitter/).
     Returns number of pruned items.
     """
@@ -87,22 +150,10 @@ def purge_stale_temp_files(temp_dir: Optional[Path] = None, max_age: float = STA
     pruned_count = 0
 
     for item in target.iterdir():
-        try:
-            if item.is_dir() and item.name in ("instagram", "twitter"):
-                pruned_count += _prune_directory_entries(item, now, max_age)
-                continue
-            mtime = item.stat().st_mtime
-            if (now - mtime) > max_age:
-                if item.is_dir():
-                    try:
-                        shutil.rmtree(item, ignore_errors=True)
-                    except OSError as e:
-                        logger.warning(f"Could not remove stale temp directory {item}: {e}")
-                else:
-                    item.unlink(missing_ok=True)
-                pruned_count += 1
-        except Exception as e:
-            logger.debug(f"Could not process temp item {item}: {e}")
+        if item.is_dir() and item.name in ("instagram", "twitter"):
+            pruned_count += _prune_directory_entries(item, now, max_age)
+            continue
+        pruned_count += _prune_single_entry(item, now, max_age)
 
     if pruned_count > 0:
         logger.info(f"🧹 Disk Cleaner: Pruned {pruned_count} abandoned temp file(s)/directory(ies).")
@@ -131,6 +182,7 @@ async def cleanup_dir_async(job_dir: Optional[Path]) -> None:
     """Non-blocking temporary directory removal executed off the event loop."""
     if not job_dir:
         return
+    unregister_active_job_dir(job_dir)
 
     def _rm() -> None:
         try:

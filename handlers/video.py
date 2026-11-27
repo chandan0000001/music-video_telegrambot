@@ -2,7 +2,7 @@
 Video Download and FFmpeg Remuxing Handler
 """
 import html
-from typing import Optional
+from typing import Optional, Any
 import asyncio
 import logging
 from aiogram import Router, F
@@ -142,6 +142,21 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+async def _send_quota_exhausted_notice(callback: CallbackQuery, status_msg: Message, sub: dict[str, Any]) -> None:
+    """Notify subscriber when daily HD quota is exhausted and schedule auto-vanish."""
+    await callback.answer("Daily video quota reached!", show_alert=True)
+    plan_name = sub.get("plan_tier", "").capitalize()
+    limit_num = sub.get("daily_limit", 0)
+    await status_msg.edit_text(
+        f"🎬 **Aaj ka quota khatam babu bhaiya! Pura internet aaj hi download karega kya? 😂**\n\n"
+        f"You have used all **{limit_num} VIP videos** for today on your {plan_name} plan.\n\n"
+        f"💡 *Midnight (12:00 AM) ko quota reset hoga!*\n"
+        f"Standard qualities (144p - 720p HD) aur music downloads abhi bhi completely free hain!",
+        parse_mode="Markdown"
+    )
+    asyncio.create_task(vanish_status_message(status_msg, delay=90.0))
+
+
 @router.callback_query(F.data.startswith("vdl:"))
 async def cb_start_video_download(callback: CallbackQuery) -> None:
     """Check permissions, subscription quota, or trigger paywall."""
@@ -176,17 +191,7 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
 
         if not is_admin and not has_active_sub:
             if sub and sub.get("is_active") and sub.get("today_remaining", 0) <= 0:
-                await callback.answer("Daily video quota reached!", show_alert=True)
-                plan_name = sub.get("plan_tier", "").capitalize()
-                limit_num = sub.get("daily_limit", 0)
-                await status_msg.edit_text(
-                    f"🎬 **Aaj ka quota khatam babu bhaiya! Pura internet aaj hi download karega kya? 😂**\n\n"
-                    f"You have used all **{limit_num} VIP videos** for today on your {plan_name} plan.\n\n"
-                    f"💡 *Midnight (12:00 AM) ko quota reset hoga!*\n"
-                    f"Standard qualities (144p - 720p HD) aur music downloads abhi bhi completely free hain!",
-                    parse_mode="Markdown"
-                )
-                asyncio.create_task(vanish_status_message(status_msg, delay=90.0))
+                await _send_quota_exhausted_notice(callback, status_msg, sub)
                 return
 
             price = PRICE_SINGLE_1080P
@@ -227,6 +232,9 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             return
         elif has_active_sub and not is_admin:
             quota_deducted = await db.use_subscription_video_quota(user_id)
+            if not quota_deducted:
+                await _send_quota_exhausted_notice(callback, status_msg, sub)
+                return
 
     preserved_title = None
     if status_msg.text and "Title:" in status_msg.text:
