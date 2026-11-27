@@ -45,7 +45,20 @@ def test_is_retryable_error():
     assert mgr.is_retryable_error("Requested format is not available") is True
     assert mgr.is_retryable_error("Connection timed out (>25s)") is True
     assert mgr.is_retryable_error("HTTP Error 429: Too Many Requests") is True
+    assert mgr.is_retryable_error("HTTP Error 402: Payment Required") is True
+    assert mgr.is_retryable_error("X-Webshare-Reason: bandwidthlimit") is True
     
     # Non-retryable user errors
     assert mgr.is_retryable_error("Video unavailable: This video has been removed by the uploader") is False
     assert mgr.is_retryable_error("Private video. Sign in if you've been granted access") is False
+
+def test_mark_exhausted_proxy():
+    test_proxies = ["http://proxy1:8080", "http://proxy2:8080"]
+    mgr = YouTubeProxyManager(test_proxies)
+    
+    # Mark proxy1 exhausted (e.g. 402 bandwidth limit)
+    mgr.mark_exhausted("http://proxy1:8080")
+    assert mgr.get_proxies() == ["http://proxy2:8080"]
+    assert mgr.get_next_proxy() == "http://proxy2:8080"
+    assert mgr.get_next_proxy() == "http://proxy2:8080"
+

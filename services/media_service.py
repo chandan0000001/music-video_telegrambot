@@ -194,6 +194,9 @@ class MediaService:
                         return info
             except Exception as pe:
                 last_error = pe
+                err_str = str(pe).lower()
+                if "402" in err_str or "bandwidthlimit" in err_str or "payment required" in err_str:
+                    youtube_proxy_manager.mark_exhausted(proxy)
                 logger.warning(f"Proxy extraction failed via {proxy}: {pe}. Rotating to next proxy...")
 
         if last_error:
@@ -368,41 +371,70 @@ class MediaService:
             )
 
         # Retry with round-robin proxies (strictly isolated to YouTube)
+        # ZERO-PROXY-BANDWIDTH ARCHITECTURE:
+        # 1. Use proxy strictly to extract info_dict (metadata only ~50 KB).
+        # 2. Download media streams directly from googlevideo.com WITHOUT proxy (0 MB proxy quota consumed!).
+        # 3. Only if direct stream download fails, fallback to full proxy streaming as safety net.
         last_dl_error = None
         for attempt in range(4):
             proxy = youtube_proxy_manager.get_next_proxy()
             if not proxy:
                 break
-            logger.info(f"Retrying YouTube download via round-robin proxy (attempt {attempt + 1}/4)...")
-            fallback_opts = dict(ydl_opts)
-            fallback_opts["proxy"] = proxy
-            fallback_opts["socket_timeout"] = 25
+            logger.info(f"Extracting YouTube download metadata via proxy (attempt {attempt + 1}/4)...")
+            extract_opts = dict(ydl_opts)
+            extract_opts["proxy"] = proxy
+            extract_opts["skip_download"] = True
+            extract_opts["socket_timeout"] = 25
             # Pop extractor_args so player_client list doesn't cause yt-dlp to skip clients when cookies are active
-            fallback_opts.pop("extractor_args", None)
+            extract_opts.pop("extractor_args", None)
 
             # Attach authenticated Chrome session / cookiefile so proxy requests avoid bot challenges
             chrome_profile = Path.home() / ".config" / "google-chrome"
             if not chrome_profile.exists():
                 chrome_profile = Path("/home/ubuntu/.config/google-chrome")
             if chrome_profile.exists():
-                fallback_opts["cookiesfrombrowser"] = ("chrome",)
+                extract_opts["cookiesfrombrowser"] = ("chrome",)
             else:
                 from config import get_cookie_file
                 cookie_file = get_cookie_file()
                 if cookie_file:
-                    fallback_opts["cookiefile"] = str(cookie_file)
+                    extract_opts["cookiefile"] = str(cookie_file)
 
-            # CRITICAL: Strictly preserve format selector (e.g. height<=2160)
+            # Strictly preserve requested format selector (e.g. height<=2160)
             if "format" in ydl_opts:
-                fallback_opts["format"] = ydl_opts["format"]
+                extract_opts["format"] = ydl_opts["format"]
 
             try:
-                with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
-                    fallback_ydl.download([url])
-                    return
+                # Step A: Extract stream URLs via proxy (~50 KB)
+                with yt_dlp.YoutubeDL(extract_opts) as ydl_extract:
+                    info_dict = ydl_extract.extract_info(url, download=False)
+
+                # Step B: Download media streams directly without proxy (0 MB proxy quota consumed!)
+                direct_opts = dict(ydl_opts)
+                direct_opts["proxy"] = None
+                direct_opts["socket_timeout"] = 30
+                try:
+                    logger.info("Directly streaming media from googlevideo.com (bypassing proxy for 0-quota consumption)...")
+                    with yt_dlp.YoutubeDL(direct_opts) as ydl_direct:
+                        ydl_direct.process_ie_result(info_dict, download=True)
+                        return
+                except Exception as direct_err:
+                    logger.warning(
+                        f"Direct stream download failed ({direct_err}). Falling back to proxy tunnel for download..."
+                    )
+                    # Step C: Fallback to full proxy download if direct streaming fails
+                    proxy_opts = dict(ydl_opts)
+                    proxy_opts["proxy"] = proxy
+                    proxy_opts["socket_timeout"] = 30
+                    with yt_dlp.YoutubeDL(proxy_opts) as ydl_proxy_stream:
+                        ydl_proxy_stream.process_ie_result(info_dict, download=True)
+                        return
             except Exception as pe:
                 last_dl_error = pe
-                logger.warning(f"Download via proxy failed: {pe}. Rotating to next proxy...")
+                err_str = str(pe).lower()
+                if "402" in err_str or "bandwidthlimit" in err_str or "payment required" in err_str:
+                    youtube_proxy_manager.mark_exhausted(proxy)
+                logger.warning(f"Download attempt via proxy {proxy} failed: {pe}. Rotating to next proxy...")
 
         if last_dl_error:
             raise last_dl_error

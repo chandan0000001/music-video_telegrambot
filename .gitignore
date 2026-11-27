@@ -24,6 +24,10 @@ bot_database.sqlite3
 # Environment & credentials
 .env
 cookies.txt
+proxies.txt
+*proxy*.json
+*Proxy*.json
+*proxy*.txt
 
 # OS specific files
 .DS_Store

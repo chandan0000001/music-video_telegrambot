@@ -4,17 +4,21 @@ Strictly isolated:
 - Applied ONLY to YouTube metadata and downloads (never used for Spotify, SoundCloud, JioSaavn, etc.).
 - Direct-First: Always hits with the server's Own IP first.
 - Fallback: On failure (403 Forbidden, bot challenge, format not available, timeout),
-  proceeds through the round-robin pool of high-speed proxies.
+  proceeds through the round-robin pool of proxies.
+- Zero-Proxy-Bandwidth design: heavy media streams (googlevideo.com) bypass proxy,
+  using proxy strictly for tiny metadata extraction (~50 KB) so quota is never exhausted.
 """
 
 import threading
 import logging
-from typing import Optional, List
+import json
+from pathlib import Path
+from typing import Optional, List, Set
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-# The 10 WebShare proxies provided by the user
+# The default WebShare proxies
 DEFAULT_YOUTUBE_PROXIES: List[str] = [
     "http://gpzyewzw:7yo2ov1b9hfp@45.38.107.97:6014",
     "http://gpzyewzw:7yo2ov1b9hfp@64.137.96.74:6641",
@@ -28,29 +32,103 @@ DEFAULT_YOUTUBE_PROXIES: List[str] = [
     "http://gpzyewzw:7yo2ov1b9hfp@23.26.71.145:5628",
 ]
 
+
 class YouTubeProxyManager:
     """Thread-safe round-robin proxy rotator specifically for YouTube."""
 
     def __init__(self, proxies: Optional[List[str]] = None):
-        self._proxies = list(proxies) if proxies else list(DEFAULT_YOUTUBE_PROXIES)
         self._lock = threading.Lock()
         self._index = 0
+        self._exhausted: Set[str] = set()
+
+        initial = list(proxies) if proxies else self._discover_proxies()
+        self._proxies: List[str] = [p.strip() for p in initial if p and p.strip()]
+
+    def _discover_proxies(self) -> List[str]:
+        """Discover proxies from proxies.txt, proxy JSON files, or config defaults."""
+        collected: List[str] = []
+
+        # 1. Check for proxies.txt in project root or current working dir
+        candidates = [
+            Path("proxies.txt"),
+            Path("/home/chandan/music_bot/proxies.txt"),
+            Path("/home/ubuntu/music_bot/proxies.txt"),
+        ]
+        for p_file in candidates:
+            if p_file.exists():
+                try:
+                    with open(p_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            cleaned = line.strip()
+                            if cleaned and not cleaned.startswith("#"):
+                                collected.append(cleaned)
+                    if collected:
+                        logger.info(f"Loaded {len(collected)} proxies from {p_file}")
+                        return collected
+                except Exception as e:
+                    logger.warning(f"Could not read {p_file}: {e}")
+
+        # 2. Check for Free_Proxy_List.json or custom JSON files
+        json_candidates = [
+            Path("Free_Proxy_List.json"),
+            Path("/home/chandan/Downloads/Free_Proxy_List.json"),
+            Path("/home/chandan/music_bot/Free_Proxy_List.json"),
+            Path("/home/ubuntu/music_bot/Free_Proxy_List.json"),
+        ]
+        for j_file in json_candidates:
+            if j_file.exists():
+                try:
+                    with open(j_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, dict) and "ip" in item and "port" in item:
+                                    # Prefer elite / anonymous proxies
+                                    anon = item.get("anonymityLevel", "")
+                                    proto = item.get("protocols", ["http"])[0]
+                                    ip = item.get("ip")
+                                    port = item.get("port")
+                                    collected.append(f"{proto}://{ip}:{port}")
+                    if collected:
+                        logger.info(f"Loaded {len(collected)} proxies from JSON {j_file}")
+                        return collected
+                except Exception as e:
+                    logger.warning(f"Could not read {j_file}: {e}")
+
+        # 3. Fallback to DEFAULT_YOUTUBE_PROXIES
+        return list(DEFAULT_YOUTUBE_PROXIES)
 
     def get_proxies(self) -> List[str]:
         with self._lock:
-            return list(self._proxies)
+            return [p for p in self._proxies if p not in self._exhausted]
 
     def set_proxies(self, proxies: List[str]) -> None:
         with self._lock:
             self._proxies = [p.strip() for p in proxies if p and p.strip()]
+            self._exhausted.clear()
             self._index = 0
             logger.info(f"YouTubeProxyManager updated with {len(self._proxies)} proxies.")
 
+    def mark_exhausted(self, proxy: str) -> None:
+        """Mark a proxy as quota-exhausted or permanently dead (e.g. 402 Payment Required)."""
+        with self._lock:
+            self._exhausted.add(proxy)
+            active_count = len([p for p in self._proxies if p not in self._exhausted])
+            logger.warning(
+                f"Proxy marked exhausted/dead: {proxy}. Active proxies remaining: {active_count}."
+            )
+
     def get_next_proxy(self) -> Optional[str]:
         with self._lock:
-            if not self._proxies:
-                return None
-            proxy = self._proxies[self._index % len(self._proxies)]
+            active = [p for p in self._proxies if p not in self._exhausted]
+            if not active:
+                # If all exhausted, reset to give second chance
+                if self._proxies:
+                    self._exhausted.clear()
+                    active = list(self._proxies)
+                else:
+                    return None
+            proxy = active[self._index % len(active)]
             self._index += 1
             return proxy
 
@@ -92,8 +170,12 @@ class YouTubeProxyManager:
             "network is unreachable",
             "temporary failure",
             "unable to download api page",
+            "402",
+            "payment required",
+            "bandwidthlimit",
         )
         return any(k in msg for k in retry_keywords)
+
 
 # Global singleton
 def _get_configured_proxy_manager() -> YouTubeProxyManager:
@@ -101,6 +183,7 @@ def _get_configured_proxy_manager() -> YouTubeProxyManager:
         from config import YOUTUBE_PROXIES
         return YouTubeProxyManager(YOUTUBE_PROXIES)
     except Exception:
-        return YouTubeProxyManager(DEFAULT_YOUTUBE_PROXIES)
+        return YouTubeProxyManager()
+
 
 youtube_proxy_manager = _get_configured_proxy_manager()
