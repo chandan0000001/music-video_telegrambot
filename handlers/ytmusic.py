@@ -23,13 +23,10 @@ logger = logging.getLogger(__name__)
 router = Router(name="ytmusic_router")
 
 YTMUSIC_HUB_TEXT = (
-    "╔══════════════════════════════════════╗\n"
-    "    ▶️ **YOUTUBE MUSIC STUDIO** ▶️\n"
-    "╚══════════════════════════════════════╝\n\n"
-    "🎧 *1-Tap Studio Audio (320 kbps MP3 & M4A)*\n\n"
-    "Send any `music.youtube.com` track link or song name to download.\n\n"
-    "────────────────────────────\n"
-    "👉 *Paste link or send song name below:*"
+    "▶️ <b>YOUTUBE MUSIC STUDIO</b>\n"
+    "────────────────────\n"
+    "🎧 <i>1-Tap Studio Audio (320 kbps MP3, M4A &amp; WAV)</i>\n\n"
+    "Paste any <code>music.youtube.com</code> link or song title below."
 )
 
 
@@ -41,6 +38,7 @@ async def cb_menu_ytmusic(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("🚫 You are restricted from using this service.", show_alert=True)
         return
 
+    await callback.answer()
     await state.set_state(UserStates.waiting_for_ytmusic)
     if callback.message:
         sent_msg = None
@@ -48,13 +46,13 @@ async def cb_menu_ytmusic(callback: CallbackQuery, state: FSMContext) -> None:
             sent_msg = await callback.message.edit_text(
                 text=YTMUSIC_HUB_TEXT,
                 reply_markup=get_ytmusic_menu_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception:
             sent_msg = await callback.message.answer(
                 text=YTMUSIC_HUB_TEXT,
                 reply_markup=get_ytmusic_menu_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         from utils.selection_session import selection_session_manager
         await selection_session_manager.register_session(
@@ -63,7 +61,6 @@ async def cb_menu_ytmusic(callback: CallbackQuery, state: FSMContext) -> None:
             chat_id=callback.message.chat.id,
             message_id=sent_msg.message_id if sent_msg else callback.message.message_id
         )
-    await callback.answer()
 
 
 @router.message(Command("ytmusic"))
@@ -81,7 +78,7 @@ async def cmd_ytmusic(message: Message, state: FSMContext) -> None:
         sent = await message.answer(
             text=YTMUSIC_HUB_TEXT,
             reply_markup=get_ytmusic_menu_keyboard(),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         from utils.selection_session import selection_session_manager
         chat_id = getattr(getattr(message, "chat", None), "id", getattr(user, "id", 0))

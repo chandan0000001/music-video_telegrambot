@@ -24,12 +24,14 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🎟️ Redeem Coupon", callback_data="coupon:redeem"),
         ],
         [
+            InlineKeyboardButton(text="💎 My Plan", callback_data="menu:plan"),
             InlineKeyboardButton(text="📜 My History", callback_data="menu:history"),
+        ],
+        [
             InlineKeyboardButton(text="❔ Help", callback_data="menu:help"),
-        ]
+            InlineKeyboardButton(text="🔒 Privacy", callback_data="menu:privacy"),
+        ],
     ]
-
-    buttons.append([InlineKeyboardButton(text="🔒 Privacy", callback_data="menu:privacy")])
 
     if is_admin:
         buttons.append([
@@ -38,7 +40,8 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         ])
     else:
         buttons.append([
-            InlineKeyboardButton(text="💬 Support", url="https://t.me/coder_chandan")
+            InlineKeyboardButton(text="ℹ️ About", callback_data="menu:about"),
+            InlineKeyboardButton(text="💬 Support", url="https://t.me/coder_chandan"),
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

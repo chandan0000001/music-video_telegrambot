@@ -9,6 +9,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
+from config import ADMIN_IDS
 from database import db
 from utils.callback_data import parse_callback
 from services.music_service import music_service
@@ -249,23 +250,24 @@ async def cb_select_result(callback: CallbackQuery) -> None:
         return
 
     text = (
-        "🎯 **Selected Track**\n\n"
+        "🎯 <b>Selected Track</b>\n"
+        "────────────────────\n"
         "How would you like to download this media?\n\n"
-        "• 🎧 **Audio:** Convert to MP3, M4A, or WAV (128 - 320 kbps)\n"
-        "• 🎬 **Video:** Download as MP4 (144p - 1080p genuine qualities)"
+        "• 🎧 <b>Audio:</b> MP3, M4A, or WAV (128k–320k)\n"
+        "• 🎬 <b>Video:</b> MP4 (144p – 4K UHD genuine tiers)"
     )
     if callback.message:
         try:
             await callback.message.edit_text(
                 text=text,
                 reply_markup=get_media_type_keyboard(video_id),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception:
             await callback.message.answer(
                 text=text,
                 reply_markup=get_media_type_keyboard(video_id),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         user_id = callback.from_user.id if callback.from_user else 0
         await selection_session_manager.register_session(
@@ -337,7 +339,7 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
         from keyboards.main_menu import get_main_menu_keyboard
         await message.answer(
             text=get_welcome_text(user_name),
-            reply_markup=get_main_menu_keyboard(user.id if user else 0),
+            reply_markup=get_main_menu_keyboard(is_admin=bool(user and user.id in ADMIN_IDS)),
             parse_mode="HTML"
         )
         return
@@ -514,17 +516,18 @@ async def handle_user_text(message: Message, state: FSMContext) -> None:
 
     # If no state is active, offer a 1-tap search button rather than blindly executing an unrequested YouTube search
     clean_query = text[:60]
+    safe_clean = html.escape(clean_query)
     suggest_msg = await message.answer(
-        f"🎵 **Looking for music?**\n\n"
-        f"Would you like to search for `\"{clean_query}\"`?\n\n"
-        "💡 *Click below to search or send any YouTube / Instagram / X link directly:*",
+        f"🎵 <b>Looking for music?</b>\n\n"
+        f"Would you like to search for <code>\"{safe_clean}\"</code>?\n\n"
+        "💡 <i>Tap below to search or send any YouTube, Instagram, or X link directly.</i>",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text=f"🔍 Search \"{clean_query[:25]}\"", callback_data=f"dosearch:{clean_query[:50]}")],
                 [InlineKeyboardButton(text="🔙 Main Menu", callback_data="menu:main")]
             ]
         ),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     from utils.selection_session import selection_session_manager
     chat_id = getattr(getattr(message, "chat", None), "id", getattr(user, "id", 0)) if user else 0

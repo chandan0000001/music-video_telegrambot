@@ -38,12 +38,15 @@ async def handle_home_button(message: Message, state: FSMContext) -> None:
     if action == "more":
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         await message.answer(
-            "☰ <b>MORE</b>\n\nRewards, your history and help—all in one place.\nChoose an option below, or return to the main menu.",
+            "☰ <b>MORE</b>\n────────────────────\n"
+            "Rewards, history, and help below.\n"
+            "💡 Also available: /plan · /privacy · /about",
             parse_mode="HTML", reply_markup=get_more_reply_keyboard(is_admin),
         )
     elif action == "main":
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         await message.answer(
-            MAIN_MENU_TEXT, parse_mode="HTML", reply_markup=get_home_reply_keyboard(),
+            MAIN_MENU_TEXT, parse_mode="HTML", reply_markup=get_home_reply_keyboard(is_admin),
         )
     elif action == "youtube":
         await message.answer(

@@ -97,9 +97,8 @@ async def render_admin_dashboard_text() -> str:
     yt_cookie_status = f"✅ Active ({cookie_f.stat().st_size / 1024:.1f} KB)" if (cookie_f and cookie_f.exists()) else "⚪ None"
 
     return (
-        "╔══════════════════════════════════════╗\n"
-        "       🛡️ <b>ADMIN DASHBOARD</b> 🛡️\n"
-        "╚══════════════════════════════════════╝\n\n"
+        "🛡️ <b>ADMIN DASHBOARD</b>\n"
+        "────────────────────\n"
         f"👥 <b>Total Registered Users:</b> <code>{stats['total_users']}</code>\n"
         f"🆕 <b>New Users Today:</b> <code>{stats['new_users_today']}</code>\n"
         f"🔍 <b>Total Searches Performed:</b> <code>{stats['total_searches']}</code>\n"

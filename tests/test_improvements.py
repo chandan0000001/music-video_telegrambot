@@ -167,3 +167,72 @@ async def test_admin_document_accepts_chrome_cookie_export_name(tmp_path: Path):
     assert cookie_dest.exists()
     assert b".youtube.com" in cookie_dest.read_bytes()
     msg.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_phrase_does_not_leak_admin_button_to_regular_user():
+    """Regular users typing cancel must not see the Admin button."""
+    from handlers.search import handle_user_text
+
+    msg = MagicMock(spec=Message)
+    msg.text = "cancel"
+    msg.from_user = User(id=123456, is_bot=False, first_name="Regular")
+    msg.answer = AsyncMock()
+    state = MagicMock()
+    state.clear = AsyncMock()
+
+    with patch("handlers.search.db.is_user_blocked", AsyncMock(return_value=False)):
+        await handle_user_text(msg, state)
+
+    kb = msg.answer.call_args.kwargs["reply_markup"]
+    callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "admin:dashboard" not in callbacks
+    assert "menu:plan" in callbacks
+
+
+@pytest.mark.asyncio
+async def test_plain_text_with_markdown_symbols_uses_safe_html():
+    """Queries containing underscores or asterisks render safely via HTML."""
+    from handlers.search import handle_user_text
+
+    msg = MagicMock(spec=Message)
+    msg.text = "Alan_Walker *Faded* <Remix>"
+    msg.from_user = User(id=123456, is_bot=False, first_name="Regular")
+    msg.chat = MagicMock(id=123456)
+    msg.answer = AsyncMock(return_value=MagicMock(message_id=55))
+    msg.bot = MagicMock()
+    state = MagicMock()
+    state.get_state = AsyncMock(return_value=None)
+
+    with (
+        patch("handlers.search.db.is_user_blocked", AsyncMock(return_value=False)),
+        patch("utils.selection_session.selection_session_manager.register_session", AsyncMock()),
+    ):
+        await handle_user_text(msg, state)
+
+    assert msg.answer.call_args.kwargs["parse_mode"] == "HTML"
+    assert "&lt;Remix&gt;" in msg.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_plan_command_renders_free_and_vip_status(tmp_path: Path):
+    """/plan renders Free tier details and active VIP quota accurately."""
+    from handlers.start import cmd_or_cb_plan
+
+    test_db = Database(tmp_path / "plan.sqlite3")
+    await test_db.init_db()
+    uid = 777123
+    await test_db.add_or_update_user(uid, "puser", "PlanUser")
+
+    msg = MagicMock(spec=Message)
+    msg.from_user = User(id=uid, is_bot=False, first_name="PlanUser")
+    msg.answer = AsyncMock()
+
+    with patch("handlers.start.db", test_db):
+        await cmd_or_cb_plan(msg)
+        assert "Normal (Free)" in msg.answer.call_args.kwargs["text"]
+
+        await test_db.activate_subscription(uid, "pro")
+        await cmd_or_cb_plan(msg)
+        assert "45/45" in msg.answer.call_args.kwargs["text"]
+

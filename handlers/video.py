@@ -88,15 +88,14 @@ async def cb_choose_video_quality(callback: CallbackQuery) -> None:
     safe_duration = html.escape(info.get("duration_str", "00:00"))
 
     text = (
-        "╔══════════════════════════════════════╗\n"
-        "     🎬 VIDEO RESOLUTION SELECTION 🎬\n"
-        "╚══════════════════════════════════════╝\n\n"
+        "🎬 <b>VIDEO RESOLUTION SELECTION</b>\n"
+        "────────────────────\n"
         f"🎬 <b>Title:</b> {safe_title}\n"
         f"⏱ <b>Duration:</b> <code>{safe_duration}</code>\n"
-        "──────────────────────────────────────\n"
-        "✨ <b>144p - 720p HD are 100% Free!</b>\n"
-        "⚡ <i>1080p Full HD &amp; 4K require VIP Pass.</i>\n"
-        "──────────────────────────────────────\n"
+        "────────────────────\n"
+        "✨ <b>144p – 720p HD:</b> 100% Free\n"
+        "⚡ <b>1080p · 2K · 4K:</b> VIP Pass\n"
+        "────────────────────\n"
         f"{admin_banner}"
         "Select a genuinely available resolution below (low to high):"
     )
@@ -195,24 +194,27 @@ async def cb_start_video_download(callback: CallbackQuery) -> None:
             pro_price = SUBSCRIPTION_PLANS.get("pro", {}).get("price", 100)
             ultra_price = SUBSCRIPTION_PLANS.get("ultra", {}).get("price", 299)
             max_price = SUBSCRIPTION_PLANS.get("max", {}).get("price", 799)
+            res_label = (
+                "4K UHD (2160p)" if resolution == "2160p"
+                else ("2K QHD (1440p)" if resolution == "1440p" else "1080p Full HD")
+            )
             paywall_text = (
-                "╔══════════════════════════════════════╗\n"
-                f"   💎 PREMIUM VIDEO ACCESS ({resolution}) 💎\n"
-                "╚══════════════════════════════════════╝\n\n"
-                "✨ Standard qualities (`144p` - `720p HD`) & music are **100% Free**.\n"
-                f"To unlock **{resolution} Full HD**, choose an access pass below:\n\n"
-                f"⚡ **Single Video:** `₹{price}` (Unlock this video only)\n"
-                f"⚡ **Go Pass:** `₹{go_price} / 7 Days` (20 HD videos/day)\n"
-                f"🚀 **Pro Pass:** `₹{pro_price} / 30 Days` (45 HD videos/day)\n"
-                f"⚡ **Ultra Pass:** `₹{ultra_price} / 90 Days` (80 HD videos/day)\n"
-                f"👑 **Max VIP:** `₹{max_price} / 365 Days` (150 HD videos/day + 2GB Bandwidth)\n\n"
-                "──────────────────────────────────────\n"
-                "👇 *Tap a button below to get your instant UPI QR code:*"
+                f"💎 <b>PREMIUM VIDEO ACCESS ({html.escape(resolution)})</b>\n"
+                "────────────────────\n"
+                "✨ Standard qualities (<code>144p</code> – <code>720p HD</code>) &amp; music are <b>100% Free</b>.\n"
+                f"Unlock <b>{html.escape(res_label)}</b> with an instant pass:\n\n"
+                f"⚡ <b>Single Video:</b> <code>₹{price}</code> (This video only)\n"
+                f"⚡ <b>Go Pass:</b> <code>₹{go_price} / 7 Days</code> (20 HD/day)\n"
+                f"🚀 <b>Pro Pass:</b> <code>₹{pro_price} / 30 Days</code> (45 HD/day)\n"
+                f"⚡ <b>Ultra Pass:</b> <code>₹{ultra_price} / 90 Days</code> (80 HD/day)\n"
+                f"👑 <b>Max VIP:</b> <code>₹{max_price} / 365 Days</code> (150 HD/4K/day)\n"
+                "────────────────────\n"
+                "👇 <i>Tap below to generate your instant UPI QR code:</i>"
             )
             await status_msg.edit_text(
                 text=paywall_text,
                 reply_markup=get_paywall_keyboard(video_id, resolution),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await selection_session_manager.register_session(
                 bot=callback.bot,

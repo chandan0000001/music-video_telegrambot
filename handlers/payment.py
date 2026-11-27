@@ -88,6 +88,9 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
             )
         return
 
+    # Answer callback immediately if user passed validation to avoid Telegram spinner hang during QR/metadata setup
+    await callback.answer("Generating UPI QR code...")
+
     # Determine order_type and amount
     if plan_type in ("go", "pro", "ultra", "max", "weekly", "monthly"):
         plan_key = "go" if plan_type == "weekly" else ("pro" if plan_type == "monthly" else plan_type)
@@ -156,7 +159,6 @@ async def cb_select_payment_plan(callback: CallbackQuery) -> None:
             video_id=clean_video_id,
             is_photo=True
         )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("submit_utr:"))

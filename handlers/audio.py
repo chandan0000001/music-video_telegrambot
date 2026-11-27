@@ -37,24 +37,25 @@ async def cb_choose_audio_format(callback: CallbackQuery) -> None:
     if not await selection_session_manager.enforce_session_validity(callback, video_id):
         return
     text = (
-        "🎧 **Audio Format Selection**\n\n"
-        "Please choose your preferred audio format:\n"
-        "• **MP3:** Universally compatible, high quality audio.\n"
-        "• **M4A:** AAC codec, efficient compression with great fidelity.\n"
-        "• **WAV:** Lossless uncompressed audio."
+        "🎧 <b>AUDIO FORMAT SELECTION</b>\n"
+        "────────────────────\n"
+        "Choose your preferred audio format:\n"
+        "• <b>MP3:</b> Universally compatible\n"
+        "• <b>M4A:</b> AAC codec, crisp &amp; compact\n"
+        "• <b>WAV:</b> Lossless uncompressed audio"
     )
     if callback.message:
         try:
             await callback.message.edit_text(
                 text=text,
                 reply_markup=get_audio_format_keyboard(video_id),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception:
             await callback.message.answer(
                 text=text,
                 reply_markup=get_audio_format_keyboard(video_id),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         # Track session with 10-min TTL
@@ -100,15 +101,14 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
     approx_sizes = info.get("approx_audio_sizes", {}) if (success and info) else {}
 
     text = (
-        "╔══════════════════════════════════════╗\n"
-        f"      🎧 AUDIO QUALITY ({selected_format.upper()}) 🎧\n"
-        "╚══════════════════════════════════════╝\n\n"
-        "Select the desired bitrate for conversion:\n"
-        "• ⚡ **128 kbps:** Fast download, standard sound\n"
-        "• ⚡ **192 kbps:** Balanced, crisp fidelity\n"
-        "• ⚡ **320 kbps:** Maximum studio bitrate\n"
-        "──────────────────────────────────────\n"
-        "💡 *Bitrate conversions reflect genuine source parameters.*"
+        f"🎧 <b>AUDIO QUALITY ({selected_format.upper()})</b>\n"
+        "────────────────────\n"
+        "Select bitrate:\n"
+        "• ⚡ <b>128 kbps:</b> Fast download, standard sound\n"
+        "• ⚡ <b>192 kbps:</b> Balanced, crisp fidelity\n"
+        "• ⚡ <b>320 kbps:</b> Maximum studio bitrate\n"
+        "────────────────────\n"
+        "💡 <i>Conversions use high-fidelity FFmpeg encoding.</i>"
     )
 
     if callback.message:
@@ -116,7 +116,7 @@ async def cb_choose_audio_bitrate(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 text=text,
                 reply_markup=get_audio_quality_keyboard(video_id, selected_format, approx_sizes),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception:
             pass

@@ -19,59 +19,51 @@ router = Router(name="start_router")
 
 
 def get_welcome_text(user_name: str = "Music Lover") -> str:
-    """Framed welcome card inspired by the native Telegram menu reference."""
+    """Clean, mobile-friendly welcome card."""
     return (
-        "<b>╔══════════════════════╗</b>\n"
-        "    🔥 <b>Music &amp; Video</b> 🔥\n"
-        "<b>╚══════════════════════╝</b>\n\n"
-        "👨‍💻 Developer · @coder_chandan\n"
-        "🎧 Music · Videos · Reels\n"
-        "🔗 YouTube, Instagram or X\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💎 Welcome, <b>{html.escape(user_name)}</b>! 💎\n"
-        "🚀 <i>Your media bot is ready.</i>"
+        "🎧 <b>Music &amp; Video Downloader</b>\n"
+        "────────────────────\n"
+        "▶️ YouTube · 📸 Instagram or X\n"
+        "🎵 Studio Audio (MP3, M4A, WAV)\n"
+        "🎬 HD &amp; 4K Video (up to 2 GB)\n\n"
+        f"👋 Welcome, <b>{html.escape(user_name)}</b>!\n"
+        "💡 <i>Use the menu below or paste any link to start.</i>"
     )
 
 
 MAIN_MENU_TEXT = (
-    "<b>╔══════════════════╗</b>\n"
-    "      ⚡ <b>MAIN MENU</b> ⚡\n"
-    "<b>╚══════════════════╝</b>\n\n"
-    "🔹 Select an option below 👇\n"
-    "💡 <i>Or paste a link to get started.</i>"
+    "⚡ <b>MAIN MENU</b>\n"
+    "────────────────────\n"
+    "Choose an option below or paste any supported link."
 )
 
 
 WELCOME_TEXT = get_welcome_text("Music Lover")
 
 HELP_TEXT = (
-    "╔══════════════════════════════════════╗\n"
-    "             📖 USER GUIDE 📖\n"
-    "╚══════════════════════════════════════╝\n\n"
-    "🎯 **Quick Ways to Download:**\n"
-    "• 🎵 **Song Search:** Send any title or artist\n"
-    "• ▶️ **YouTube:** Send any YouTube or YT Music link\n"
-    "• 📸 **Instagram:** Send any Reel, Post, or Carousel link\n"
-    "• 𝕏 **X (Twitter):** Send any tweet link for original HD media\n"
-    "──────────────────────────────────────\n"
-    "⚡ **Formats & Quality:**\n"
-    "• 🎧 **Audio:** MP3 (128k, 192k, 320k), M4A, WAV\n"
-    "• 🎬 **Video:** 144p, 240p, 360p, 480p, 720p HD (Free)\n"
-    "• 💎 **Premium:** 1080p Full HD, 1440p, 4K (VIP Pass)\n"
-    "──────────────────────────────────────\n"
-    "💡 *Commands:* `/start` • `/ytmusic` • `/instagram` • `/twitter` • `/history` • `/privacy`"
+    "📖 <b>USER GUIDE</b>\n"
+    "────────────────────\n"
+    "🎯 <b>Quick Ways to Download:</b>\n"
+    "• 🎵 <b>Song Search:</b> Send any song title or artist\n"
+    "• ▶️ <b>YouTube:</b> Paste any YouTube or YT Music link\n"
+    "• 📸 <b>Instagram:</b> Reels, Posts, Stories, Albums &amp; Profiles\n"
+    "• 𝕏 <b>X (Twitter):</b> Tweets with HD video, GIF, or photos\n\n"
+    "⚡ <b>Formats &amp; Quality:</b>\n"
+    "• 🎧 <b>Audio:</b> MP3 (128k–320k), M4A, Lossless WAV\n"
+    "• 🎬 <b>Free Video:</b> 144p – 720p HD\n"
+    "• 👑 <b>VIP Video:</b> 1080p Full HD, 2K (1440p) &amp; 4K (2160p)\n\n"
+    "💡 <b>Commands:</b> <code>/start</code> · <code>/plan</code> · <code>/ytmusic</code> · "
+    "<code>/instagram</code> · <code>/twitter</code> · <code>/history</code> · <code>/privacy</code>"
 )
 
 ABOUT_TEXT = (
-    "╔══════════════════════════════════════╗\n"
-    "             ℹ️ ABOUT BOT ℹ️\n"
-    "╚══════════════════════════════════════╝\n\n"
-    "• **Bot:** Music & Video Downloader (@songsuperzxbot)\n"
-    "• **Engine:** Python 3.12+, aiogram 3, yt-dlp & FFmpeg\n"
-    "• **Developer:** @coder_chandan\n"
-    "• **Source Code:** Contact Admin (@coder_chandan)\n"
-    "──────────────────────────────────────\n"
-    "🔒 *30-Min Auto-Drain: Temp files purged automatically.*"
+    "ℹ️ <b>ABOUT BOT</b>\n"
+    "────────────────────\n"
+    "• <b>Bot:</b> Music &amp; Video Downloader (@songsuperzxbot)\n"
+    "• <b>Engine:</b> Python 3.12+, aiogram 3, yt-dlp, FFmpeg &amp; MTProto\n"
+    "• <b>Developer:</b> @coder_chandan\n"
+    "• <b>Support / Inquiries:</b> Contact Admin (@coder_chandan)\n\n"
+    "🔒 <i>30-Min Auto-Drain: Temporary files are deleted automatically after delivery.</i>"
 )
 
 
@@ -116,7 +108,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             try:
                 info_success, info, _ = await media_service.get_media_info(f"https://www.youtube.com/watch?v={video_id}")
                 title = info.get("title", f"Track {video_id}") if (info_success and info) else f"Track {video_id}"
-                duration = info.get("duration_string", "N/A") if (info_success and info) else "N/A"
+                duration = (info.get("duration_str") or info.get("duration_string") or "N/A") if (info_success and info) else "N/A"
             except Exception:
                 title = f"Track {video_id}"
                 duration = "N/A"
@@ -127,8 +119,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                 f"🎯 <b>Selected Media:</b> {safe_title}\n"
                 f"⏱ <b>Duration:</b> <code>{safe_dur}</code>\n\n"
                 "How would you like to download this media?\n\n"
-                "• 🎧 <b>Audio:</b> Convert to MP3 (128-320k), M4A, or WAV\n"
-                "• 🎬 <b>Video:</b> Download MP4 from 144p to 1080p HD"
+                "• 🎧 <b>Audio:</b> MP3 (128k–320k), M4A, or WAV\n"
+                "• 🎬 <b>Video:</b> MP4 from 144p up to 4K UHD"
             )
             try:
                 card_msg = await message.answer(
@@ -194,10 +186,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     await message.answer(
         text=welcome_prefix + get_welcome_text(first_name),
+        reply_markup=get_home_reply_keyboard(is_admin),
         parse_mode="HTML"
-    )
-    await message.answer(
-        MAIN_MENU_TEXT, reply_markup=get_home_reply_keyboard(is_admin), parse_mode="HTML"
     )
 
 
@@ -207,7 +197,7 @@ async def cmd_help(message: Message) -> None:
     await message.answer(
         text=HELP_TEXT,
         reply_markup=get_back_to_main_keyboard(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 
@@ -217,8 +207,86 @@ async def cmd_about(message: Message) -> None:
     await message.answer(
         text=ABOUT_TEXT,
         reply_markup=get_back_to_main_keyboard(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
+
+
+@router.message(Command("plan", "vip"))
+@router.callback_query(F.data == "menu:plan")
+async def cmd_or_cb_plan(event: Message | CallbackQuery) -> None:
+    """Display user's current plan tier, daily HD quota, and expiry."""
+    from utils.time_utils import format_ist
+    from config import SUBSCRIPTION_PLANS
+
+    user = event.from_user
+    if not user:
+        return
+
+    is_admin = user.id in ADMIN_IDS
+    sub = await db.get_user_subscription(user.id)
+
+    if is_admin:
+        text = (
+            "👑 <b>MY PLAN &amp; QUOTA</b>\n"
+            "────────────────────\n"
+            "• <b>Tier:</b> 👑 Administrator (Unlimited)\n"
+            "• <b>Video Quality:</b> 144p – 4K UHD Unlocked\n"
+            "• <b>Daily Quota:</b> Unlimited"
+        )
+    elif sub and sub.get("is_active"):
+        tier_key = (sub.get("plan_tier") or "go").lower()
+        badge = SUBSCRIPTION_PLANS.get(tier_key, {}).get("badge", f"⚡ {tier_key.capitalize()} Pass")
+        exp_ist = format_ist(sub.get("expiry_date"))
+        used = int(sub.get("today_used", 0))
+        limit = max(1, int(sub.get("daily_limit", 1)))
+        remaining = int(sub.get("today_remaining", 0))
+        text = (
+            "💎 <b>MY PLAN &amp; QUOTA</b>\n"
+            "────────────────────\n"
+            f"• <b>Active Plan:</b> {html.escape(badge)}\n"
+            f"• <b>Remaining Today:</b> <code>{remaining}/{limit}</code> HD videos (used {used})\n"
+            f"• <b>Expires:</b> <code>{html.escape(exp_ist)}</code>\n\n"
+            "⚡ <i>Failed or cancelled VIP downloads automatically refund quota.</i>"
+        )
+    else:
+        text = (
+            "🟢 <b>MY PLAN &amp; QUOTA</b>\n"
+            "────────────────────\n"
+            "• <b>Current Tier:</b> Normal (Free)\n"
+            "• <b>Included:</b> Unlimited audio (MP3/M4A/WAV) &amp; 144p–720p HD videos\n"
+            "• <b>1080p / 2K / 4K:</b> Requires VIP Pass or single-video unlock\n\n"
+            "🎁 <i>Tip: Invite 3 friends (/referral) or use /coupon to unlock VIP free!</i>"
+        )
+
+    kb = get_back_to_main_keyboard()
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+        if event.message:
+            try:
+                await event.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+            except Exception:
+                await event.message.answer(text=text, reply_markup=kb, parse_mode="HTML")
+    else:
+        await event.answer(text=text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:about")
+async def cb_about_menu(callback: CallbackQuery) -> None:
+    """Display about card from inline menu."""
+    await callback.answer()
+    if callback.message:
+        try:
+            await callback.message.edit_text(
+                text=ABOUT_TEXT,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+        except Exception:
+            await callback.message.answer(
+                text=ABOUT_TEXT,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
 
 
 PRIVACY_TEXT = (
@@ -252,6 +320,7 @@ async def cmd_privacy(message: Message) -> None:
 @router.callback_query(F.data == "menu:privacy")
 async def cb_privacy_menu(callback: CallbackQuery) -> None:
     """Display privacy policy from menu."""
+    await callback.answer()
     if callback.message:
         try:
             await callback.message.edit_text(
@@ -265,55 +334,51 @@ async def cb_privacy_menu(callback: CallbackQuery) -> None:
                 reply_markup=get_back_to_main_keyboard(),
                 parse_mode="HTML"
             )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Return to main menu."""
+    await callback.answer()
     await state.clear()
     user_id = callback.from_user.id if callback.from_user else 0
     from utils.selection_session import selection_session_manager
     selection_session_manager.clear_session(user_id)
-    first_name = (callback.from_user.first_name or "Music Lover") if callback.from_user else "Music Lover"
     is_admin = user_id in ADMIN_IDS
     if callback.message:
         await callback.message.answer(
             MAIN_MENU_TEXT, reply_markup=get_home_reply_keyboard(is_admin), parse_mode="HTML"
         )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:help")
 async def cb_help_menu(callback: CallbackQuery) -> None:
     """Display help from menu."""
-    try:
-        if callback.message:
-            if callback.message.photo:
-                try:
-                    await callback.message.delete()
-                except Exception:
-                    pass
+    await callback.answer()
+    if callback.message:
+        if callback.message.photo:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(
+                text=HELP_TEXT,
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+        else:
+            try:
+                await callback.message.edit_text(
+                    text=HELP_TEXT,
+                    reply_markup=get_back_to_main_keyboard(),
+                    parse_mode="HTML"
+                )
+            except Exception:
                 await callback.message.answer(
                     text=HELP_TEXT,
                     reply_markup=get_back_to_main_keyboard(),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
-            else:
-                try:
-                    await callback.message.edit_text(
-                        text=HELP_TEXT,
-                        reply_markup=get_back_to_main_keyboard(),
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    await callback.message.answer(
-                        text=HELP_TEXT,
-                        reply_markup=get_back_to_main_keyboard(),
-                        parse_mode="Markdown"
-                    )
-    finally:
-        await callback.answer()
 
 
 @router.callback_query(F.data == "cancel_action")

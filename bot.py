@@ -93,6 +93,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="search", description="🔍 Search songs by title or artist"),
         BotCommand(command="referral", description="🎁 Invite Friends & Earn VIP"),
         BotCommand(command="coupon", description="🎟️ Redeem Coupon or Promo Code"),
+        BotCommand(command="plan", description="💎 View VIP plan & daily quota"),
         BotCommand(command="history", description="📜 View recent searches & downloads"),
         BotCommand(command="help", description="📖 Features guide & specs"),
         BotCommand(command="about", description="ℹ️ Engine specs & developer info"),

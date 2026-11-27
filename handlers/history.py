@@ -81,6 +81,7 @@ async def cb_history(callback: CallbackQuery) -> None:
     user = callback.from_user
     if not user:
         return
+    await callback.answer()
     text = await render_user_history(user.id)
     if callback.message:
         sent_msg = None
@@ -103,4 +104,3 @@ async def cb_history(callback: CallbackQuery) -> None:
             chat_id=callback.message.chat.id,
             message_id=sent_msg.message_id if sent_msg else callback.message.message_id
         )
-    await callback.answer()
