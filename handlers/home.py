@@ -12,7 +12,7 @@ router = Router(name="home_keyboard_router")
 
 @router.message(F.text.in_(HOME_ACTIONS))
 async def handle_home_button(message: Message, state: FSMContext) -> None:
-    from handlers.start import cmd_start, cmd_help, MAIN_MENU_TEXT
+    from handlers.start import cmd_start, cmd_help, cmd_hide, MAIN_MENU_TEXT
     from handlers.search import cmd_search
     from handlers.ytmusic import cmd_ytmusic
     from handlers.instagram import cmd_instagram
@@ -34,7 +34,7 @@ async def handle_home_button(message: Message, state: FSMContext) -> None:
         "instagram": cmd_instagram, "twitter": cmd_twitter,
         "coupon": cmd_redeem_coupon, "admin": cmd_admin,
     }
-    plain_handlers = {"referral": cmd_referral, "history": cmd_history, "help": cmd_help}
+    plain_handlers = {"referral": cmd_referral, "history": cmd_history, "help": cmd_help, "hide": cmd_hide}
     if action == "more":
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         await message.answer(

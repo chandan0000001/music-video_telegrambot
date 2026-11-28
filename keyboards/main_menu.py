@@ -44,6 +44,10 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💬 Support", url="https://t.me/coder_chandan"),
         ])
 
+    buttons.append([
+        InlineKeyboardButton(text="🎛 Show Quick Bar", callback_data="menu:show_bar"),
+    ])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -101,6 +105,7 @@ HOME_ACTIONS = {
     "📜 HISTORY": "history",
     "❔ HELP": "help",
     "🏠 MAIN MENU": "main",
+    "🙈 HIDE BAR": "hide",
     "⚙️ ADMIN": "admin",
 }
 
@@ -110,7 +115,7 @@ def _reply_keyboard(rows, placeholder):
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=label) for label in row] for row in rows],
         resize_keyboard=True,
-        is_persistent=True,
+        is_persistent=False,
         one_time_keyboard=False,
         input_field_placeholder=placeholder,
     )
@@ -125,15 +130,15 @@ def get_home_reply_keyboard(is_admin: bool = False):
 
 
 def get_more_reply_keyboard(is_admin: bool = False):
-    """Secondary actions with an always-visible route back home."""
+    """Secondary actions with an always-visible route back home or to hide the bar."""
     rows = [
         ["🎁 INVITE & EARN", "🎟 REDEEM COUPON"],
         ["📜 HISTORY", "❔ HELP"],
     ]
     if is_admin:
         rows.append(["⚙️ ADMIN"])
-    rows.append(["🏠 MAIN MENU"])
-    return _reply_keyboard(rows, "Choose an option or return to the main menu…")
+    rows.append(["🏠 MAIN MENU", "🙈 HIDE BAR"])
+    return _reply_keyboard(rows, "Choose an option, return home, or hide the bar…")
 
 
 def get_youtube_hub_keyboard() -> InlineKeyboardMarkup:

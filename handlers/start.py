@@ -4,7 +4,7 @@ Start, Help, and About Command Handlers
 import html
 import logging
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 
@@ -184,9 +184,37 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                     except Exception as e:
                         logger.warning(f"Failed to notify inviter {inviter_id}: {e}")
 
+    try:
+        rm_msg = await message.answer(
+            text="🧹",
+            reply_markup=ReplyKeyboardRemove(),
+            disable_notification=True
+        )
+        if rm_msg and hasattr(rm_msg, "delete"):
+            await rm_msg.delete()
+    except Exception:
+        pass
+
     await message.answer(
         text=welcome_prefix + get_welcome_text(first_name),
-        reply_markup=get_home_reply_keyboard(is_admin),
+        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("hide"))
+async def cmd_hide(message: Message) -> None:
+    """Hide the bottom reply keyboard bar and show clean inline navigation."""
+    user = message.from_user
+    is_admin = bool(user and user.id in ADMIN_IDS)
+    await message.answer(
+        text="🙈 <b>Quick Bar hidden.</b>\nUse /start or tap <b>🎛 Show Quick Bar</b> anytime to reopen it.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="HTML"
+    )
+    await message.answer(
+        text=MAIN_MENU_TEXT,
+        reply_markup=get_main_menu_keyboard(is_admin=is_admin),
         parse_mode="HTML"
     )
 
@@ -338,16 +366,40 @@ async def cb_privacy_menu(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
-    """Return to main menu."""
+    """Return to clean inline main menu without showing the heavy bottom bar."""
     await callback.answer()
     await state.clear()
     user_id = callback.from_user.id if callback.from_user else 0
     from utils.selection_session import selection_session_manager
     selection_session_manager.clear_session(user_id)
     is_admin = user_id in ADMIN_IDS
+    markup = get_main_menu_keyboard(is_admin=is_admin)
+    if callback.message:
+        if callback.message.photo:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(MAIN_MENU_TEXT, reply_markup=markup, parse_mode="HTML")
+        else:
+            try:
+                await callback.message.edit_text(MAIN_MENU_TEXT, reply_markup=markup, parse_mode="HTML")
+            except Exception:
+                await callback.message.answer(MAIN_MENU_TEXT, reply_markup=markup, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:show_bar")
+async def cb_show_quick_bar(callback: CallbackQuery) -> None:
+    """Open the optional compact bottom reply bar on demand."""
+    await callback.answer()
+    user_id = callback.from_user.id if callback.from_user else 0
+    is_admin = user_id in ADMIN_IDS
     if callback.message:
         await callback.message.answer(
-            MAIN_MENU_TEXT, reply_markup=get_home_reply_keyboard(is_admin), parse_mode="HTML"
+            "🎛 <b>Quick Bar opened below.</b>\n"
+            "Tap <b>☰ MORE → 🙈 HIDE BAR</b> or send /hide anytime to hide it.",
+            reply_markup=get_home_reply_keyboard(is_admin),
+            parse_mode="HTML",
         )
 
 
