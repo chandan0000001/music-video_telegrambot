@@ -407,20 +407,30 @@ class InstagramService:
         # Check carousel
         if first.get("carousel_media"):
             for c_item in first["carousel_media"]:
-                if c_item.get("video_versions"):
-                    v_url = c_item["video_versions"][0]["url"]
-                    items.append({"type": "video", "url": v_url})
-                elif c_item.get("image_versions2", {}).get("candidates"):
-                    img_url = c_item["image_versions2"]["candidates"][0]["url"]
-                    items.append({"type": "photo", "url": img_url})
+                v_versions = c_item.get("video_versions")
+                img_candidates = c_item.get("image_versions2", {}).get("candidates", [])
+                if v_versions:
+                    best_vid = max(v_versions, key=lambda v: ((v.get("width") or 0) * (v.get("height") or 0), v.get("type", 0)))
+                    items.append({"type": "video", "url": best_vid["url"]})
+                elif img_candidates:
+                    best_img = max(img_candidates, key=lambda i: (i.get("width") or 0) * (i.get("height") or 0))
+                    items.append({"type": "photo", "url": best_img["url"]})
             return items
 
-        # Single video
+        # Single video (exact original highest uploaded resolution)
         if first.get("video_versions"):
-            return [{"type": "video", "url": first["video_versions"][0]["url"]}]
-        # Single photo
+            best_vid = max(
+                first["video_versions"],
+                key=lambda v: ((v.get("width") or 0) * (v.get("height") or 0), v.get("type", 0)),
+            )
+            return [{"type": "video", "url": best_vid["url"]}]
+        # Single photo (exact original highest uploaded resolution)
         if first.get("image_versions2", {}).get("candidates"):
-            return [{"type": "photo", "url": first["image_versions2"]["candidates"][0]["url"]}]
+            best_img = max(
+                first["image_versions2"]["candidates"],
+                key=lambda i: (i.get("width") or 0) * (i.get("height") or 0),
+            )
+            return [{"type": "photo", "url": best_img["url"]}]
 
         return items
 
@@ -445,8 +455,13 @@ class InstagramService:
 
         if node.get("is_video") and node.get("video_url"):
             return [{"type": "video", "url": node["video_url"]}]
-        if node.get("display_url"):
-            return [{"type": "photo", "url": node["display_url"]}]
+        if node.get("display_url") or node.get("display_resources"):
+            best_url = node.get("display_url")
+            if node.get("display_resources"):
+                best_res = max(node["display_resources"], key=lambda r: r.get("config_width", 0))
+                best_url = best_res.get("src") or best_url
+            if best_url:
+                return [{"type": "photo", "url": best_url}]
 
         return items
 
@@ -705,7 +720,25 @@ class InstagramService:
                 if items:
                     return items, None
 
-            # Fallback to standard yt-dlp extraction if CustomInstagramIE did not capture product
+            # Fallback to standard yt-dlp extraction keeping original max resolution (no downscale/upscale)
+            def _pick_best_ytdlp_url(item_info: Dict[str, Any]) -> Optional[str]:
+                formats = [
+                    f for f in (item_info.get("formats") or [])
+                    if isinstance(f, dict) and f.get("url")
+                ]
+                if formats:
+                    best_fmt = max(
+                        formats,
+                        key=lambda f: (
+                            1 if (f.get("vcodec") and f.get("vcodec") != "none") else 0,
+                            (f.get("width") or 0) * (f.get("height") or 0),
+                            float(f.get("tbr") or 0),
+                        ),
+                    )
+                    if best_fmt.get("url"):
+                        return best_fmt["url"]
+                return item_info.get("url") or item_info.get("thumbnail")
+
             try:
                 info = ydl.extract_info(url, download=False)
                 if info:
@@ -714,11 +747,7 @@ class InstagramService:
                         for entry in info["entries"]:
                             if not entry:
                                 continue
-                            direct_url = entry.get("url")
-                            if not direct_url and entry.get("formats"):
-                                direct_url = entry["formats"][-1].get("url")
-                            if not direct_url and entry.get("thumbnail"):
-                                direct_url = entry.get("thumbnail")
+                            direct_url = _pick_best_ytdlp_url(entry)
                             if direct_url:
                                 is_video = bool(entry.get("vcodec") and entry.get("vcodec") != "none") or (entry.get("ext") == "mp4")
                                 items.append({
@@ -732,11 +761,7 @@ class InstagramService:
                         if items:
                             return items, None
 
-                    direct_url = info.get("url")
-                    if not direct_url and info.get("formats"):
-                        direct_url = info["formats"][-1].get("url")
-                    if not direct_url and info.get("thumbnail"):
-                        direct_url = info.get("thumbnail")
+                    direct_url = _pick_best_ytdlp_url(info)
                     if direct_url:
                         is_video = bool(info.get("vcodec") and info.get("vcodec") != "none") or (info.get("ext") == "mp4")
                         return [{
@@ -822,13 +847,6 @@ class InstagramService:
             dest_file = job_dir / f"media_1.{ext}"
             ok = await self.download_file(item["url"], dest_file, tracker=tracker)
             if ok and dest_file.exists() and dest_file.stat().st_size > 0:
-                if item_type == "video":
-                    from services.ffmpeg_service import ffmpeg_service
-                    capped_file = job_dir / f"capped_{dest_file.name}"
-                    did_cap = await ffmpeg_service.cap_video_to_1080p(dest_file, capped_file)
-                    if did_cap and capped_file.exists() and capped_file.stat().st_size > 0:
-                        dest_file.unlink(missing_ok=True)
-                        capped_file.rename(dest_file)
                 return [{**item, "file_path": dest_file, "index": 0}]
             return []
 
@@ -844,22 +862,6 @@ class InstagramService:
         )
         metrics.incr("downloads", max(1, len(downloaded)))
         metrics.record_timing("download", (time.perf_counter() - dl_start) * 1000.0)
-
-        # Cap any videos exceeding 1080p to 1080p using FFmpeg with bounded concurrency
-        from services.ffmpeg_service import ffmpeg_service
-        ff_sem = asyncio.Semaphore(2)
-
-        async def _cap_video(it: Dict[str, Any]) -> None:
-            if it.get("type") == "video" and it.get("file_path"):
-                v_file = it["file_path"]
-                capped_file = job_dir / f"capped_{v_file.name}"
-                async with ff_sem:
-                    did_cap = await ffmpeg_service.cap_video_to_1080p(v_file, capped_file)
-                if did_cap and capped_file.exists() and capped_file.stat().st_size > 0:
-                    v_file.unlink(missing_ok=True)
-                    capped_file.rename(v_file)
-
-        await asyncio.gather(*[_cap_video(it) for it in downloaded])
 
         return downloaded
 

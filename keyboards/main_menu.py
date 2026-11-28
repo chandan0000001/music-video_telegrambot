@@ -44,10 +44,6 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💬 Support", url="https://t.me/coder_chandan"),
         ])
 
-    buttons.append([
-        InlineKeyboardButton(text="🎛 Show Quick Bar", callback_data="menu:show_bar"),
-    ])
-
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

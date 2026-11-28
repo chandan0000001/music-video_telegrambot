@@ -63,9 +63,10 @@ async def test_more_and_main_menu_replace_keyboard_and_clear_input_state():
 
 
 @pytest.mark.asyncio
-async def test_start_hides_bottom_bar_and_show_hide_toggle(tmp_path):
+async def test_start_shows_collapsible_quick_bar_only_and_hide_works(tmp_path):
+    from aiogram.types import ReplyKeyboardMarkup
     from database import Database
-    from handlers.start import cmd_start, cmd_hide, cb_show_quick_bar, cb_main_menu
+    from handlers.start import cmd_start, cmd_hide, cb_main_menu
 
     test_db = Database(db_path=tmp_path / "start_ui.db")
     await test_db.init_db()
@@ -84,40 +85,26 @@ async def test_start_hides_bottom_bar_and_show_hide_toggle(tmp_path):
         Message, "answer", new_callable=AsyncMock
     ) as answer:
         await cmd_start(message, state)
-        assert answer.await_count == 2
-        assert isinstance(answer.await_args_list[0].kwargs["reply_markup"], ReplyKeyboardRemove)
-        final_markup = answer.await_args_list[1].kwargs["reply_markup"]
-        assert isinstance(final_markup, InlineKeyboardMarkup)
-        callbacks = [b.callback_data for row in final_markup.inline_keyboard for b in row if b.callback_data]
-        assert "menu:show_bar" in callbacks
+        answer.assert_awaited_once()
+        markup = answer.await_args.kwargs["reply_markup"]
+        assert isinstance(markup, ReplyKeyboardMarkup)
+        assert not markup.is_persistent
+        assert [b.text for b in markup.keyboard[0]] == ["▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X/Twitter"]
 
-    # Tapping Show Quick Bar opens the bottom reply keyboard
-    cb = MagicMock()
-    cb.from_user = MagicMock(id=321)
-    cb.answer = AsyncMock()
-    cb.message = MagicMock()
-    cb.message.answer = AsyncMock()
-    await cb_show_quick_bar(cb)
-    assert [b.text for b in cb.message.answer.await_args.kwargs["reply_markup"].keyboard[0]] == [
-        "▶️ YOUTUBE", "📸 INSTAGRAM", "𝕏 X/Twitter"
-    ]
-
-    # /hide removes the bottom bar and shows clean inline menu
+    # /hide cleanly removes the bottom bar without sending a bloated inline grid
     with patch.object(Message, "answer", new_callable=AsyncMock) as hide_answer:
         await cmd_hide(message)
-        assert hide_answer.await_count == 2
-        assert isinstance(hide_answer.await_args_list[0].kwargs["reply_markup"], ReplyKeyboardRemove)
-        assert isinstance(hide_answer.await_args_list[1].kwargs["reply_markup"], InlineKeyboardMarkup)
+        hide_answer.assert_awaited_once()
+        assert isinstance(hide_answer.await_args.kwargs["reply_markup"], ReplyKeyboardRemove)
 
-    # menu:main keeps clean inline menu without bottom bar
+    # menu:main returns clean collapsible Quick Bar
     cb_main = MagicMock()
     cb_main.from_user = MagicMock(id=321)
     cb_main.answer = AsyncMock()
     cb_main.message = MagicMock()
-    cb_main.message.photo = None
-    cb_main.message.edit_text = AsyncMock()
+    cb_main.message.answer = AsyncMock()
     await cb_main_menu(cb_main, state)
-    assert isinstance(cb_main.message.edit_text.await_args.kwargs["reply_markup"], InlineKeyboardMarkup)
+    assert isinstance(cb_main.message.answer.await_args.kwargs["reply_markup"], ReplyKeyboardMarkup)
 
     await bot.session.close()
 

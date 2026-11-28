@@ -274,9 +274,18 @@ class TwitterService:
                     "height": item.get("height")
                 })
             elif item_type == "video":
+                best_url = media_url
+                variants = item.get("variants") or []
+                mp4_variants = [
+                    v for v in variants
+                    if isinstance(v, dict) and v.get("url") and "mp4" in str(v.get("content_type", "video/mp4")).lower()
+                ]
+                if mp4_variants:
+                    best_var = max(mp4_variants, key=lambda v: int(v.get("bitrate") or 0))
+                    best_url = best_var["url"]
                 parsed_items.append({
                     "type": "video",
-                    "url": media_url,
+                    "url": best_url,
                     "thumbnail_url": item.get("thumbnail_url"),
                     "duration": item.get("duration"),
                     "width": item.get("width"),
@@ -312,12 +321,25 @@ class TwitterService:
                 if not info:
                     return False, [], "⚠️ Could not extract media from this post."
 
-                # Check if it has formats or direct url
-                direct_url = info.get("url")
-                if not direct_url and "formats" in info:
-                    formats = [f for f in info["formats"] if f.get("url") and f.get("ext") == "mp4"]
-                    if formats:
-                        direct_url = formats[-1]["url"]
+                # Pick highest original resolution & bitrate stream without downscaling/upscaling
+                direct_url = None
+                if "formats" in info:
+                    mp4_formats = [
+                        f for f in info["formats"]
+                        if isinstance(f, dict) and f.get("url") and f.get("ext") == "mp4"
+                    ]
+                    if mp4_formats:
+                        best_fmt = max(
+                            mp4_formats,
+                            key=lambda f: (
+                                1 if (f.get("vcodec") and f.get("vcodec") != "none") else 0,
+                                (f.get("width") or 0) * (f.get("height") or 0),
+                                float(f.get("tbr") or 0),
+                            ),
+                        )
+                        direct_url = best_fmt["url"]
+                if not direct_url:
+                    direct_url = info.get("url")
 
                 if not direct_url:
                     return False, [], "⚠️ No downloadable video stream found."

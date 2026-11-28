@@ -198,3 +198,63 @@ async def test_low_disk_cleaner_skips_active_job_directory(tmp_path):
         await cleanup_dir_async(active_dir)
 
     assert not active_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_instagram_and_twitter_preserve_original_max_quality(tmp_path):
+    """Instagram and X must select highest uploaded resolution/bitrate without 1080p downscaling."""
+    from services.instagram_service import InstagramService
+    from services.twitter_service import TwitterService
+
+    ig = InstagramService(temp_base=tmp_path / "ig")
+    payload = {
+        "items": [
+            {
+                "video_versions": [
+                    {"width": 720, "height": 1280, "url": "https://cdn.ig/720.mp4"},
+                    {"width": 2160, "height": 3840, "url": "https://cdn.ig/4k.mp4"},
+                    {"width": 1080, "height": 1920, "url": "https://cdn.ig/1080.mp4"},
+                ]
+            }
+        ]
+    }
+    parsed_ig = ig._parse_instagram_json_payload(payload)
+    assert parsed_ig[0]["url"] == "https://cdn.ig/4k.mp4"
+
+    # Single video download must NOT invoke cap_video_to_1080p
+    tracker = MagicMock()
+    job_dir = tmp_path / "ig_job"
+    job_dir.mkdir()
+
+    async def _fake_dl(url, dest_path, tracker=None):
+        dest_path.write_bytes(b"original-4k-bytes")
+        return True
+
+    with patch.object(ig, "download_file", side_effect=_fake_dl), patch(
+        "services.ffmpeg_service.ffmpeg_service.cap_video_to_1080p", AsyncMock()
+    ) as cap_mock:
+        res = await ig.download_all_media(parsed_ig, job_dir, tracker=tracker)
+    assert len(res) == 1
+    assert cap_mock.await_count == 0
+
+    # Twitter picks highest bitrate variant from fxtwitter and highest resolution from yt-dlp fallback
+    tw = TwitterService(temp_base=tmp_path / "tw")
+    ok, items, _ = tw._parse_fxtwitter_response({
+        "code": 200,
+        "tweet": {
+            "media": {
+                "videos": [
+                    {
+                        "type": "video",
+                        "url": "https://video.twimg.com/720.mp4",
+                        "variants": [
+                            {"content_type": "video/mp4", "bitrate": 832000, "url": "https://video.twimg.com/720.mp4"},
+                            {"content_type": "video/mp4", "bitrate": 10368000, "url": "https://video.twimg.com/4k.mp4"},
+                        ],
+                    }
+                ]
+            }
+        },
+    })
+    assert ok is True
+    assert items[0]["url"] == "https://video.twimg.com/4k.mp4"
